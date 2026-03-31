@@ -56,7 +56,9 @@ from environments.hermes_base_env import HermesAgentBaseEnv, HermesAgentEnvConfi
 # Import submit_flag_tool to trigger registry.register() at module load
 from environments.pwncollege_env import submit_flag_tool  # noqa: F401
 from environments.pwncollege_env.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
-from environments.pwncollege_env.sdk import DojoRLClient, DojoRLSyncClient, RLChallenge
+from environments.pwncollege_env.sdk import (
+    DojoRLClient, DojoRLSyncClient, RLChallenge, RLInstance,
+)
 from environments.pwncollege_env.submit_flag_tool import (
     clear_flag_context,
     register_flag_context,
@@ -97,6 +99,12 @@ class PwnCollegeEnvConfig(HermesAgentEnvConfig):
     dojo_filter: Optional[str] = Field(default=None, description="Filter by dojo ID")
     module_filter: Optional[str] = Field(
         default=None, description="Filter by module ID"
+    )
+    include_challenges: Optional[List[str]] = Field(
+        default=None,
+        description="Specific challenge keys to include in training "
+        "(format: module_id/challenge_id). Overrides dojo/module "
+        "filters. Use for retry runs.",
     )
 
     # Eval settings
@@ -262,12 +270,21 @@ class PwnCollegeEnv(HermesAgentBaseEnv):
         logger.info("Fetched %d challenges from dojo", len(challenges))
 
         # Apply filters
-        for c in challenges:
-            if self.config.dojo_filter and c.dojo_id != self.config.dojo_filter:
-                continue
-            if self.config.module_filter and c.module_id != self.config.module_filter:
-                continue
-            self.train.append(c)
+        if self.config.include_challenges:
+            # Explicit include list overrides all other filters
+            include_set = set(self.config.include_challenges)
+            for c in challenges:
+                if c.challenge_key in include_set:
+                    self.train.append(c)
+        else:
+            for c in challenges:
+                if (self.config.dojo_filter
+                        and c.dojo_id != self.config.dojo_filter):
+                    continue
+                if (self.config.module_filter
+                        and c.module_id != self.config.module_filter):
+                    continue
+                self.train.append(c)
 
         # If a specific challenge is set and no filters matched, use it directly
         if not self.train and self.config.challenge:
@@ -310,8 +327,77 @@ class PwnCollegeEnv(HermesAgentBaseEnv):
             challenge_description=item.description or f"Solve the challenge: {challenge_key}",
         )
 
+    async def _acquire_instance(
+        self, challenge_key: str, *, pool_slot: Optional[int] = None,
+    ) -> Optional[RLInstance]:
+        """Acquire a dojo instance for a challenge.
+
+        If *pool_slot* is given (process mode), try to reset the slot.
+        If the slot is dead on the dojo, destroy it and create a fresh
+        one.  The returned instance may have a different slot ID than
+        *pool_slot* — callers must use ``inst.slot`` going forward.
+
+        If *pool_slot* is ``None`` (evaluate / serve modes), create a
+        new instance with transient-error retries.
+        """
+        if pool_slot is not None:
+            # Pool mode: try reset first (fast path)
+            try:
+                return await self.client.reset_instance(
+                    pool_slot, challenge=challenge_key,
+                )
+            except Exception as e:
+                logger.warning(
+                    "reset_instance(%d, %s) failed: %s — "
+                    "destroying and creating fresh slot",
+                    pool_slot, challenge_key, str(e)[:80],
+                )
+                try:
+                    await self.client.destroy_instance(pool_slot)
+                except Exception:
+                    pass
+                # Fall through to create mode
+
+        # Create mode: new instance with transient-error retries
+        max_retries = 10 if pool_slot is not None else 5
+        for attempt in range(max_retries):
+            try:
+                return await self.client.create_instance(
+                    challenge_key,
+                )
+            except Exception as e:
+                err_str = str(e)
+                is_transient = (
+                    isinstance(e, httpx.HTTPStatusError)
+                    and e.response.status_code >= 500
+                    or isinstance(e, (
+                        httpx.ReadTimeout,
+                        httpx.ConnectTimeout,
+                        httpx.ConnectError,
+                    ))
+                    or "No available slots" in err_str
+                )
+                if is_transient and attempt < max_retries - 1:
+                    wait = min(2 ** (attempt + 1), 60)
+                    logger.warning(
+                        "Transient error creating instance "
+                        "for %s (attempt %d/%d): %s, "
+                        "retrying in %ds",
+                        challenge_key, attempt + 1,
+                        max_retries, err_str[:80], wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(
+                        "Failed to create instance for %s "
+                        "after %d attempts: %s",
+                        challenge_key, attempt + 1, e,
+                    )
+                    return None
+        return None
+
     async def collect_trajectory(
-        self, item: Item
+        self, item: Item, *, pool_instance: Optional[RLInstance] = None,
     ) -> Tuple[Optional[Union[ScoredDataItem, Any]], List[Item]]:
         """Run a single rollout with dojo instance lifecycle.
 
@@ -320,36 +406,21 @@ class PwnCollegeEnv(HermesAgentBaseEnv):
         2. SSH override registration (routes terminal tool to the instance)
         3. Flag context registration (enables submit_flag tool)
         4. Cleanup on completion
+
+        When *pool_instance* is provided (process mode), that
+        pre-acquired instance is used directly and NOT destroyed on
+        completion — the caller manages its lifecycle.
         """
         task_id = str(uuid.uuid4())
         challenge_key = self._get_challenge_key(item)
+        owns_slot = pool_instance is None
 
-        max_retries = 5
-        inst = None
-        for attempt in range(max_retries):
-            try:
-                inst = await self.client.create_instance(challenge_key)
-                break
-            except Exception as e:
-                err_str = str(e)
-                is_transient = (
-                    isinstance(e, httpx.HTTPStatusError) and e.response.status_code >= 500
-                    or isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError))
-                    or "No available slots" in err_str
-                )
-                if is_transient and attempt < max_retries - 1:
-                    wait = min(2 ** (attempt + 1), 30)
-                    logger.warning(
-                        "Transient error creating instance for %s (attempt %d/%d): %s, retrying in %ds",
-                        challenge_key, attempt + 1, max_retries, err_str[:100], wait,
-                    )
-                    await asyncio.sleep(wait)
-                else:
-                    logger.error(
-                        "Failed to create instance for %s after %d attempts: %s",
-                        challenge_key, attempt + 1, e,
-                    )
-                    return None, []
+        if pool_instance is not None:
+            inst = pool_instance
+        else:
+            inst = await self._acquire_instance(challenge_key)
+            if inst is None:
+                return None, []
 
         slot = inst.slot
         self._active_slots.add(slot)
@@ -434,10 +505,13 @@ class PwnCollegeEnv(HermesAgentBaseEnv):
             clear_flag_context(task_id)
             clear_task_env_overrides(task_id)
             cleanup_vm(task_id)
-            try:
-                await self.client.destroy_instance(slot)
-            except Exception as e:
-                logger.warning("Failed to destroy instance slot %d: %s", slot, e)
+            if owns_slot:
+                # Evaluate/serve mode: we created it, we destroy it
+                try:
+                    await self.client.destroy_instance(slot)
+                except Exception as e:
+                    logger.warning("Failed to destroy instance slot %d: %s", slot, e)
+            # Pool mode: caller is responsible for the slot lifecycle
             self._active_slots.discard(slot)
 
     async def compute_reward(
@@ -476,12 +550,12 @@ class PwnCollegeEnv(HermesAgentBaseEnv):
         return 0.0
 
     async def process_manager(self):
-        """Override: process items concurrently instead of sequentially.
+        """Override: process items concurrently with pre-allocated slot pool.
 
-        Stock Atropos process_manager processes one item at a time (sequential).
-        Each pwncollege rollout needs a dojo slot, so sequential processing
-        wastes slots.  This override runs multiple items concurrently, gated
-        by eval_concurrency (= max dojo instances), so all slots stay busy.
+        Uses a pool of dojo instances (asyncio.Queue) instead of a semaphore.
+        Each task waits for a real dojo slot to become available, resets it
+        to the target challenge, and returns it to the pool on completion.
+        This guarantees zero silent drops from slot contention.
         """
         from atroposlib.frontend.jsonl2html import generate_html
 
@@ -508,36 +582,128 @@ class PwnCollegeEnv(HermesAgentBaseEnv):
 
         total = len(items)
         concurrency = self.config.eval_concurrency
-        semaphore = asyncio.Semaphore(concurrency)
         completed = 0
 
+        # --- Pre-allocate slot pool ---
+        # Use the first challenge as a throwaway target; each task will
+        # reset_instance to its own challenge before running.
+        first_key = self._get_challenge_key(items[0]) if items else "hello/hello"
+        slot_pool: asyncio.Queue[int] = asyncio.Queue()
+        pool_size = 0
+
+        logger.info("Pre-allocating %d dojo slots...", concurrency)
+        for i in range(concurrency):
+            try:
+                inst = await self.client.create_instance(first_key)
+                slot_pool.put_nowait(inst.slot)
+                pool_size += 1
+            except Exception as e:
+                # Dojo has a hard slot cap; once full, stop trying
+                logger.info(
+                    "Pre-allocated %d/%d slots (dojo full: %s)",
+                    i, concurrency, e,
+                )
+                break
+
+        if pool_size == 0:
+            raise RuntimeError("Could not allocate any dojo slots")
+
         logger.info(
-            "Processing %d items (concurrency=%d, group_size=%d)",
-            total, concurrency, self.group_size_to_process,
+            "Processing %d items (pool_size=%d, group_size=%d)",
+            total, pool_size, self.group_size_to_process,
         )
+
+        # Resolve tools once before launching concurrent tasks
+        self._current_group_tools = self._resolve_tools_for_group()
 
         async def process_one(item):
             nonlocal completed
             challenge_key = self._get_challenge_key(item)
-            async with semaphore:
-                try:
-                    to_postprocess, _ = await self.collect_trajectories(item)
-                    if to_postprocess:
-                        processed = await self.postprocess_histories(to_postprocess)
-                        await self.handle_send_to_api(
-                            processed, item,
-                            do_send_to_api=False,
-                            abort_on_any_max_length_exceeded=False,
-                        )
-                except Exception as e:
-                    logger.error("Failed to process %s: %s", challenge_key, e)
-                finally:
-                    completed += 1
-                    logger.info("Processed %d/%d (%s)", completed, total, challenge_key)
+
+            # Wait for a real slot (blocks until one is returned)
+            original_slot = await slot_pool.get()
+            # _acquire_instance may create a new slot if the original
+            # died on the dojo, so we track the actual slot to return.
+            actual_slot: int | None = original_slot
+
+            try:
+                # Acquire instance (reset or create)
+                inst = await self._acquire_instance(
+                    challenge_key, pool_slot=original_slot,
+                )
+                if inst is None:
+                    logger.warning(
+                        "Could not acquire instance for %s",
+                        challenge_key,
+                    )
+                    actual_slot = None  # don't poison pool
+                    return
+                actual_slot = inst.slot
+                if actual_slot != original_slot:
+                    logger.info(
+                        "Slot %d replaced with %d for %s",
+                        original_slot, actual_slot,
+                        challenge_key,
+                    )
+
+                # Run the trajectory with the acquired instance
+                scored, _ = await self.collect_trajectory(
+                    item, pool_instance=inst,
+                )
+                if scored is None:
+                    logger.warning(
+                        "No scored data for %s (slot %d)",
+                        challenge_key, actual_slot,
+                    )
+                    return
+
+                # Wrap in ScoredDataGroup for postprocessing
+                to_postprocess = {
+                    "tokens": [scored["tokens"]],
+                    "masks": [scored["masks"]],
+                    "scores": [scored["scores"]],
+                    "advantages": [],
+                    "ref_logprobs": [],
+                    "messages": [scored.get("messages", [])],
+                    "group_overrides": {},
+                    "overrides": [],
+                    "images": [],
+                }
+                processed = await self.postprocess_histories(
+                    to_postprocess,
+                )
+                await self.handle_send_to_api(
+                    processed, item,
+                    do_send_to_api=False,
+                    abort_on_any_max_length_exceeded=False,
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to process %s: %s", challenge_key, e,
+                )
+            finally:
+                completed += 1
+                logger.info(
+                    "Processed %d/%d (%s)",
+                    completed, total, challenge_key,
+                )
+                # Return the actual slot to pool (may differ from
+                # original_slot if reset failed and a new one was
+                # created). None means acquisition failed entirely.
+                if actual_slot is not None:
+                    slot_pool.put_nowait(actual_slot)
 
         await asyncio.gather(*[process_one(item) for item in items])
 
         logger.info("Completed processing %d items", completed)
+
+        # Cleanup: destroy all pooled slots
+        while not slot_pool.empty():
+            slot = slot_pool.get_nowait()
+            try:
+                await self.client.destroy_instance(slot)
+            except Exception as e:
+                logger.warning("Failed to destroy pool slot %d: %s", slot, e)
 
         if self.jsonl_writer is not None:
             self.jsonl_writer.close()
