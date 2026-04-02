@@ -562,3 +562,167 @@ class TestSummaryTargetRatio:
         with patch("agent.context_compressor.get_model_context_length", return_value=100_000):
             c = ContextCompressor(model="test", quiet_mode=True)
         assert c.protect_last_n == 20
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Tests for supersede_stale_browser_snapshots
+# ──────────────────────────────────────────────────────────────────────
+
+from agent.context_compressor import (
+    supersede_stale_browser_snapshots,
+    _SNAPSHOT_SUPERSEDED_PLACEHOLDER,
+)
+
+
+def _tool_msg(name: str, content: str, call_id: str = "call_1") -> dict:
+    """Helper to create a tool result message."""
+    return {"role": "tool", "name": name, "content": content, "tool_call_id": call_id}
+
+
+def _assistant_msg(content: str = "ok") -> dict:
+    return {"role": "assistant", "content": content}
+
+
+def _user_msg(content: str = "do something") -> dict:
+    return {"role": "user", "content": content}
+
+
+class TestSupersedeStaleSnapshots:
+    """Tests for the browser snapshot superseding pre-pass."""
+
+    def test_no_snapshots_noop(self):
+        """No browser snapshots → nothing changes."""
+        messages = [
+            _user_msg("navigate to example.com"),
+            _tool_msg("browser_navigate", '{"url": "https://example.com"}'),
+            _assistant_msg("Navigated."),
+        ]
+        original = [m.copy() for m in messages]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 0
+        assert messages == original
+
+    def test_single_snapshot_noop(self):
+        """Only one snapshot → nothing to supersede."""
+        messages = [
+            _user_msg(),
+            _tool_msg("browser_snapshot", "A" * 5000, "call_snap_1"),
+            _assistant_msg(),
+        ]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 0
+        assert len(messages[1]["content"]) == 5000
+
+    def test_two_snapshots_supersedes_first(self):
+        """Two snapshots → first one gets replaced."""
+        messages = [
+            _user_msg(),
+            _tool_msg("browser_snapshot", "A" * 5000, "call_1"),
+            _assistant_msg("I see the page."),
+            _user_msg("scroll down"),
+            _tool_msg("browser_snapshot", "B" * 5000, "call_2"),
+            _assistant_msg("Scrolled."),
+        ]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 1
+        assert messages[1]["content"] == _SNAPSHOT_SUPERSEDED_PLACEHOLDER
+        # Latest snapshot untouched
+        assert messages[4]["content"] == "B" * 5000
+
+    def test_three_snapshots_supersedes_first_two(self):
+        """Three snapshots → first two get replaced, last one kept."""
+        messages = [
+            _tool_msg("browser_snapshot", "X" * 8000, "c1"),
+            _tool_msg("browser_click", '{"clicked": true}', "c2"),
+            _tool_msg("browser_snapshot", "Y" * 8000, "c3"),
+            _tool_msg("browser_click", '{"clicked": true}', "c4"),
+            _tool_msg("browser_snapshot", "Z" * 8000, "c5"),
+        ]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 2
+        assert messages[0]["content"] == _SNAPSHOT_SUPERSEDED_PLACEHOLDER
+        assert messages[2]["content"] == _SNAPSHOT_SUPERSEDED_PLACEHOLDER
+        assert messages[4]["content"] == "Z" * 8000
+
+    def test_non_snapshot_tools_untouched(self):
+        """Other tool results are never modified."""
+        messages = [
+            _tool_msg("browser_snapshot", "A" * 1000, "c1"),
+            _tool_msg("browser_click", "Clicked element @e5", "c2"),
+            _tool_msg("browser_navigate", '{"url": "https://example.com"}', "c3"),
+            _tool_msg("browser_snapshot", "B" * 1000, "c4"),
+        ]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 1
+        # Click and navigate untouched
+        assert messages[1]["content"] == "Clicked element @e5"
+        assert messages[2]["content"] == '{"url": "https://example.com"}'
+
+    def test_already_superseded_noop(self):
+        """Snapshots already replaced are not counted again."""
+        messages = [
+            _tool_msg("browser_snapshot", _SNAPSHOT_SUPERSEDED_PLACEHOLDER, "c1"),
+            _tool_msg("browser_snapshot", "current page" * 100, "c2"),
+        ]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 0
+
+    def test_short_content_not_superseded(self):
+        """Snapshots with very short content (errors, etc.) are skipped."""
+        messages = [
+            _tool_msg("browser_snapshot", "Error: no session", "c1"),
+            _tool_msg("browser_snapshot", "B" * 5000, "c2"),
+        ]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 0  # "Error: no session" is <200 chars
+
+    def test_browser_vision_also_superseded(self):
+        """browser_vision results are also superseded alongside browser_snapshot."""
+        messages = [
+            _tool_msg("browser_vision", "I see a login form with..." + "x" * 1000, "c1"),
+            _tool_msg("browser_snapshot", "big tree" * 500, "c2"),
+            _tool_msg("browser_vision", "Now the page shows..." + "y" * 1000, "c3"),
+        ]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 2
+        assert messages[0]["content"] == _SNAPSHOT_SUPERSEDED_PLACEHOLDER
+        assert messages[1]["content"] == _SNAPSHOT_SUPERSEDED_PLACEHOLDER
+        # Last one (browser_vision) kept
+        assert "Now the page shows" in messages[2]["content"]
+
+    def test_preserves_other_message_fields(self):
+        """Superseding preserves tool_call_id, name, role, and any extra fields."""
+        messages = [
+            {
+                "role": "tool",
+                "name": "browser_snapshot",
+                "content": "A" * 5000,
+                "tool_call_id": "call_abc",
+                "custom_field": "preserved",
+            },
+            _tool_msg("browser_snapshot", "B" * 5000, "call_def"),
+        ]
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 1
+        assert messages[0]["tool_call_id"] == "call_abc"
+        assert messages[0]["name"] == "browser_snapshot"
+        assert messages[0]["role"] == "tool"
+        assert messages[0]["custom_field"] == "preserved"
+        assert messages[0]["content"] == _SNAPSHOT_SUPERSEDED_PLACEHOLDER
+
+    def test_empty_messages_noop(self):
+        """Empty message list doesn't crash."""
+        messages = []
+        count = supersede_stale_browser_snapshots(messages)
+        assert count == 0
+
+    def test_idempotent(self):
+        """Running twice produces the same result."""
+        messages = [
+            _tool_msg("browser_snapshot", "A" * 5000, "c1"),
+            _tool_msg("browser_snapshot", "B" * 5000, "c2"),
+        ]
+        count1 = supersede_stale_browser_snapshots(messages)
+        assert count1 == 1
+        count2 = supersede_stale_browser_snapshots(messages)
+        assert count2 == 0  # Already superseded

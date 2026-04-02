@@ -86,7 +86,7 @@ from agent.model_metadata import (
     get_next_probe_tier, parse_context_limit_from_error,
     save_context_length,
 )
-from agent.context_compressor import ContextCompressor
+from agent.context_compressor import ContextCompressor, supersede_stale_browser_snapshots
 from agent.prompt_caching import apply_anthropic_cache_control
 from agent.prompt_builder import build_skills_system_prompt, build_context_files_prompt, load_soul_md, TOOL_USE_ENFORCEMENT_GUIDANCE, TOOL_USE_ENFORCEMENT_MODELS, DEVELOPER_ROLE_MODELS
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
@@ -6710,6 +6710,14 @@ class AIAgent:
                     and "skill_manage" in self.valid_tool_names):
                 self._iters_since_skill += 1
             
+            # Supersede stale browser snapshots before building the API request.
+            # Each browser_snapshot returns a full accessibility tree (8,000+ chars);
+            # only the most recent one reflects the current page state.  Older ones
+            # are replaced with a compact placeholder to reclaim context tokens.
+            # This is a cheap pre-pass (no LLM call) that runs every turn.
+            # Ported from google-gemini/gemini-cli#24440.
+            supersede_stale_browser_snapshots(messages)
+
             # Prepare messages for API call
             # If we have an ephemeral system prompt, prepend it to the messages
             # Note: Reasoning is embedded in content via <think> tags for trajectory storage.

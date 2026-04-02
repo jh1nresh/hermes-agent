@@ -674,3 +674,66 @@ Write only the summary body. Do not include any preamble or prefix."""
             logger.info("Compression #%d complete", self.compression_count)
 
         return compressed
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Stale browser snapshot superseding (cheap pre-pass, no LLM call)
+# ──────────────────────────────────────────────────────────────────────
+
+# Browser tool outputs that contain large page-state data.  Only the most
+# recent snapshot/vision result is meaningful — earlier ones describe a
+# page state that no longer exists.
+_BROWSER_SNAPSHOT_TOOLS = frozenset({"browser_snapshot", "browser_vision"})
+
+_SNAPSHOT_SUPERSEDED_PLACEHOLDER = (
+    "[Snapshot superseded — a newer snapshot exists later in this conversation. "
+    "Call browser_snapshot for current page state.]"
+)
+
+
+def supersede_stale_browser_snapshots(messages: List[Dict[str, Any]]) -> int:
+    """Replace stale browser snapshot tool results with a compact placeholder.
+
+    Browser snapshots (accessibility trees from ``browser_snapshot``) are often
+    the largest single tool outputs — each one can be 8,000+ characters.  Only
+    the most recent snapshot reflects the current page state; older ones are
+    stale and waste context-window tokens.
+
+    This function scans *messages* in-place and replaces the content of all but
+    the most recent ``browser_snapshot`` / ``browser_vision`` tool result with
+    a short placeholder.  It runs every turn as a cheap pre-pass before the API
+    call — no LLM invocation, just string replacement.
+
+    Returns the number of tool results that were superseded.
+
+    Ported from google-gemini/gemini-cli#24440.
+    """
+    # Collect indices of all browser snapshot tool results.
+    snapshot_indices: list[int] = []
+    for i, msg in enumerate(messages):
+        if msg.get("role") != "tool":
+            continue
+        tool_name = msg.get("name", "")
+        if tool_name in _BROWSER_SNAPSHOT_TOOLS:
+            snapshot_indices.append(i)
+
+    # Nothing to do if there are 0 or 1 snapshots.
+    if len(snapshot_indices) < 2:
+        return 0
+
+    # Replace all but the last snapshot.
+    superseded = 0
+    for idx in snapshot_indices[:-1]:
+        content = messages[idx].get("content", "")
+        if not content or content == _SNAPSHOT_SUPERSEDED_PLACEHOLDER:
+            continue
+        # Only supersede if the content is substantial (short error messages
+        # or already-pruned outputs aren't worth touching).
+        if len(content) > 200:
+            messages[idx] = {**messages[idx], "content": _SNAPSHOT_SUPERSEDED_PLACEHOLDER}
+            superseded += 1
+
+    if superseded:
+        logger.info("Superseded %d stale browser snapshot(s)", superseded)
+
+    return superseded
