@@ -503,6 +503,10 @@ from cron import get_job
 from tools.terminal_tool import cleanup_all_environments as _cleanup_all_terminals
 from tools.terminal_tool import set_sudo_password_callback, set_approval_callback
 from tools.skills_tool import set_secret_capture_callback
+try:
+    from tools.computer_use_tool import set_approval_callback as set_computer_approval_callback
+except ImportError:
+    set_computer_approval_callback = lambda cb: None  # noqa: E731
 from hermes_cli.callbacks import prompt_for_secret
 from tools.browser_tool import _emergency_cleanup_all_sessions as _cleanup_all_browsers
 
@@ -6555,6 +6559,7 @@ class HermesCLI:
         # Register callbacks so terminal_tool prompts route through our UI
         set_sudo_password_callback(self._sudo_password_callback)
         set_approval_callback(self._approval_callback)
+        set_computer_approval_callback(self._approval_callback)
         set_secret_capture_callback(self._secret_capture_callback)
 
         # Ensure tirith security scanner is available (downloads if needed).
@@ -7789,6 +7794,7 @@ class HermesCLI:
             # Unregister callbacks to avoid dangling references
             set_sudo_password_callback(None)
             set_approval_callback(None)
+            set_computer_approval_callback(None)
             set_secret_capture_callback(None)
             # Flush + shut down Honcho async writer (drains queue before exit)
             if self.agent and getattr(self.agent, '_honcho', None):

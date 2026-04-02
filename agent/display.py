@@ -153,6 +153,50 @@ def build_tool_preview(tool_name: str, args: dict, max_len: int | None = None) -
         "clarify": "question", "skill_manage": "name",
     }
 
+    if tool_name == "computer":
+        action = args.get("action", "?")
+        coord = args.get("coordinate")
+        text = args.get("text", "")
+        if action == "screenshot":
+            return "screenshot"
+        if action == "zoom":
+            region = args.get("region")
+            return f"zoom {region}" if region else "zoom"
+        if action in ("left_click", "right_click", "double_click", "triple_click", "middle_click"):
+            label = action.replace("_", " ")
+            pos = f" ({coord[0]}, {coord[1]})" if coord and len(coord) == 2 else ""
+            mod = f" [{text}]" if text else ""
+            return f"{label}{pos}{mod}"
+        if action == "left_click_drag":
+            start = args.get("start_coordinate")
+            end = args.get("end_coordinate") or coord
+            s = f"({start[0]},{start[1]})" if start and len(start) == 2 else "?"
+            e = f"({end[0]},{end[1]})" if end and len(end) == 2 else "?"
+            return f"drag {s}->{e}"
+        if action == "type":
+            preview = _oneline(text)[:30]
+            return f'type "{preview}{"..." if len(text) > 30 else ""}"'
+        if action == "key":
+            key_combo = args.get("key", text)
+            return f"key {key_combo}"
+        if action == "hold_key":
+            key = args.get("key", text)
+            dur = args.get("duration", 1)
+            return f"hold {key} {dur}s"
+        if action == "scroll":
+            direction = args.get("scroll_direction", "down")
+            amount = args.get("scroll_amount", 3)
+            return f"scroll {direction} x{amount}"
+        if action == "wait":
+            dur = args.get("duration", 1)
+            return f"wait {dur}s"
+        if action == "mouse_move":
+            pos = f" ({coord[0]}, {coord[1]})" if coord and len(coord) == 2 else ""
+            return f"move{pos}"
+        if action in ("left_mouse_down", "left_mouse_up"):
+            return action.replace("left_mouse_", "mouse ")
+        return action
+
     if tool_name == "process":
         action = args.get("action", "")
         sid = args.get("session_id", "")
@@ -838,6 +882,47 @@ def get_cute_tool_message(
             return line
         return f"{line}{failure_suffix}"
 
+    if tool_name == "computer":
+        action = args.get("action", "?")
+        coord = args.get("coordinate")
+        text = args.get("text", "")
+        _pos = f" ({coord[0]},{coord[1]})" if coord and len(coord) == 2 else ""
+        if action == "screenshot":
+            return _wrap(f"┊ 🖥️  screen    capture  {dur}")
+        if action == "zoom":
+            return _wrap(f"┊ 🖥️  zoom      region  {dur}")
+        if action in ("left_click", "right_click", "double_click", "triple_click", "middle_click"):
+            label = action.replace("_click", "").replace("_", " ")
+            mod = f" [{text}]" if text else ""
+            return _wrap(f"┊ 🖥️  click     {label}{_pos}{mod}  {dur}")
+        if action == "left_click_drag":
+            start = args.get("start_coordinate")
+            end = args.get("end_coordinate") or coord
+            s = f"({start[0]},{start[1]})" if start and len(start) == 2 else "?"
+            e = f"({end[0]},{end[1]})" if end and len(end) == 2 else "?"
+            return _wrap(f"┊ 🖥️  drag      {s}->{e}  {dur}")
+        if action == "type":
+            return _wrap(f"┊ 🖥️  type      \"{_trunc(text, 30)}\"  {dur}")
+        if action == "key":
+            key_combo = args.get("key", text)
+            return _wrap(f"┊ 🖥️  key       {key_combo}  {dur}")
+        if action == "hold_key":
+            key = args.get("key", text)
+            hold_dur = args.get("duration", 1)
+            return _wrap(f"┊ 🖥️  hold      {key} {hold_dur}s  {dur}")
+        if action == "scroll":
+            direction = args.get("scroll_direction", "down")
+            amount = args.get("scroll_amount", 3)
+            return _wrap(f"┊ 🖥️  scroll    {direction} x{amount}  {dur}")
+        if action == "wait":
+            wait_dur = args.get("duration", 1)
+            return _wrap(f"┊ 🖥️  wait      {wait_dur}s  {dur}")
+        if action == "mouse_move":
+            return _wrap(f"┊ 🖥️  move      {_pos}  {dur}")
+        if action in ("left_mouse_down", "left_mouse_up"):
+            label = "press" if "down" in action else "release"
+            return _wrap(f"┊ 🖥️  mouse     {label}{_pos}  {dur}")
+        return _wrap(f"┊ 🖥️  computer  {action}  {dur}")
     if tool_name == "web_search":
         return _wrap(f"┊ 🔍 search    {_trunc(args.get('query', ''), 42)}  {dur}")
     if tool_name == "web_extract":

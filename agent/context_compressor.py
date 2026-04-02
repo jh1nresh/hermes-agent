@@ -174,7 +174,21 @@ class ContextCompressor:
             content = msg.get("content", "")
             if not content or content == _PRUNED_TOOL_PLACEHOLDER:
                 continue
-            # Only prune if the content is substantial (>200 chars)
+            # Prune multimodal tool results (e.g. computer_use screenshots)
+            # regardless of text content length — the base64 image data in
+            # _anthropic_content_blocks is ~1MB per screenshot but the text
+            # summary is only ~85 chars, so the len(content) > 200 check
+            # below would never trigger. Strip the image blocks explicitly.
+            has_images = isinstance(msg.get("_anthropic_content_blocks"), list) and msg.get("_anthropic_content_blocks")
+            if has_images:
+                result[i] = {
+                    k: v for k, v in msg.items()
+                    if k != "_anthropic_content_blocks"
+                }
+                result[i]["content"] = _PRUNED_TOOL_PLACEHOLDER
+                pruned += 1
+                continue
+            # Only prune text-only tool results if the content is substantial (>200 chars)
             if len(content) > 200:
                 result[i] = {**msg, "content": _PRUNED_TOOL_PLACEHOLDER}
                 pruned += 1

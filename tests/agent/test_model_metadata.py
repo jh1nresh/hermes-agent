@@ -68,11 +68,11 @@ class TestEstimateMessagesTokensRough:
         assert estimate_messages_tokens_rough([]) == 0
 
     def test_single_message_concrete_value(self):
-        """Verify against known str(msg) length."""
+        """Content text is counted, not the full dict repr."""
         msg = {"role": "user", "content": "a" * 400}
         result = estimate_messages_tokens_rough([msg])
-        expected = len(str(msg)) // 4
-        assert result == expected
+        # 400 chars content + 20 overhead = 420 // 4 = 105
+        assert result == (400 + 20) // 4
 
     def test_multiple_messages_additive(self):
         msgs = [
@@ -80,7 +80,8 @@ class TestEstimateMessagesTokensRough:
             {"role": "assistant", "content": "Hi there, how can I help?"},
         ]
         result = estimate_messages_tokens_rough(msgs)
-        expected = sum(len(str(m)) for m in msgs) // 4
+        # len("Hello") + 20 + len("Hi there, how can I help?") + 20 = 70 // 4 = 17
+        expected = (len("Hello") + 20 + len("Hi there, how can I help?") + 20) // 4
         assert result == expected
 
     def test_tool_call_message(self):
@@ -89,16 +90,30 @@ class TestEstimateMessagesTokensRough:
                "tool_calls": [{"id": "1", "function": {"name": "terminal", "arguments": "{}"}}]}
         result = estimate_messages_tokens_rough([msg])
         assert result > 0
-        assert result == len(str(msg)) // 4
+        # args "{}" = 2 chars + 20 overhead = 22 // 4 = 5
+        assert result == (len("{}") + 20) // 4
 
     def test_message_with_list_content(self):
-        """Vision messages with multimodal content arrays."""
+        """Vision messages with multimodal content arrays count text, not image data."""
         msg = {"role": "user", "content": [
             {"type": "text", "text": "describe"},
             {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
         ]}
         result = estimate_messages_tokens_rough([msg])
-        assert result == len(str(msg)) // 4
+        # "describe" = 8 chars + 20 overhead = 28 // 4 = 7
+        assert result == (len("describe") + 20) // 4
+
+    def test_image_blocks_use_flat_estimate(self):
+        """_anthropic_content_blocks images counted as flat 1500 tokens, not base64 size."""
+        msg = {"role": "tool", "content": "Screenshot taken",
+               "_anthropic_content_blocks": [
+                   {"type": "image", "source": {"type": "base64", "data": "X" * 1_000_000}}
+               ]}
+        result = estimate_messages_tokens_rough([msg])
+        # Without fix: 1M chars / 4 = 250K tokens
+        # With fix: "Screenshot taken"(16) + 1500*4(image) + 20(overhead) = 6036 // 4 = 1509
+        assert result < 2000  # Not 250K
+        assert result >= 1500  # At least the image estimate
 
 
 # =========================================================================

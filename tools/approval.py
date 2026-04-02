@@ -75,6 +75,10 @@ DANGEROUS_PATTERNS = [
     (r'\b(cp|mv|install)\b.*\s/etc/', "copy/move file into /etc/"),
     (r'\bsed\s+-[^\s]*i.*\s/etc/', "in-place edit of system config"),
     (r'\bsed\s+--in-place\b.*\s/etc/', "in-place edit of system config (long flag)"),
+    # Computer use — mouse/keyboard actions control the physical desktop
+    (r'^computer:\s*(left_click|right_click|double_click|triple_click|middle_click|scroll|left_click_drag)', "computer use: mouse action"),
+    (r'^computer:\s*type\b', "computer use: keyboard input"),
+    (r'^computer:\s*key\b', "computer use: keyboard shortcut"),
 ]
 
 

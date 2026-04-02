@@ -3582,3 +3582,43 @@ class TestDeadRetryCode:
             f"Expected 2 occurrences of 'if retry_count >= max_retries:' "
             f"but found {occurrences}"
         )
+
+
+class TestComputerUseProviderGuard:
+    """computer tool must be stripped for non-Anthropic providers."""
+
+    def test_computer_removed_for_openrouter(self):
+        with (
+            patch("run_agent.get_tool_definitions",
+                  return_value=_make_tool_defs("web_search", "computer")),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+        ):
+            a = AIAgent(
+                api_key="test-key-1234567890",
+                base_url="https://openrouter.ai/api/v1",
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=True,
+            )
+            assert "computer" not in a.valid_tool_names
+            assert all(
+                t.get("function", {}).get("name") != "computer"
+                for t in a.tools
+            )
+
+    def test_computer_kept_for_anthropic(self):
+        with (
+            patch("run_agent.get_tool_definitions",
+                  return_value=_make_tool_defs("web_search", "computer")),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+        ):
+            a = AIAgent(
+                api_key="test-key-1234567890",
+                provider="anthropic",
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=True,
+            )
+            assert "computer" in a.valid_tool_names

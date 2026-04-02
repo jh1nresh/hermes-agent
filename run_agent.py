@@ -78,7 +78,7 @@ from hermes_constants import OPENROUTER_BASE_URL
 # Agent internals extracted to agent/ package for modularity
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, PLATFORM_HINTS,
-    MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE,
+    MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE, COMPUTER_USE_GUIDANCE,
     build_nous_subscription_prompt,
 )
 from agent.model_metadata import (
@@ -956,6 +956,25 @@ class AIAgent:
         elif not self.quiet_mode:
             print("🛠️  No tools loaded (all tools filtered out or unavailable)")
         
+        # computer_use requires Anthropic native API (computer_20251124 tool type).
+        # Strip it from non-Anthropic providers where it silently fails.
+        if "computer" in self.valid_tool_names and self.api_mode != "anthropic_messages":
+            self.tools = [
+                t for t in self.tools
+                if t.get("function", {}).get("name") != "computer"
+            ]
+            self.valid_tool_names.discard("computer")
+            if not self.quiet_mode:
+                logger.info("computer_use tool removed — requires Anthropic native API (current: %s)", self.api_mode)
+
+        # Enable adaptive thinking for computer_use sessions when no
+        # reasoning config is explicitly set. Anthropic's docs recommend
+        # adaptive thinking for computer use — "best-in-class accuracy".
+        if "computer" in self.valid_tool_names and self.reasoning_config is None:
+            self.reasoning_config = {"effort": "medium"}
+            if not self.quiet_mode:
+                logger.info("computer_use: enabled adaptive thinking (effort=medium)")
+
         # Check tool requirements
         if self.tools and not self.quiet_mode:
             requirements = check_toolset_requirements()
@@ -2592,6 +2611,26 @@ class AIAgent:
             tool_guidance.append(SESSION_SEARCH_GUIDANCE)
         if "skill_manage" in self.valid_tool_names:
             tool_guidance.append(SKILLS_GUIDANCE)
+        if "computer" in self.valid_tool_names:
+            tool_guidance.append(COMPUTER_USE_GUIDANCE)
+            # Auto-load the macos-computer-use skill when computer_use is active.
+            # The COMPUTER_USE_GUIDANCE above is a short behavioral summary;
+            # the full skill contains detailed workflows (hover-verify-click,
+            # text input state, Finder operations, shortcuts, etc.) that the
+            # model needs to use the computer tool effectively.
+            try:
+                from agent.skill_commands import _load_skill_payload, _build_skill_message
+                _cu_skill = _load_skill_payload("macos-computer-use")
+                if _cu_skill:
+                    _cu_loaded, _cu_dir, _cu_name = _cu_skill
+                    _cu_note = (
+                        "[SYSTEM: The macos-computer-use skill is auto-loaded because the "
+                        "computer_use toolset is active. Follow its instructions when using "
+                        "the computer tool.]"
+                    )
+                    tool_guidance.append(_build_skill_message(_cu_loaded, _cu_dir, _cu_note))
+            except Exception as e:
+                logger.debug("Failed to auto-load macos-computer-use skill: %s", e)
         if tool_guidance:
             prompt_parts.append(" ".join(tool_guidance))
 
@@ -4057,6 +4096,16 @@ class AIAgent:
     def _anthropic_messages_create(self, api_kwargs: dict):
         if self.api_mode == "anthropic_messages":
             self._try_refresh_anthropic_client_credentials()
+        # Use beta API when native tools (computer_use) are present —
+        # the standard messages.create() rejects non-function tool types.
+        tools = api_kwargs.get("tools", [])
+        _STANDARD_TYPES = {None, "", "function"}
+        has_native = any(
+            isinstance(t, dict) and t.get("type") not in _STANDARD_TYPES
+            for t in tools
+        )
+        if has_native:
+            return self._anthropic_client.beta.messages.create(**api_kwargs)
         return self._anthropic_client.messages.create(**api_kwargs)
 
     def _interruptible_api_call(self, api_kwargs: dict):
@@ -4414,8 +4463,19 @@ class AIAgent:
 
             # Reset stale-stream timer for this attempt
             last_chunk_time["t"] = time.time()
-            # Use the Anthropic SDK's streaming context manager
-            with self._anthropic_client.messages.stream(**api_kwargs) as stream:
+            # Use beta API for streaming when native tools (computer_use) are present
+            tools = api_kwargs.get("tools", [])
+            _STANDARD_TYPES = {None, "", "function"}
+            _use_beta_stream = any(
+                isinstance(t, dict) and t.get("type") not in _STANDARD_TYPES
+                for t in tools
+            )
+            _stream_ctx = (
+                self._anthropic_client.beta.messages.stream(**api_kwargs)
+                if _use_beta_stream
+                else self._anthropic_client.messages.stream(**api_kwargs)
+            )
+            with _stream_ctx as stream:
                 for event in stream:
                     if self._interrupt_requested:
                         break
@@ -4916,6 +4976,43 @@ class AIAgent:
         base = (getattr(self, "base_url", "") or "").lower()
         return "dashscope" in base or "aliyuncs" in base
 
+    def _get_native_anthropic_tools(self) -> Optional[list]:
+        """Build native Anthropic tool definitions (computer_use) if enabled."""
+        if "computer" not in self.valid_tool_names:
+            return None
+        try:
+            from tools.computer_use_tool import get_native_tool_definition
+            return [get_native_tool_definition()]
+        except Exception as e:
+            logger.debug("Failed to load native computer_use tool definition: %s", e)
+            return None
+
+    def _get_context_management(self) -> Optional[dict]:
+        """Build context_management config for server-side context editing.
+
+        Only enabled when computer_use is active — screenshots accumulate
+        ~1,500 tokens each and old ones are rarely useful. Server-side
+        clearing keeps the 3 most recent tool results and replaces older
+        ones with placeholders, significantly reducing token costs in
+        long computer use sessions.
+
+        Returns None for all non-computer-use sessions (zero impact).
+        """
+        if "computer" not in self.valid_tool_names:
+            return None
+        return {
+            "edits": [
+                {
+                    "type": "clear_tool_uses_20250919",
+                    "trigger": {"type": "input_tokens", "value": 30000},
+                    "keep": {"type": "tool_uses", "value": 3},
+                    # Don't clear tiny amounts — each clear invalidates
+                    # prompt cache, so only clear when it's worth it.
+                    "clear_at_least": {"type": "input_tokens", "value": 5000},
+                },
+            ],
+        }
+
     def _build_api_kwargs(self, api_messages: list) -> dict:
         """Build the keyword arguments dict for the active API mode."""
         if self.api_mode == "anthropic_messages":
@@ -4925,15 +5022,25 @@ class AIAgent:
             # user configured a smaller context window than the model's output limit.
             ctx_len = getattr(self, "context_compressor", None)
             ctx_len = ctx_len.context_length if ctx_len else None
+            native_tools = self._get_native_anthropic_tools()
+            # Filter out stub schemas for tools that have native definitions
+            # (e.g. "computer" has a native computer_20251124 type)
+            native_names = {t["name"] for t in (native_tools or [])}
+            filtered_tools = [
+                t for t in (self.tools or [])
+                if t.get("function", {}).get("name") not in native_names
+            ] if native_names else self.tools
             return build_anthropic_kwargs(
                 model=self.model,
                 messages=anthropic_messages,
-                tools=self.tools,
+                tools=filtered_tools,
                 max_tokens=self.max_tokens,
                 reasoning_config=self.reasoning_config,
                 is_oauth=self._is_anthropic_oauth,
                 preserve_dots=self._anthropic_preserve_dots(),
                 context_length=ctx_len,
+                native_tools=native_tools,
+                context_management=self._get_context_management(),
             )
 
         if self.api_mode == "codex_responses":
@@ -5763,7 +5870,12 @@ class AIAgent:
                 result = f"Error executing tool '{function_name}': {tool_error}"
                 logger.error("_invoke_tool raised for %s: %s", function_name, tool_error, exc_info=True)
             duration = time.time() - start
-            is_error, _ = _detect_tool_failure(function_name, result)
+            # Multimodal results (e.g. computer_use screenshots) are dicts —
+            # _detect_tool_failure expects a string, so skip error detection for them.
+            _is_multimodal = isinstance(result, dict) and result.get("_multimodal")
+            is_error = False
+            if not _is_multimodal:
+                is_error, _ = _detect_tool_failure(function_name, result)
             results[index] = (function_name, function_args, result, duration, is_error)
 
         # Start spinner for CLI mode (skip when TUI handles tool progress)
@@ -5797,23 +5909,59 @@ class AIAgent:
                 # Shouldn't happen, but safety fallback
                 function_result = f"Error executing tool '{name}': thread did not return a result"
                 tool_duration = 0.0
+                is_error = True
             else:
                 function_name, function_args, function_result, tool_duration, is_error = r
 
+            # Handle multimodal results (e.g. computer_use screenshots) —
+            # same pattern as the sequential path in _execute_tool_calls.
+            _is_multimodal = isinstance(function_result, dict) and function_result.get("_multimodal")
+            if _is_multimodal:
+                _text_summary = function_result.get("text_summary", "")
+                _content_blocks = function_result.get("content_blocks", [])
+                result_preview = _text_summary
+
+                if is_error:
+                    logger.warning("Tool %s returned error (%.2fs): %s", name, tool_duration, result_preview)
+
+                if self.verbose_logging:
+                    logging.debug(f"Tool {name} completed in {tool_duration:.2f}s")
+                    logging.debug(f"Tool result (multimodal): {result_preview}")
+
+                # Print cute message per tool
+                if self.quiet_mode:
+                    cute_msg = _get_cute_tool_message_impl(name, args, tool_duration, result=_text_summary)
+                    self._safe_print(f"  {cute_msg}")
+                elif self.verbose_logging:
+                    print(f"  ✅ Tool {i+1} completed in {tool_duration:.2f}s")
+                    print(f"     Result: {result_preview}")
+                else:
+                    _rp = result_preview[:self.log_prefix_chars] + "..." if len(result_preview) > self.log_prefix_chars else result_preview
+                    print(f"  ✅ Tool {i+1} completed in {tool_duration:.2f}s - {_rp}")
+
+                tool_msg = {
+                    "role": "tool",
+                    "content": _text_summary or "(screenshot taken)",
+                    "_anthropic_content_blocks": _content_blocks,
+                    "tool_call_id": tc.id,
+                }
+            else:
+                if not isinstance(function_result, str):
+                    function_result = json.dumps(function_result) if function_result else ""
+
                 if is_error:
                     result_preview = function_result[:200] if len(function_result) > 200 else function_result
-                    logger.warning("Tool %s returned error (%.2fs): %s", function_name, tool_duration, result_preview)
+                    logger.warning("Tool %s returned error (%.2fs): %s", name, tool_duration, result_preview)
 
                 if self.verbose_logging:
-                    logging.debug(f"Tool {function_name} completed in {tool_duration:.2f}s")
+                    logging.debug(f"Tool {name} completed in {tool_duration:.2f}s")
                     logging.debug(f"Tool result ({len(function_result)} chars): {function_result}")
 
-            # Print cute message per tool
-            if self.quiet_mode:
-                cute_msg = _get_cute_tool_message_impl(name, args, tool_duration, result=function_result)
-                self._safe_print(f"  {cute_msg}")
-            elif not self.quiet_mode:
-                if self.verbose_logging:
+                # Print cute message per tool
+                if self.quiet_mode:
+                    cute_msg = _get_cute_tool_message_impl(name, args, tool_duration, result=function_result)
+                    self._safe_print(f"  {cute_msg}")
+                elif self.verbose_logging:
                     print(f"  ✅ Tool {i+1} completed in {tool_duration:.2f}s")
                     print(f"     Result: {function_result}")
                 else:
@@ -5822,26 +5970,28 @@ class AIAgent:
 
             if self.tool_complete_callback:
                 try:
-                    self.tool_complete_callback(tc.id, name, args, function_result)
+                    self.tool_complete_callback(tc.id, name, args, function_result if not _is_multimodal else _text_summary)
                 except Exception as cb_err:
                     logging.debug(f"Tool complete callback error: {cb_err}")
 
-            # Truncate oversized results
-            MAX_TOOL_RESULT_CHARS = 100_000
-            if len(function_result) > MAX_TOOL_RESULT_CHARS:
-                original_len = len(function_result)
-                function_result = (
-                    function_result[:MAX_TOOL_RESULT_CHARS]
-                    + f"\n\n[Truncated: tool response was {original_len:,} chars, "
-                    f"exceeding the {MAX_TOOL_RESULT_CHARS:,} char limit]"
-                )
+            # For non-multimodal results, apply truncation and build tool_msg.
+            # Multimodal results already have tool_msg built above with
+            # _anthropic_content_blocks — do NOT overwrite it.
+            if not _is_multimodal:
+                MAX_TOOL_RESULT_CHARS = 100_000
+                if len(function_result) > MAX_TOOL_RESULT_CHARS:
+                    original_len = len(function_result)
+                    function_result = (
+                        function_result[:MAX_TOOL_RESULT_CHARS]
+                        + f"\n\n[Truncated: tool response was {original_len:,} chars, "
+                        f"exceeding the {MAX_TOOL_RESULT_CHARS:,} char limit]"
+                    )
 
-            # Append tool result message in order
-            tool_msg = {
-                "role": "tool",
-                "content": function_result,
-                "tool_call_id": tc.id,
-            }
+                tool_msg = {
+                    "role": "tool",
+                    "content": function_result,
+                    "tool_call_id": tc.id,
+                }
             messages.append(tool_msg)
 
         # ── Budget pressure injection ────────────────────────────────────
@@ -6052,7 +6202,11 @@ class AIAgent:
                     logger.error("handle_function_call raised for %s: %s", function_name, tool_error, exc_info=True)
                 finally:
                     tool_duration = time.time() - tool_start_time
-                    cute_msg = _get_cute_tool_message_impl(function_name, function_args, tool_duration, result=_spinner_result)
+                    # Multimodal results (computer_use) are dicts — pass text summary for display
+                    _display_result = _spinner_result
+                    if isinstance(_display_result, dict) and _display_result.get("_multimodal"):
+                        _display_result = _display_result.get("text_summary", "")
+                    cute_msg = _get_cute_tool_message_impl(function_name, function_args, tool_duration, result=_display_result)
                     if spinner:
                         spinner.stop(cute_msg)
                     else:
@@ -6070,52 +6224,79 @@ class AIAgent:
                     logger.error("handle_function_call raised for %s: %s", function_name, tool_error, exc_info=True)
                 tool_duration = time.time() - tool_start_time
 
-            result_preview = function_result if self.verbose_logging else (
-                function_result[:200] if len(function_result) > 200 else function_result
-            )
+            # Handle multimodal tool results (e.g. computer_use screenshots).
+            # These return a dict with _multimodal flag and content_blocks list.
+            _is_multimodal = isinstance(function_result, dict) and function_result.get("_multimodal")
+            if _is_multimodal:
+                _text_summary = function_result.get("text_summary", "")
+                _content_blocks = function_result.get("content_blocks", [])
+                result_preview = _text_summary
+                _is_error_result = False
+                tool_msg = {
+                    "role": "tool",
+                    "content": _text_summary or "(screenshot taken)",
+                    "_anthropic_content_blocks": _content_blocks,
+                    "tool_call_id": tool_call.id,
+                }
+            else:
+                if not isinstance(function_result, str):
+                    function_result = json.dumps(function_result) if function_result else ""
 
-            # Log tool errors to the persistent error log so [error] tags
-            # in the UI always have a corresponding detailed entry on disk.
-            _is_error_result, _ = _detect_tool_failure(function_name, function_result)
+                result_preview = function_result if self.verbose_logging else (
+                    function_result[:200] if len(function_result) > 200 else function_result
+                )
+
+                # Log tool errors to the persistent error log so [error] tags
+                # in the UI always have a corresponding detailed entry on disk.
+                _is_error_result, _ = _detect_tool_failure(function_name, function_result)
+
+                # Guard against tools returning absurdly large content that would
+                # blow up the context window. 100K chars ≈ 25K tokens — generous
+                # enough for any reasonable tool output but prevents catastrophic
+                # context explosions (e.g. accidental base64 image dumps).
+                MAX_TOOL_RESULT_CHARS = 100_000
+                if len(function_result) > MAX_TOOL_RESULT_CHARS:
+                    original_len = len(function_result)
+                    function_result = (
+                        function_result[:MAX_TOOL_RESULT_CHARS]
+                        + f"\n\n[Truncated: tool response was {original_len:,} chars, "
+                        f"exceeding the {MAX_TOOL_RESULT_CHARS:,} char limit]"
+                    )
+
+                tool_msg = {
+                    "role": "tool",
+                    "content": function_result,
+                    "tool_call_id": tool_call.id,
+                }
+
             if _is_error_result:
                 logger.warning("Tool %s returned error (%.2fs): %s", function_name, tool_duration, result_preview)
 
             if self.verbose_logging:
                 logging.debug(f"Tool {function_name} completed in {tool_duration:.2f}s")
-                logging.debug(f"Tool result ({len(function_result)} chars): {function_result}")
+                if _is_multimodal:
+                    logging.debug(f"Tool result (multimodal): {result_preview}")
+                else:
+                    logging.debug(f"Tool result ({len(function_result)} chars): {function_result}")
 
             if self.tool_complete_callback:
                 try:
-                    self.tool_complete_callback(tool_call.id, function_name, function_args, function_result)
+                    self.tool_complete_callback(tool_call.id, function_name, function_args, result_preview if _is_multimodal else function_result)
                 except Exception as cb_err:
                     logging.debug(f"Tool complete callback error: {cb_err}")
 
-            # Guard against tools returning absurdly large content that would
-            # blow up the context window. 100K chars ≈ 25K tokens — generous
-            # enough for any reasonable tool output but prevents catastrophic
-            # context explosions (e.g. accidental base64 image dumps).
-            MAX_TOOL_RESULT_CHARS = 100_000
-            if len(function_result) > MAX_TOOL_RESULT_CHARS:
-                original_len = len(function_result)
-                function_result = (
-                    function_result[:MAX_TOOL_RESULT_CHARS]
-                    + f"\n\n[Truncated: tool response was {original_len:,} chars, "
-                    f"exceeding the {MAX_TOOL_RESULT_CHARS:,} char limit]"
-                )
-
-            tool_msg = {
-                "role": "tool",
-                "content": function_result,
-                "tool_call_id": tool_call.id
-            }
             messages.append(tool_msg)
 
             if not self.quiet_mode:
+                # Use text summary for multimodal results (avoid printing base64)
+                _print_result = result_preview if _is_multimodal else function_result
+                if not isinstance(_print_result, str):
+                    _print_result = str(_print_result)[:200]
                 if self.verbose_logging:
                     print(f"  ✅ Tool {i} completed in {tool_duration:.2f}s")
-                    print(f"     Result: {function_result}")
+                    print(f"     Result: {_print_result}")
                 else:
-                    response_preview = function_result[:self.log_prefix_chars] + "..." if len(function_result) > self.log_prefix_chars else function_result
+                    response_preview = _print_result[:self.log_prefix_chars] + "..." if len(_print_result) > self.log_prefix_chars else _print_result
                     print(f"  ✅ Tool {i} completed in {tool_duration:.2f}s - {response_preview}")
 
             if self._interrupt_requested and i < len(assistant_message.tool_calls):
@@ -7800,6 +7981,17 @@ class AIAgent:
                     assistant_message, finish_reason = normalize_anthropic_response(
                         response, strip_tool_prefix=self._is_anthropic_oauth
                     )
+                    # Log server-side context editing results (computer_use optimization)
+                    _ctx_mgmt = getattr(response, "context_management", None)
+                    if _ctx_mgmt:
+                        for _edit in getattr(_ctx_mgmt, "applied_edits", []) or []:
+                            _cleared = getattr(_edit, "cleared_tool_uses", 0)
+                            _cleared_tokens = getattr(_edit, "cleared_input_tokens", 0)
+                            if _cleared:
+                                logger.info(
+                                    "Context editing: cleared %d tool result(s), ~%d input tokens saved",
+                                    _cleared, _cleared_tokens,
+                                )
                 else:
                     assistant_message = response.choices[0].message
                 

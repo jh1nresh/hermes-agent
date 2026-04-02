@@ -18,6 +18,7 @@ Apple/macOS-specific skills — iMessage, Reminders, Notes, FindMy, and macOS au
 | `apple-reminders` | Manage Apple Reminders via remindctl CLI (list, add, complete, delete). | `apple/apple-reminders` |
 | `findmy` | Track Apple devices and AirTags via FindMy.app on macOS using AppleScript and screen capture. | `apple/findmy` |
 | `imessage` | Send and receive iMessages/SMS via the imsg CLI on macOS. | `apple/imessage` |
+| `macos-computer-use` | Guide for using the computer_use tool on macOS — app switching, keyboard shortcuts, typing, and reliable interaction patterns. | `apple/macos-computer-use` |
 
 ## autonomous-ai-agents
 

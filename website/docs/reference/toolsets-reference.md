@@ -13,6 +13,7 @@ Toolsets are named bundles of tools that you can enable with `hermes chat --tool
 | `browser` | core | `browser_back`, `browser_click`, `browser_close`, `browser_console`, `browser_get_images`, `browser_navigate`, `browser_press`, `browser_scroll`, `browser_snapshot`, `browser_type`, `browser_vision`, `web_search` |
 | `clarify` | core | `clarify` |
 | `code_execution` | core | `execute_code` |
+| `computer_use` | core | `computer` |
 | `cronjob` | core | `cronjob` |
 | `debugging` | composite | `patch`, `process`, `read_file`, `search_files`, `terminal`, `web_extract`, `web_search`, `write_file` |
 | `delegation` | core | `delegate_task` |

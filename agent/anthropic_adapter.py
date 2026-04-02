@@ -93,6 +93,8 @@ def _supports_adaptive_thinking(model: str) -> bool:
 _COMMON_BETAS = [
     "interleaved-thinking-2025-05-14",
     "fine-grained-tool-streaming-2025-05-14",
+    "computer-use-2025-11-24",
+    "context-management-2025-06-27",
 ]
 
 # Additional beta headers required for OAuth/subscription auth.
@@ -1026,8 +1028,23 @@ def convert_messages_to_anthropic(
             continue
 
         if role == "tool":
-            # Sanitize tool_use_id and ensure non-empty content
-            result_content = content if isinstance(content, str) else json.dumps(content)
+            # Sanitize tool_use_id and ensure non-empty content.
+            # Check for multimodal content blocks (computer_use screenshots).
+            # Stored in _anthropic_content_blocks to keep "content" as a string
+            # for compatibility with trajectory/session code paths.
+            multimodal_blocks = m.get("_anthropic_content_blocks")
+            if isinstance(multimodal_blocks, list) and multimodal_blocks:
+                # Include text content alongside image blocks so Claude sees
+                # the MEDIA: path and can include it in its response for gateway.
+                text_content = content if isinstance(content, str) and content.strip() else None
+                if text_content:
+                    result_content = [{"type": "text", "text": text_content}] + multimodal_blocks
+                else:
+                    result_content = multimodal_blocks
+            elif isinstance(content, str):
+                result_content = content
+            else:
+                result_content = json.dumps(content) if content else "(no output)"
             if not result_content:
                 result_content = "(no output)"
             tool_result = {
@@ -1142,6 +1159,50 @@ def convert_messages_to_anthropic(
             fixed.append(m)
     result = fixed
 
+    # ── Image eviction: keep only the most recent N screenshots ─────
+    # computer_use screenshots (base64 images) sit inside tool_result blocks:
+    #   msg["content"] = [{"type": "tool_result", "content": [{"type": "image", ...}]}]
+    # They accumulate and are sent with every API call. Each costs ~1,465
+    # tokens; after 10+ the conversation becomes very slow even for simple
+    # text queries. Walk backward, keep the most recent _MAX_KEEP_IMAGES,
+    # replace older ones with a text placeholder.
+    #
+    # Performance vs context trade-off:
+    #   1 (default) — fastest, model only sees the latest screenshot
+    #   2-3         — model can compare before/after states (useful for
+    #                 verifying multi-step UI changes) but adds ~1.5K
+    #                 tokens per extra image, slowing every API call
+    #   5+          — rarely useful, significant latency impact
+    #
+    # The model almost always decides based on the most recent screenshot
+    # alone, so keeping 1 is the best default. Increase only if the agent
+    # needs explicit before/after comparison for a specific workflow.
+    _MAX_KEEP_IMAGES = 3
+    _image_count = 0
+    for msg in reversed(result):
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            inner = block.get("content")
+            if not isinstance(inner, list):
+                continue
+            has_image = any(
+                isinstance(b, dict) and b.get("type") == "image"
+                for b in inner
+            )
+            if not has_image:
+                continue
+            _image_count += 1
+            if _image_count > _MAX_KEEP_IMAGES:
+                block["content"] = [
+                    b if b.get("type") != "image"
+                    else {"type": "text", "text": "[screenshot removed to save context]"}
+                    for b in inner
+                ]
+
     return system, result
 
 
@@ -1155,6 +1216,8 @@ def build_anthropic_kwargs(
     is_oauth: bool = False,
     preserve_dots: bool = False,
     context_length: Optional[int] = None,
+    native_tools: Optional[List[Dict]] = None,
+    context_management: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build kwargs for anthropic.messages.create().
 
@@ -1168,6 +1231,10 @@ def build_anthropic_kwargs(
 
     When *preserve_dots* is True, model name dots are not converted to hyphens
     (for Alibaba/DashScope anthropic-compatible endpoints: qwen3.5-plus).
+
+    When *context_management* is provided, enables server-side context editing
+    (e.g. clearing old tool results). Only used with computer_use to reduce
+    token costs from accumulated screenshots.
     """
     system, anthropic_messages = convert_messages_to_anthropic(messages)
     anthropic_tools = convert_tools_to_anthropic(tools) if tools else []
@@ -1179,6 +1246,13 @@ def build_anthropic_kwargs(
     # (e.g. custom endpoint with limited capacity).
     if context_length and effective_max_tokens > context_length:
         effective_max_tokens = max(context_length - 1, 1)
+
+    # Append native Anthropic tool types (e.g. computer_use) that bypass
+    # the OpenAI-to-Anthropic conversion — they use Anthropic's own format.
+    # Must happen BEFORE OAuth prefixing so native tools also get the mcp_
+    # prefix, keeping tool definitions consistent with message history.
+    if native_tools:
+        anthropic_tools.extend(native_tools)
 
     # ── OAuth: Claude Code identity ──────────────────────────────────
     if is_oauth:
@@ -1203,19 +1277,25 @@ def build_anthropic_kwargs(
                 block["text"] = text
 
         # 3. Prefix tool names with mcp_ (Claude Code convention)
+        #    Skip native Anthropic tool types (e.g. computer_20251124) —
+        #    their names are fixed by the API and must not be prefixed.
+        _NATIVE_TOOL_TYPES = {"computer_20251124", "text_editor_20250124", "bash_20250124"}
         if anthropic_tools:
             for tool in anthropic_tools:
-                if "name" in tool:
+                if "name" in tool and tool.get("type") not in _NATIVE_TOOL_TYPES:
                     tool["name"] = _MCP_TOOL_PREFIX + tool["name"]
 
         # 4. Prefix tool names in message history (tool_use and tool_result blocks)
+        #    Skip native tool names (e.g. "computer") — same reason as step 3.
+        _native_tool_names = {t["name"] for t in (native_tools or []) if "name" in t}
         for msg in anthropic_messages:
             content = msg.get("content")
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict):
                         if block.get("type") == "tool_use" and "name" in block:
-                            if not block["name"].startswith(_MCP_TOOL_PREFIX):
+                            if (not block["name"].startswith(_MCP_TOOL_PREFIX)
+                                    and block["name"] not in _native_tool_names):
                                 block["name"] = _MCP_TOOL_PREFIX + block["name"]
                         elif block.get("type") == "tool_result" and "tool_use_id" in block:
                             pass  # tool_result uses ID, not name
@@ -1228,6 +1308,12 @@ def build_anthropic_kwargs(
 
     if system:
         kwargs["system"] = system
+
+    # Server-side context editing (beta) — clears old tool results to
+    # reduce token costs. Currently only enabled for computer_use sessions
+    # where accumulated screenshots bloat context rapidly.
+    if context_management:
+        kwargs["context_management"] = context_management
 
     if anthropic_tools:
         kwargs["tools"] = anthropic_tools

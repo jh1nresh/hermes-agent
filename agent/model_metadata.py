@@ -903,9 +903,45 @@ def estimate_tokens_rough(text: str) -> int:
 
 
 def estimate_messages_tokens_rough(messages: List[Dict[str, Any]]) -> int:
-    """Rough token estimate for a message list (pre-flight only)."""
-    total_chars = sum(len(str(msg)) for msg in messages)
-    return total_chars // 4
+    """Rough token estimate for a message list (pre-flight only).
+
+    Excludes base64 image data from ``_anthropic_content_blocks`` which would
+    massively overcount tokens (a single screenshot's base64 is ~1MB of chars
+    but only costs ~1,465 API tokens).  Instead, each image block is counted
+    as a flat 1,500 tokens (Anthropic formula: width*height/750 for typical
+    1300x845 screenshots).
+    """
+    _IMAGE_TOKEN_ESTIMATE = 1500
+    total = 0
+    for msg in messages:
+        if not isinstance(msg, dict):
+            total += len(str(msg))
+            continue
+        # Count text content normally
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            total += len(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, str):
+                    total += len(block)
+                elif isinstance(block, dict):
+                    total += len(block.get("text", ""))
+        # Count tool_calls args (but not the huge function schema)
+        for tc in msg.get("tool_calls", []):
+            if isinstance(tc, dict):
+                fn = tc.get("function", {})
+                total += len(fn.get("arguments", ""))
+        # Count _anthropic_content_blocks: images as flat estimate, text normally
+        for block in msg.get("_anthropic_content_blocks", []):
+            if isinstance(block, dict):
+                if block.get("type") == "image":
+                    total += _IMAGE_TOKEN_ESTIMATE * 4  # * 4 because we divide by 4 below
+                else:
+                    total += len(block.get("text", ""))
+        # Role/metadata overhead
+        total += 20  # role, tool_call_id, etc.
+    return total // 4
 
 
 def estimate_request_tokens_rough(
@@ -920,12 +956,14 @@ def estimate_request_tokens_rough(
     system prompt, conversation messages, and tool schemas.  With 50+
     tools enabled, schemas alone can add 20-30K tokens — a significant
     blind spot when only counting messages.
+
+    Uses ``estimate_messages_tokens_rough`` for messages to avoid
+    counting base64 image data as text tokens.
     """
     total_chars = 0
     if system_prompt:
         total_chars += len(system_prompt)
-    if messages:
-        total_chars += sum(len(str(msg)) for msg in messages)
+    msg_tokens = estimate_messages_tokens_rough(messages) if messages else 0
     if tools:
         total_chars += len(str(tools))
-    return total_chars // 4
+    return total_chars // 4 + msg_tokens

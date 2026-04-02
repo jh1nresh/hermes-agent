@@ -36,6 +36,12 @@ This page documents the built-in Hermes tool registry as it exists in code. Avai
 |------|-------------|----------------------|
 | `execute_code` | Run a Python script that can call Hermes tools programmatically. Use this when you need 3+ tool calls with processing logic between them, need to filter/reduce large tool outputs before they enter your context, need conditional branching (… | — |
 
+## `computer_use` toolset
+
+| Tool | Description | Requires environment |
+|------|-------------|----------------------|
+| `computer` | Control the macOS desktop — take screenshots, click, type, scroll, drag, and use keyboard shortcuts. Uses Anthropic's Computer Use API (`computer_20251124`). Actions: `screenshot`, `left_click`, `right_click`, `double_click`, `triple_click`, `middle_click`, `mouse_move`, `left_click_drag`, `left_mouse_down`, `left_mouse_up`, `type`, `key`, `hold_key`, `scroll`, `zoom`, `wait`. Requires macOS, pyautogui, Quartz, and Anthropic native API. | macOS + Anthropic provider |
+
 ## `cronjob` toolset
 
 | Tool | Description | Requires environment |
