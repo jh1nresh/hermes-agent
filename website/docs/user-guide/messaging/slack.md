@@ -217,23 +217,6 @@ In channels, always @mention the bot. Simply typing a message without mentioning
 This is intentional — it prevents the bot from responding to every message in busy channels.
 :::
 
-### Reply Threading
-
-By default, Hermes replies in a **thread** attached to the original message in channels. If your team prefers replies to go **directly to the channel** instead, you can disable threading:
-
-```yaml
-platforms:
-  slack:
-    extra:
-      reply_in_thread: false
-```
-
-When `reply_in_thread` is `false`:
-- **Channel messages** — Hermes replies directly in the channel (no thread created)
-- **Thread messages** — Hermes still replies inside the existing thread to preserve conversation context
-
-The default is `true` (threaded replies), which matches the original behavior.
-
 ---
 
 ## Configuration Options
@@ -252,6 +235,11 @@ platforms:
     reply_to_mode: "first"
 
     extra:
+      # Whether to reply in a thread (default: true).
+      # When false, channel messages get direct channel replies instead
+      # of threads. Messages inside existing threads still reply in-thread.
+      reply_in_thread: true
+
       # Also post thread replies to the main channel
       # (Slack's "Also send to channel" feature).
       # Only the first chunk of the first reply is broadcast.
@@ -261,6 +249,7 @@ platforms:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `platforms.slack.reply_to_mode` | `"first"` | Threading mode for multi-part messages: `"off"`, `"first"`, or `"all"` |
+| `platforms.slack.extra.reply_in_thread` | `true` | When `false`, channel messages get direct replies instead of threads. Messages inside existing threads still reply in-thread. |
 | `platforms.slack.extra.reply_broadcast` | `false` | When `true`, thread replies are also posted to the main channel. Only the first chunk is broadcast. |
 
 ### Session Isolation
@@ -342,6 +331,7 @@ platforms:
   slack:
     reply_to_mode: "first"
     extra:
+      reply_in_thread: true
       reply_broadcast: false
 ```
 
