@@ -301,6 +301,8 @@ Update the summary using this exact structure. PRESERVE all existing information
 
 Target ~{summary_budget} tokens. Be specific — include file paths, command outputs, error messages, and concrete values rather than vague descriptions.
 
+Write the summary in the same language the user was using in the conversation.
+
 Write only the summary body. Do not include any preamble or prefix."""
         else:
             # First compaction: summarize from scratch
@@ -338,6 +340,8 @@ Use this exact structure:
 [Any specific values, error messages, configuration details, or data that would be lost without explicit preservation]
 
 Target ~{summary_budget} tokens. Be specific — include file paths, command outputs, error messages, and concrete values rather than vague descriptions. The goal is to prevent the next assistant from repeating work or losing important details.
+
+Write the summary in the same language the user was using in the conversation.
 
 Write only the summary body. Do not include any preamble or prefix."""
 
