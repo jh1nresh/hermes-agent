@@ -375,6 +375,58 @@ def _sanitize_messages_surrogates(messages: list) -> bool:
     return found
 
 
+def _normalize_structured_content(content) -> tuple:
+    """Normalize Mistral-style structured content blocks to (text, reasoning).
+
+    Mistral's Magistral models (and mistral-large-2512+) return ``content`` as
+    a list of typed blocks instead of a plain string::
+
+        [{"type": "thinking", "thinking": [{"type": "text", "text": "..."}]},
+         {"type": "text", "text": "final answer"},
+         {"type": "reference", ...}]
+
+    This also appears in streaming deltas (``delta.content`` is a list).
+
+    Returns:
+        (text_content, thinking_content) — text is always a string (possibly
+        empty), thinking is a string or None.
+    """
+    if content is None:
+        return ("", None)
+    if isinstance(content, str):
+        return (content, None)
+    if not isinstance(content, list):
+        return (str(content), None)
+
+    text_parts: list = []
+    thinking_parts: list = []
+    for block in content:
+        if isinstance(block, str):
+            text_parts.append(block)
+            continue
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type", "")
+        if block_type == "text":
+            text_parts.append(block.get("text", ""))
+        elif block_type == "thinking":
+            # "thinking" is itself a list of text blocks
+            thinking = block.get("thinking", [])
+            if isinstance(thinking, list):
+                for t in thinking:
+                    if isinstance(t, dict) and t.get("type") == "text":
+                        thinking_parts.append(t.get("text", ""))
+                    elif isinstance(t, str):
+                        thinking_parts.append(t)
+            elif isinstance(thinking, str):
+                thinking_parts.append(thinking)
+        # Other types (reference, image, document, audio, file) are skipped.
+
+    text = "\n".join(p for p in text_parts if p)
+    thinking = "\n\n".join(p for p in thinking_parts if p) or None
+    return (text, thinking)
+
+
 def _strip_budget_warnings_from_history(messages: list) -> None:
     """Remove budget pressure warnings from tool-result messages in-place.
 
@@ -4107,30 +4159,43 @@ class AIAgent:
                     _fire_first_delta()
                     self._fire_reasoning_delta(reasoning_text)
 
-                # Accumulate text content — fire callback only when no tool calls
+                # Accumulate text content — fire callback only when no tool calls.
+                # Mistral Magistral models return delta.content as a list of
+                # structured blocks instead of a plain string; normalize first.
                 if delta and delta.content:
-                    content_parts.append(delta.content)
-                    if not tool_calls_acc:
-                        _fire_first_delta()
-                        self._fire_stream_delta(delta.content)
-                        deltas_were_sent["yes"] = True
+                    _raw_delta_content = delta.content
+                    if isinstance(_raw_delta_content, list):
+                        _delta_text, _delta_thinking = _normalize_structured_content(_raw_delta_content)
+                        if _delta_thinking:
+                            reasoning_parts.append(_delta_thinking)
+                            _fire_first_delta()
+                            self._fire_reasoning_delta(_delta_thinking)
                     else:
-                        # Tool calls suppress regular content streaming (avoids
-                        # displaying chatty "I'll use the tool..." text alongside
-                        # tool calls).  But reasoning tags embedded in suppressed
-                        # content should still reach the display — otherwise the
-                        # reasoning box only appears as a post-response fallback,
-                        # rendering it confusingly after the already-streamed
-                        # response.  Route suppressed content through the stream
-                        # delta callback so its tag extraction can fire the
-                        # reasoning display.  Non-reasoning text is harmlessly
-                        # suppressed by the CLI's _stream_delta when the stream
-                        # box is already closed (tool boundary flush).
-                        if self.stream_delta_callback:
-                            try:
-                                self.stream_delta_callback(delta.content)
-                            except Exception:
-                                pass
+                        _delta_text = _raw_delta_content
+
+                    if _delta_text:
+                        content_parts.append(_delta_text)
+                        if not tool_calls_acc:
+                            _fire_first_delta()
+                            self._fire_stream_delta(_delta_text)
+                            deltas_were_sent["yes"] = True
+                        else:
+                            # Tool calls suppress regular content streaming (avoids
+                            # displaying chatty "I'll use the tool..." text alongside
+                            # tool calls).  But reasoning tags embedded in suppressed
+                            # content should still reach the display — otherwise the
+                            # reasoning box only appears as a post-response fallback,
+                            # rendering it confusingly after the already-streamed
+                            # response.  Route suppressed content through the stream
+                            # delta callback so its tag extraction can fire the
+                            # reasoning display.  Non-reasoning text is harmlessly
+                            # suppressed by the CLI's _stream_delta when the stream
+                            # box is already closed (tool boundary flush).
+                            if self.stream_delta_callback:
+                                try:
+                                    self.stream_delta_callback(_delta_text)
+                                except Exception:
+                                    pass
 
                 # Accumulate tool call deltas — notify display on first name
                 if delta and delta.tool_calls:
@@ -5170,18 +5235,32 @@ class AIAgent:
         Handles reasoning extraction, reasoning_details, and optional tool_calls
         so both the tool-call path and the final-response path share one builder.
         """
+        # Normalize content early — Mistral Magistral models return content
+        # as a list of structured blocks instead of a string.
+        _raw_content = assistant_message.content
+        _structured_thinking = None
+        if isinstance(_raw_content, list):
+            _raw_content, _structured_thinking = _normalize_structured_content(_raw_content)
+
         reasoning_text = self._extract_reasoning(assistant_message)
         _from_structured = bool(reasoning_text)
+
+        # If the structured content included thinking blocks and
+        # _extract_reasoning didn't find anything, use the structured thinking.
+        if not reasoning_text and _structured_thinking:
+            reasoning_text = _structured_thinking
+            _from_structured = True
 
         # Fallback: extract inline <think> blocks from content when no structured
         # reasoning fields are present (some models/providers embed thinking
         # directly in the content rather than returning separate API fields).
         if not reasoning_text:
-            content = assistant_message.content or ""
-            think_blocks = re.findall(r'<think>(.*?)</think>', content, flags=re.DOTALL)
-            if think_blocks:
-                combined = "\n\n".join(b.strip() for b in think_blocks if b.strip())
-                reasoning_text = combined or None
+            content = _raw_content or ""
+            if isinstance(content, str):
+                think_blocks = re.findall(r'<think>(.*?)</think>', content, flags=re.DOTALL)
+                if think_blocks:
+                    combined = "\n\n".join(b.strip() for b in think_blocks if b.strip())
+                    reasoning_text = combined or None
 
         if reasoning_text and self.verbose_logging:
             logging.debug(f"Captured reasoning ({len(reasoning_text)} chars): {reasoning_text}")
@@ -5203,7 +5282,7 @@ class AIAgent:
 
         msg = {
             "role": "assistant",
-            "content": assistant_message.content or "",
+            "content": _raw_content or "",
             "reasoning": reasoning_text,
             "finish_reason": finish_reason,
         }
@@ -7022,6 +7101,9 @@ class AIAgent:
                         if self.api_mode == "chat_completions":
                             _trunc_msg = response.choices[0].message if (hasattr(response, "choices") and response.choices) else None
                             _trunc_content = getattr(_trunc_msg, "content", None) if _trunc_msg else None
+                            # Mistral Magistral: content may be a list of blocks
+                            if isinstance(_trunc_content, list):
+                                _trunc_content, _ = _normalize_structured_content(_trunc_content)
                         elif self.api_mode == "anthropic_messages":
                             # Anthropic response.content is a list of blocks
                             _text_parts = []
@@ -7076,7 +7158,10 @@ class AIAgent:
                                 interim_msg = self._build_assistant_message(assistant_message, finish_reason)
                                 messages.append(interim_msg)
                                 if assistant_message.content:
-                                    truncated_response_prefix += assistant_message.content
+                                    _cont = assistant_message.content
+                                    if isinstance(_cont, list):
+                                        _cont, _ = _normalize_structured_content(_cont)
+                                    truncated_response_prefix += _cont
 
                                 if length_continue_retries < 3:
                                     self._vprint(
@@ -7791,21 +7876,22 @@ class AIAgent:
                 # Normalize content to string — some OpenAI-compatible servers
                 # (llama-server, etc.) return content as a dict or list instead
                 # of a plain string, which crashes downstream .strip() calls.
+                # Mistral Magistral models return a list of structured blocks
+                # including {type: "thinking"} and {type: "text"}.
                 if assistant_message.content is not None and not isinstance(assistant_message.content, str):
                     raw = assistant_message.content
                     if isinstance(raw, dict):
                         assistant_message.content = raw.get("text", "") or raw.get("content", "") or json.dumps(raw)
                     elif isinstance(raw, list):
-                        # Multimodal content list — extract text parts
-                        parts = []
-                        for part in raw:
-                            if isinstance(part, str):
-                                parts.append(part)
-                            elif isinstance(part, dict) and part.get("type") == "text":
-                                parts.append(part.get("text", ""))
-                            elif isinstance(part, dict) and "text" in part:
-                                parts.append(str(part["text"]))
-                        assistant_message.content = "\n".join(parts)
+                        _norm_text, _norm_thinking = _normalize_structured_content(raw)
+                        assistant_message.content = _norm_text
+                        # Preserve extracted thinking as reasoning_content so
+                        # _extract_reasoning / _build_assistant_message picks it up.
+                        if _norm_thinking and not getattr(assistant_message, "reasoning_content", None):
+                            try:
+                                assistant_message.reasoning_content = _norm_thinking
+                            except (AttributeError, TypeError):
+                                pass  # frozen/read-only SDK object
                     else:
                         assistant_message.content = str(raw)
 
