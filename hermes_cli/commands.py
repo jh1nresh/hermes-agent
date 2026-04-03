@@ -82,6 +82,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     # Configuration
     CommandDef("config", "Show current configuration", "Configuration",
                cli_only=True),
+    CommandDef("model", "Switch model mid-session (e.g. /model claude-sonnet-4 or /model openai:gpt-5)",
+               "Configuration", args_hint="[provider:model]"),
     CommandDef("provider", "Show available providers and current provider",
                "Configuration"),
     CommandDef("prompt", "View/set custom system prompt", "Configuration",

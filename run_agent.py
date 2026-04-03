@@ -1267,7 +1267,153 @@ class AIAgent:
             self.context_compressor._context_probe_persistable = False
             # Iterative summary from previous session must not bleed into new one (#2635)
             self.context_compressor._previous_summary = None
-    
+
+    # ── Mid-chat model switching ──────────────────────────────────────────
+
+    def switch_model(
+        self,
+        new_model: str,
+        new_provider: str,
+        api_key: str = "",
+        base_url: str = "",
+        api_mode: str = "",
+    ) -> None:
+        """Switch the agent to a different model/provider mid-conversation.
+
+        Follows the same pattern as ``_try_activate_fallback()`` for the
+        client/state swap, but differs in two critical ways:
+
+        1. Updates ``_primary_runtime`` — this is a permanent switch, not
+           a temporary fallback that gets restored next turn.
+        2. Invalidates ``_cached_system_prompt`` — the system prompt
+           contains model-dependent content (tool enforcement guidance,
+           Google model guidance, Alibaba self-identification) that must
+           be rebuilt for the new model.
+
+        The caller (CLI or gateway handler) is responsible for:
+        - Parsing user input via ``model_switch.switch_model()``
+        - Credential resolution (api_key, base_url)
+        - Persisting the change to config.yaml
+        - Formatting output messages
+
+        Args:
+            new_model: The new model slug (e.g. ``"claude-sonnet-4"``).
+            new_provider: The provider ID (e.g. ``"openrouter"``).
+            api_key: API key for the target provider.
+            base_url: Base URL for the target provider.
+            api_mode: Explicit api_mode override.  If empty, auto-detected
+                from provider/base_url.
+        """
+        old_model = self.model
+
+        # ── Determine api_mode ──
+        if not api_mode:
+            api_mode = "chat_completions"
+            if new_provider == "openai-codex":
+                api_mode = "codex_responses"
+            elif new_provider == "anthropic":
+                api_mode = "anthropic_messages"
+            elif base_url:
+                _bu_lower = base_url.rstrip("/").lower()
+                if _bu_lower.endswith("/anthropic"):
+                    api_mode = "anthropic_messages"
+                elif self._is_direct_openai_url(base_url):
+                    api_mode = "codex_responses"
+
+        self.model = new_model
+        self.provider = new_provider
+        self.base_url = base_url
+        self.api_mode = api_mode
+
+        # ── Build new client ──
+        if api_mode == "anthropic_messages":
+            from agent.anthropic_adapter import (
+                build_anthropic_client,
+                resolve_anthropic_token,
+                _is_oauth_token,
+            )
+            effective_key = api_key or (
+                resolve_anthropic_token() if new_provider == "anthropic" else ""
+            )
+            self.api_key = effective_key
+            self._anthropic_api_key = effective_key
+            self._anthropic_base_url = base_url or None
+            self._anthropic_client = build_anthropic_client(
+                effective_key, self._anthropic_base_url,
+            )
+            self._is_anthropic_oauth = _is_oauth_token(effective_key)
+            self.client = None
+            self._client_kwargs = {}
+        else:
+            self.api_key = api_key
+            new_kwargs = {"api_key": api_key, "base_url": base_url}
+            self._client_kwargs = new_kwargs
+            self.client = self._create_openai_client(
+                dict(new_kwargs), reason="model_switch", shared=True,
+            )
+            # Clear anthropic state if we were previously on anthropic
+            self._anthropic_client = None
+
+        # ── Re-evaluate prompt caching for the new model/provider ──
+        is_native_anthropic = api_mode == "anthropic_messages"
+        self._use_prompt_caching = (
+            ("openrouter" in (base_url or "").lower() and "claude" in new_model.lower())
+            or is_native_anthropic
+        )
+
+        # ── Update context compressor for new model's context window ──
+        if hasattr(self, "context_compressor") and self.context_compressor:
+            from agent.model_metadata import get_model_context_length
+            new_context_length = get_model_context_length(
+                new_model,
+                base_url=base_url,
+                api_key=api_key,
+                provider=new_provider,
+            )
+            self.context_compressor.model = new_model
+            self.context_compressor.base_url = base_url
+            self.context_compressor.api_key = api_key
+            self.context_compressor.provider = new_provider
+            self.context_compressor.context_length = new_context_length
+            self.context_compressor.threshold_tokens = int(
+                new_context_length * self.context_compressor.threshold_percent
+            )
+
+        # ── Invalidate system prompt — it contains model-dependent content ──
+        self._invalidate_system_prompt()
+
+        # ── Update _primary_runtime snapshot (permanent switch) ──
+        _cc = self.context_compressor
+        self._primary_runtime = {
+            "model": self.model,
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "api_mode": self.api_mode,
+            "api_key": getattr(self, "api_key", ""),
+            "client_kwargs": dict(self._client_kwargs),
+            "use_prompt_caching": self._use_prompt_caching,
+            "compressor_model": _cc.model,
+            "compressor_base_url": _cc.base_url,
+            "compressor_api_key": getattr(_cc, "api_key", ""),
+            "compressor_provider": _cc.provider,
+            "compressor_context_length": _cc.context_length,
+            "compressor_threshold_tokens": _cc.threshold_tokens,
+        }
+        if self.api_mode == "anthropic_messages":
+            self._primary_runtime.update({
+                "anthropic_api_key": self._anthropic_api_key,
+                "anthropic_base_url": self._anthropic_base_url,
+                "is_anthropic_oauth": self._is_anthropic_oauth,
+            })
+
+        # ── Reset fallback state — new primary means fresh fallback chain ──
+        self._fallback_activated = False
+        self._fallback_index = 0
+
+        logging.info(
+            "Model switched: %s → %s (%s)", old_model, new_model, new_provider,
+        )
+
     def _safe_print(self, *args, **kwargs):
         """Print that silently handles broken pipes / closed stdout.
 

@@ -1821,6 +1821,11 @@ class GatewayRunner:
                     adapter._pending_messages[_quick_key] = queued_event
                 return "Queued for the next turn."
 
+            # /model must not be queued as an interrupt — it's a config change
+            # that requires no agent to be running.  Return a clear message.
+            if _cmd_def_inner and _cmd_def_inner.name == "model":
+                return "⏳ Agent is running — wait for it to finish or `/stop` first, then switch models."
+
             # /approve and /deny must bypass the running-agent interrupt path.
             # The agent thread is blocked on a threading.Event inside
             # tools/approval.py — sending an interrupt won't unblock it.
@@ -1919,6 +1924,9 @@ class GatewayRunner:
 
         if canonical == "yolo":
             return await self._handle_yolo_command(event)
+
+        if canonical == "model":
+            return await self._handle_model_command(event)
 
         if canonical == "provider":
             return await self._handle_provider_command(event)
@@ -3227,6 +3235,130 @@ class GatewayRunner:
             lines.append(f"_(Requested page {requested_page} was out of range, showing page {page}.)_")
         return "\n".join(lines)
     
+    async def _handle_model_command(self, event: MessageEvent) -> str:
+        """Handle /model command — switch model mid-session.
+
+        Works across all gateway platforms (Telegram, Discord, Slack,
+        Matrix, WhatsApp, etc.) since they all route through the same
+        gateway command dispatch.
+        """
+        import yaml
+        from hermes_cli.models import _PROVIDER_LABELS, normalize_provider
+        from hermes_cli.model_switch import (
+            switch_model, switch_to_custom_provider,
+            MODEL_ALIASES, suggest_models,
+        )
+        from hermes_cli.config import save_config
+
+        raw_input = event.get_command_args().strip()
+
+        # Resolve current provider/model from config
+        config_path = _hermes_home / "config.yaml"
+        current_provider = "openrouter"
+        current_model = ""
+        current_base_url = ""
+        current_api_key = ""
+        try:
+            if config_path.exists():
+                with open(config_path, encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                model_cfg = cfg.get("model", {})
+                if isinstance(model_cfg, dict):
+                    current_provider = model_cfg.get("provider", "openrouter")
+                    current_model = model_cfg.get("default") or model_cfg.get("model", "")
+                    current_base_url = model_cfg.get("base_url", "")
+                elif isinstance(model_cfg, str):
+                    current_model = model_cfg
+        except Exception:
+            pass
+
+        current_provider = normalize_provider(current_provider)
+
+        # No argument → show current model and how to switch
+        if not raw_input:
+            provider_label = _PROVIDER_LABELS.get(current_provider, current_provider)
+            return (
+                f"🤖 **Current:** `{current_model}` via {provider_label}\n\n"
+                "**Aliases:** sonnet, opus, haiku, gpt5, gpt5-mini, codex, "
+                "gemini, deepseek, grok, qwen, minimax\n\n"
+                "**Full names:** `/model anthropic/claude-sonnet-4.5`\n"
+                "**Direct provider:** `/model anthropic:claude-opus-4`\n"
+                "**Custom endpoint:** `/model custom:my-local-model`"
+            )
+
+        # Handle bare "custom"
+        if raw_input.lower() == "custom":
+            custom_result = switch_to_custom_provider()
+            if not custom_result.success:
+                return f"❌ {custom_result.error_message}"
+            raw_input = f"custom:{custom_result.model}"
+
+        # Same model check (quick path)
+        if raw_input == current_model:
+            return f"Already using `{current_model}`"
+
+        # Run the shared switch pipeline
+        result = switch_model(
+            raw_input,
+            current_provider=current_provider,
+            current_model=current_model,
+            current_base_url=current_base_url,
+            current_api_key=current_api_key,
+        )
+
+        if not result.success:
+            # Try to suggest alternatives on failure
+            suggestions = suggest_models(raw_input, limit=3)
+            msg = f"❌ {result.error_message}"
+            if suggestions:
+                sug_str = ", ".join(f"`{s}`" for s in suggestions)
+                msg += f"\nDid you mean: {sug_str}?"
+            return msg
+
+        # Same model after resolution
+        if result.new_model == current_model and not result.provider_changed:
+            return f"Already using `{current_model}`"
+
+        # Persist to config.yaml
+        if result.persist:
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                model_cfg = cfg.get("model", {})
+                if not isinstance(model_cfg, dict):
+                    model_cfg = {"default": model_cfg} if model_cfg else {}
+                model_cfg["default"] = result.new_model
+                model_cfg["provider"] = result.target_provider
+                if result.base_url:
+                    model_cfg["base_url"] = result.base_url
+                elif "base_url" in model_cfg and not result.is_custom_target:
+                    # Clear stale base_url when switching away from custom
+                    del model_cfg["base_url"]
+                cfg["model"] = model_cfg
+                save_config(cfg)
+            except Exception as e:
+                logger.warning("Failed to persist model switch: %s", e)
+
+        # Evict the cached agent so the next message creates a fresh one
+        # with the new model/provider configuration.
+        source = event.source
+        session_key = self._session_key_for_source(source)
+        self._evict_cached_agent(session_key)
+
+        # Format response
+        new_label = _PROVIDER_LABELS.get(result.target_provider, result.target_provider)
+        if result.resolved_via_alias:
+            lines = [f"✅ **{result.resolved_via_alias}** → `{result.new_model}` via {new_label}"]
+        else:
+            lines = [f"✅ Switched to `{result.new_model}` via {new_label}"]
+        if result.provider_changed:
+            old_label = _PROVIDER_LABELS.get(current_provider, current_provider)
+            lines.append(f"Provider: {old_label} → {new_label}")
+        if result.warning_message:
+            lines.append(f"⚠️ {result.warning_message}")
+        lines.append("Prompt cache reset (new model).")
+        return "\n".join(lines)
+
     async def _handle_provider_command(self, event: MessageEvent) -> str:
         """Handle /provider command - show available providers."""
         import yaml
