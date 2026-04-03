@@ -3052,10 +3052,56 @@ class HermesCLI:
         print(f"  Config File: {config_path} {config_status}")
         print()
     
+    def _list_recent_sessions(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Return recent CLI sessions for in-chat browsing/resume affordances."""
+        if not self._session_db:
+            return []
+        try:
+            sessions = self._session_db.list_sessions_rich(
+                source="cli",
+                limit=limit,
+            )
+        except Exception:
+            return []
+        return [s for s in sessions if s.get("id") != self.session_id]
+
+    def _show_recent_sessions(self, *, reason: str = "history", limit: int = 10) -> bool:
+        """Render recent sessions inline from the active chat TUI.
+
+        Returns True when something was shown, False if no session list was available.
+        """
+        sessions = self._list_recent_sessions(limit=limit)
+        if not sessions:
+            return False
+
+        from hermes_cli.main import _relative_time
+
+        print()
+        print("+" + "-" * 86 + "+")
+        print("|" + "Recent Sessions".center(86) + "|")
+        print("+" + "-" * 86 + "+")
+        print(f"  {'Title':<30} {'Preview':<30} {'Last Active':<12} ID")
+        print(f"  {'─' * 30} {'─' * 30} {'─' * 12} {'─' * 18}")
+        for session in sessions:
+            title = (session.get("title") or "—")[:30]
+            preview = (session.get("preview") or "")[:30]
+            last_active = _relative_time(session.get("last_active"))
+            print(f"  {title:<30} {preview:<30} {last_active:<12} {session['id']}")
+
+        print()
+        if reason == "history":
+            print("(._.) No messages in the current chat yet.")
+            print("      Above are recent sessions you can resume with /resume <session id or title>.")
+        else:
+            print("  Use /resume <session id or title> to switch to one of these sessions.")
+        print()
+        return True
+
     def show_history(self):
         """Display conversation history."""
         if not self.conversation_history:
-            print("(._.) No conversation history yet.")
+            if not self._show_recent_sessions(reason="history"):
+                print("(._.) No conversation history yet.")
             return
 
         preview_limit = 400
@@ -3180,6 +3226,8 @@ class HermesCLI:
 
         if not target:
             _cprint("  Usage: /resume <session_id_or_title>")
+            if self._show_recent_sessions(reason="resume"):
+                return
             _cprint("  Tip:   Use /history or `hermes sessions list` to find sessions.")
             return
 
