@@ -530,15 +530,16 @@ def _get_or_create_env(task_id: str):
 def _ship_file_to_remote(env, remote_path: str, content: str) -> None:
     """Write *content* to *remote_path* on the remote environment.
 
-    Uses base64 encoding piped through stdin to avoid ARG_MAX limits and
-    shell-quoting pitfalls.
+    Uses ``echo … | base64 -d`` rather than stdin piping because some
+    backends (Modal) don't reliably deliver stdin_data to chained
+    commands.  Base64 output is shell-safe ([A-Za-z0-9+/=]) so single
+    quotes are fine.
     """
     encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
     env.execute_oneshot(
-        f"base64 -d > {remote_path}",
+        f"echo '{encoded}' | base64 -d > {remote_path}",
         cwd="/",
         timeout=30,
-        stdin_data=encoded + "\n",
     )
 
 
@@ -657,15 +658,17 @@ def _rpc_poll_loop(
                         "duration": round(call_duration, 2),
                     })
 
-                # Write response atomically (tmp + rename) via stdin
+                # Write response atomically (tmp + rename).
+                # Use echo piping (not stdin_data) because Modal doesn't
+                # reliably deliver stdin to chained commands.
                 encoded_result = base64.b64encode(
                     tool_result.encode("utf-8")
                 ).decode("ascii")
                 env.execute_oneshot(
-                    f"base64 -d > {res_file}.tmp && mv {res_file}.tmp {res_file}",
+                    f"echo '{encoded_result}' | base64 -d > {res_file}.tmp"
+                    f" && mv {res_file}.tmp {res_file}",
                     cwd="/",
                     timeout=60,
-                    stdin_data=encoded_result + "\n",
                 )
 
                 # Remove the request file
