@@ -1573,6 +1573,40 @@ class TestRunConversation:
         assert "Local/custom backend returned reasoning-only output" in result["error"]
         assert "wrong /v1 endpoint" in result["error"]
 
+    def test_plugin_context_is_uncached_system_suffix_when_prompt_caching_enabled(self, agent):
+        self._setup_agent(agent)
+        agent._use_prompt_caching = True
+
+        captured = {}
+
+        def _fake_api_call(api_kwargs):
+            captured["kwargs"] = api_kwargs
+            return _mock_response(content="ok", finish_reason="stop")
+
+        with (
+            patch(
+                "hermes_cli.plugins.invoke_hook",
+                return_value=[{"context": "plugin-turn-context"}],
+            ),
+            patch.object(agent, "_interruptible_api_call", side_effect=_fake_api_call),
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation("hello")
+
+        assert result["completed"] is True
+        assert result["final_response"] == "ok"
+        messages = captured["kwargs"]["messages"]
+        assert messages[0]["role"] == "system"
+
+        system_blocks = messages[0]["content"]
+        assert isinstance(system_blocks, list)
+        assert system_blocks[0]["text"] == "You are helpful."
+        assert system_blocks[0]["cache_control"]["type"] == "ephemeral"
+        assert system_blocks[-1]["text"] == "plugin-turn-context"
+        assert "cache_control" not in system_blocks[-1]
+
     def test_nous_401_refreshes_after_remint_and_retries(self, agent):
         self._setup_agent(agent)
         agent.provider = "nous"

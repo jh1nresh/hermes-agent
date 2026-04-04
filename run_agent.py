@@ -6649,8 +6649,8 @@ class AIAgent:
         # Plugin hook: pre_llm_call
         # Fired once per turn before the tool-calling loop.  Plugins can
         # return a dict with a ``context`` key whose value is a string
-        # that will be appended to the ephemeral system prompt for every
-        # API call in this turn (not persisted to session DB or cache).
+        # that will be injected at request time for every API call in
+        # this turn (not persisted to session DB or cached prefix).
         _plugin_turn_context = ""
         try:
             from hermes_cli.plugins import invoke_hook as _invoke_hook
@@ -6796,8 +6796,11 @@ class AIAgent:
             effective_system = active_system_prompt or ""
             if self.ephemeral_system_prompt:
                 effective_system = (effective_system + "\n\n" + self.ephemeral_system_prompt).strip()
-            # Plugin context from pre_llm_call hooks — ephemeral, not cached.
-            if _plugin_turn_context:
+            # Plugin context from pre_llm_call hooks.
+            # For non-cached providers/requests we can append directly.
+            # For Anthropic prompt-cached requests we inject it later as an
+            # uncached system suffix block so the cache key stays stable.
+            if _plugin_turn_context and not self._use_prompt_caching:
                 effective_system = (effective_system + "\n\n" + _plugin_turn_context).strip()
             if effective_system:
                 api_messages = [{"role": "system", "content": effective_system}] + api_messages
@@ -6815,6 +6818,16 @@ class AIAgent:
             # input token costs by ~75% on multi-turn conversations.
             if self._use_prompt_caching:
                 api_messages = apply_anthropic_cache_control(api_messages, cache_ttl=self._cache_ttl, native_anthropic=(self.api_mode == 'anthropic_messages'))
+
+                # Append plugin context AFTER cache markers so the system-level
+                # cache key stays stable even when plugin output varies per turn.
+                if _plugin_turn_context and api_messages and api_messages[0].get("role") == "system":
+                    _sys = api_messages[0].get("content", "")
+                    _blocks = list(_sys) if isinstance(_sys, list) else [{"type": "text", "text": _sys}] if isinstance(_sys, str) else []
+                    _blocks.append({"type": "text", "text": _plugin_turn_context})
+                    api_messages[0]["content"] = _blocks
+                elif _plugin_turn_context:
+                    api_messages.insert(0, {"role": "system", "content": _plugin_turn_context})
 
             # Safety net: strip orphaned tool results / add stubs for missing
             # results before sending to the API.  Runs unconditionally — not
