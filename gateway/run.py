@@ -3250,21 +3250,20 @@ class GatewayRunner:
         """Handle /model command — switch model for this session.
 
         Supports:
-          /model                     — show current model info
-          /model <name>              — switch for this session only
-          /model <name> --global     — switch and persist to config.yaml
-          /model provider:model      — switch provider + model
+          /model                              — show current model info
+          /model <name>                       — switch for this session only
+          /model <name> --global              — switch and persist to config.yaml
+          /model <name> --provider <provider> — switch provider + model
+          /model --provider <provider>        — switch to provider, auto-detect model
         """
         import yaml
-        from hermes_cli.model_switch import switch_model as _switch_model
-        from hermes_cli.models import _PROVIDER_LABELS
+        from hermes_cli.model_switch import switch_model as _switch_model, parse_model_flags
+        from hermes_cli.providers import get_label
 
         raw_args = event.get_command_args().strip()
 
-        # Check for --global flag
-        persist_global = "--global" in raw_args
-        if persist_global:
-            raw_args = raw_args.replace("--global", "").strip()
+        # Parse --provider and --global flags
+        model_input, explicit_provider, persist_global = parse_model_flags(raw_args)
 
         # Read current model/provider from config
         current_model = ""
@@ -3287,7 +3286,7 @@ class GatewayRunner:
         # Check for session override
         source = event.source
         session_key = self._session_key_for_source(source)
-        override = self._session_model_overrides.get(session_key, {})
+        override = getattr(self, "_session_model_overrides", {}).get(session_key, {})
         if override:
             current_model = override.get("model", current_model)
             current_provider = override.get("provider", current_provider)
@@ -3295,37 +3294,50 @@ class GatewayRunner:
             current_api_key = override.get("api_key", current_api_key)
 
         # No args: show current model info
-        if not raw_args:
-            provider_label = _PROVIDER_LABELS.get(current_provider, current_provider)
+        if not model_input and not explicit_provider:
+            provider_label = get_label(current_provider)
             lines = [
-                f"🤖 **Current model:** `{current_model or 'unknown'}`",
-                f"🔌 **Provider:** {provider_label} (`{current_provider}`)",
+                f"Current model: `{current_model or 'unknown'}`",
+                f"Provider: {provider_label} (`{current_provider}`)",
             ]
             if current_base_url:
-                lines.append(f"🌐 **Endpoint:** `{current_base_url}`")
+                lines.append(f"Endpoint: `{current_base_url}`")
+
+            # Show model metadata from models.dev
+            try:
+                from agent.models_dev import get_model_info
+                mi = get_model_info(current_provider, current_model)
+                if mi:
+                    lines.append(f"Context: {mi.context_window:,} tokens")
+                    if mi.max_output:
+                        lines.append(f"Max output: {mi.max_output:,} tokens")
+                    if mi.has_cost_data():
+                        lines.append(f"Cost: {mi.format_cost()}")
+                    lines.append(f"Capabilities: {mi.format_capabilities()}")
+            except Exception:
+                pass
+
             lines.append("")
             lines.append("**Usage:**")
-            lines.append("`/model <model-name>` — switch for this session")
-            lines.append("`/model provider:model` — switch provider + model")
-            lines.append("`/model <name> --global` — persist to config")
-            lines.append("")
-            lines.append("**Examples:**")
-            lines.append("`/model claude-sonnet-4`")
-            lines.append("`/model openai:gpt-4.1`")
-            lines.append("`/model anthropic:claude-sonnet-4 --global`")
+            lines.append("`/model sonnet` — alias")
+            lines.append("`/model sonnet --provider anthropic` — switch provider")
+            lines.append("`/model --provider my-ollama` — auto-detect model")
+            lines.append("`/model sonnet --global` — persist to config")
             return "\n".join(lines)
 
         # Perform the switch
         result = _switch_model(
-            raw_input=raw_args,
+            raw_input=model_input,
             current_provider=current_provider,
             current_model=current_model,
             current_base_url=current_base_url,
             current_api_key=current_api_key,
+            is_global=persist_global,
+            explicit_provider=explicit_provider,
         )
 
         if not result.success:
-            return f"❌ {result.error_message}"
+            return f"Error: {result.error_message}"
 
         # If there's a cached agent, update it in-place
         cached_entry = None
@@ -3348,6 +3360,8 @@ class GatewayRunner:
                 logger.warning("In-place model switch failed for cached agent: %s", exc)
 
         # Store session override so next agent creation uses the new model
+        if not hasattr(self, "_session_model_overrides"):
+            self._session_model_overrides = {}
         self._session_model_overrides[session_key] = {
             "model": result.new_model,
             "provider": result.target_provider,
@@ -3374,23 +3388,33 @@ class GatewayRunner:
             except Exception as e:
                 logger.warning("Failed to persist model switch: %s", e)
 
-        # Build confirmation message
+        # Build confirmation message with full metadata
         provider_label = result.provider_label or result.target_provider
-        lines = [f"✅ Model switched to `{result.new_model}`"]
+        lines = [f"Model switched to `{result.new_model}`"]
         lines.append(f"Provider: {provider_label}")
 
-        # Context window info
-        try:
-            from agent.model_metadata import get_model_context_length
-            ctx = get_model_context_length(
-                result.new_model,
-                base_url=result.base_url or current_base_url,
-                api_key=result.api_key or current_api_key,
-                provider=result.target_provider,
-            )
-            lines.append(f"📏 Context: {ctx:,} tokens")
-        except Exception:
-            pass
+        # Rich metadata from models.dev
+        mi = result.model_info
+        if mi:
+            if mi.context_window:
+                lines.append(f"Context: {mi.context_window:,} tokens")
+            if mi.max_output:
+                lines.append(f"Max output: {mi.max_output:,} tokens")
+            if mi.has_cost_data():
+                lines.append(f"Cost: {mi.format_cost()}")
+            lines.append(f"Capabilities: {mi.format_capabilities()}")
+        else:
+            try:
+                from agent.model_metadata import get_model_context_length
+                ctx = get_model_context_length(
+                    result.new_model,
+                    base_url=result.base_url or current_base_url,
+                    api_key=result.api_key or current_api_key,
+                    provider=result.target_provider,
+                )
+                lines.append(f"Context: {ctx:,} tokens")
+            except Exception:
+                pass
 
         # Cache notice
         cache_enabled = (
@@ -3398,15 +3422,15 @@ class GatewayRunner:
             or result.api_mode == "anthropic_messages"
         )
         if cache_enabled:
-            lines.append("💾 Prompt caching: enabled")
+            lines.append("Prompt caching: enabled")
 
         if result.warning_message:
-            lines.append(f"⚠️ {result.warning_message}")
+            lines.append(f"Warning: {result.warning_message}")
 
         if persist_global:
-            lines.append("💾 Saved to config.yaml (`--global`)")
+            lines.append("Saved to config.yaml (`--global`)")
         else:
-            lines.append("_(session only — add `--global` to persist)_")
+            lines.append("_(session only -- add `--global` to persist)_")
 
         return "\n".join(lines)
 

@@ -3,18 +3,19 @@
 Both the CLI (cli.py) and gateway (gateway/run.py) /model handlers
 share the same core pipeline:
 
-  alias resolution -> parse_model_input -> aggregator slug fixup ->
-  detect_provider -> credential resolution -> normalize model name ->
-  capability lookup -> build result
+  parse flags -> alias resolution -> provider resolution ->
+  credential resolution -> normalize model name ->
+  metadata lookup -> build result
 
 This module ties together the foundation layers:
 
-- ``hermes_cli.providers``        -- canonical provider identity
+- ``agent.models_dev``            -- models.dev catalog, ModelInfo, ProviderInfo
+- ``hermes_cli.providers``        -- canonical provider identity + overlays
 - ``hermes_cli.model_normalize``  -- per-provider name formatting
-- ``agent.models_dev``            -- models.dev catalog & capabilities
 
-Callers handle all platform-specific concerns: state mutation, config
-persistence, output formatting.
+Provider switching uses the ``--provider`` flag exclusively.
+No colon-based ``provider:model`` syntax — colons are reserved for
+OpenRouter variant suffixes (``:free``, ``:extended``, ``:fast``).
 """
 
 from __future__ import annotations
@@ -26,11 +27,13 @@ from typing import List, NamedTuple, Optional
 from hermes_cli.providers import (
     ALIASES,
     LABELS,
-    PROVIDERS,
+    TRANSPORT_TO_API_MODE,
     determine_api_mode,
+    get_label,
     get_provider,
     is_aggregator,
     normalize_provider,
+    resolve_provider_full,
 )
 from hermes_cli.model_normalize import (
     detect_vendor,
@@ -38,7 +41,9 @@ from hermes_cli.model_normalize import (
 )
 from agent.models_dev import (
     ModelCapabilities,
+    ModelInfo,
     get_model_capabilities,
+    get_model_info,
     list_provider_models,
     search_models_dev,
 )
@@ -129,6 +134,7 @@ class ModelSwitchResult:
     provider_label: str = ""
     resolved_via_alias: str = ""
     capabilities: Optional[ModelCapabilities] = None
+    model_info: Optional[ModelInfo] = None
     is_global: bool = False
 
 
@@ -144,14 +150,44 @@ class CustomAutoResult:
 
 
 # ---------------------------------------------------------------------------
-# Known provider names (for parse_model_input colon-splitting)
+# Flag parsing
 # ---------------------------------------------------------------------------
 
-_KNOWN_PROVIDER_NAMES: set[str] = (
-    set(PROVIDERS.keys())
-    | set(ALIASES.keys())
-    | {"custom"}
-)
+def parse_model_flags(raw_args: str) -> tuple[str, str, bool]:
+    """Parse --provider and --global flags from /model command args.
+
+    Returns (model_input, explicit_provider, is_global).
+
+    Examples::
+
+        "sonnet"                         -> ("sonnet", "", False)
+        "sonnet --global"                -> ("sonnet", "", True)
+        "sonnet --provider anthropic"    -> ("sonnet", "anthropic", False)
+        "--provider my-ollama"           -> ("", "my-ollama", False)
+        "sonnet --provider anthropic --global" -> ("sonnet", "anthropic", True)
+    """
+    is_global = False
+    explicit_provider = ""
+
+    # Extract --global
+    if "--global" in raw_args:
+        is_global = True
+        raw_args = raw_args.replace("--global", "").strip()
+
+    # Extract --provider <name>
+    parts = raw_args.split()
+    i = 0
+    filtered: list[str] = []
+    while i < len(parts):
+        if parts[i] == "--provider" and i + 1 < len(parts):
+            explicit_provider = parts[i + 1]
+            i += 2
+        else:
+            filtered.append(parts[i])
+            i += 1
+
+    model_input = " ".join(filtered).strip()
+    return (model_input, explicit_provider, is_global)
 
 
 # ---------------------------------------------------------------------------
@@ -168,10 +204,6 @@ def resolve_alias(
     current provider's models.dev catalog for the first model whose ID
     starts with ``vendor/family`` (or just ``family`` for non-aggregator
     providers).
-
-    Args:
-        raw_input: The user's raw model input (e.g. ``"sonnet"``).
-        current_provider: The currently active Hermes provider id.
 
     Returns:
         ``(provider, resolved_model_id, alias_name)`` if a match is
@@ -202,7 +234,6 @@ def resolve_alias(
                 return (current_provider, model_id, key)
         else:
             # Non-aggregator: bare names -- e.g. "claude-sonnet-4-6"
-            # Match family prefix (dots/hyphens may vary)
             family_lower = family.lower()
             if mid_lower.startswith(family_lower):
                 return (current_provider, model_id, key)
@@ -214,53 +245,12 @@ def _resolve_alias_fallback(
     raw_input: str,
     fallback_providers: tuple[str, ...] = ("openrouter", "nous"),
 ) -> Optional[tuple[str, str, str]]:
-    """Try to resolve an alias on fallback providers.
-
-    Called when the alias exists in MODEL_ALIASES but no matching model
-    was found on the current provider.
-
-    Returns:
-        ``(provider, resolved_model_id, alias_name)`` or ``None``.
-    """
+    """Try to resolve an alias on fallback providers."""
     for provider in fallback_providers:
         result = resolve_alias(raw_input, provider)
         if result is not None:
             return result
     return None
-
-
-# ---------------------------------------------------------------------------
-# parse_model_input -- shared with models.py but using our provider set
-# ---------------------------------------------------------------------------
-
-def parse_model_input(raw: str, current_provider: str) -> tuple[str, str]:
-    """Parse ``/model`` input into ``(provider, model)``.
-
-    Supports ``provider:model`` syntax to switch providers at runtime::
-
-        openrouter:anthropic/claude-sonnet-4.5  ->  ("openrouter", "anthropic/claude-sonnet-4.5")
-        nous:hermes-3                           ->  ("nous", "hermes-3")
-        anthropic/claude-sonnet-4.5             ->  (current_provider, "anthropic/claude-sonnet-4.5")
-        gpt-5.4                                 ->  (current_provider, "gpt-5.4")
-
-    The colon is only treated as a provider delimiter if the left side
-    is a recognized provider name or alias.
-    """
-    stripped = raw.strip()
-    colon = stripped.find(":")
-    if colon > 0:
-        provider_part = stripped[:colon].strip().lower()
-        model_part = stripped[colon + 1:].strip()
-        if provider_part and model_part and provider_part in _KNOWN_PROVIDER_NAMES:
-            # Support custom:name:model triple syntax
-            if provider_part == "custom" and ":" in model_part:
-                second_colon = model_part.find(":")
-                custom_name = model_part[:second_colon].strip()
-                actual_model = model_part[second_colon + 1:].strip()
-                if custom_name and actual_model:
-                    return (f"custom:{custom_name}", actual_model)
-            return (normalize_provider(provider_part), model_part)
-    return (current_provider, stripped)
 
 
 # ---------------------------------------------------------------------------
@@ -274,31 +264,41 @@ def switch_model(
     current_base_url: str = "",
     current_api_key: str = "",
     is_global: bool = False,
+    explicit_provider: str = "",
+    user_providers: dict = None,
 ) -> ModelSwitchResult:
     """Core model-switching pipeline shared between CLI and gateway.
 
     Resolution chain:
-      a. Try alias resolution on current provider
-      b. If alias exists but not on current provider -> try fallback
-         providers (openrouter, nous)
-      c. If on aggregator and input has vendor:model where vendor is NOT
-         a known hermes provider -> convert to vendor/model slug
-      d. Standard parse_model_input()
-      e. If on aggregator, try to resolve within aggregator catalog first
-      f. Fall back to detect_provider_for_model()
-      g. Resolve credentials via resolve_runtime_provider()
-      h. Normalize model name for target provider
-      i. Get capabilities from get_model_capabilities()
-      j. Build result
+
+      If --provider given:
+        a. Resolve provider via resolve_provider_full()
+        b. Resolve credentials
+        c. If model given, resolve alias on target provider or use as-is
+        d. If no model, auto-detect from endpoint
+
+      If no --provider:
+        a. Try alias resolution on current provider
+        b. If alias exists but not on current provider -> fallback
+        c. On aggregator, try vendor/model slug conversion
+        d. Aggregator catalog search
+        e. detect_provider_for_model() as last resort
+        f. Resolve credentials
+        g. Normalize model name for target provider
+
+      Finally:
+        h. Get full model metadata from models.dev
+        i. Build result
 
     Args:
-        raw_input: The user's model input (e.g. "sonnet", "claude-sonnet-4",
-            "zai:glm-5", "custom:local:qwen").
+        raw_input: The model name (after flag parsing).
         current_provider: The currently active provider.
         current_model: The currently active model name.
         current_base_url: The currently active base URL.
         current_api_key: The currently active API key.
-        is_global: Whether this switch should be persisted globally.
+        is_global: Whether to persist the switch.
+        explicit_provider: From --provider flag (empty = no explicit provider).
+        user_providers: The ``providers:`` dict from config.yaml (for user endpoints).
 
     Returns:
         ModelSwitchResult with all information the caller needs.
@@ -311,142 +311,163 @@ def switch_model(
     from hermes_cli.runtime_provider import resolve_runtime_provider
 
     resolved_alias = ""
+    new_model = raw_input.strip()
+    target_provider = current_provider
 
-    # --- Step a: Try alias resolution on current provider ---
-    alias_result = resolve_alias(raw_input, current_provider)
+    # =================================================================
+    # PATH A: Explicit --provider given
+    # =================================================================
+    if explicit_provider:
+        # Resolve the provider
+        pdef = resolve_provider_full(explicit_provider, user_providers)
+        if pdef is None:
+            return ModelSwitchResult(
+                success=False,
+                is_global=is_global,
+                error_message=(
+                    f"Unknown provider '{explicit_provider}'. "
+                    f"Check 'hermes model' for available providers, or define it "
+                    f"in config.yaml under 'providers:'."
+                ),
+            )
 
-    if alias_result is not None:
-        target_provider, new_model, resolved_alias = alias_result
-        logger.debug(
-            "Alias '%s' resolved to %s on %s",
-            resolved_alias, new_model, target_provider,
-        )
-    else:
-        # --- Step b: Alias exists but not on current provider -> fallback ---
-        key = raw_input.strip().lower()
-        if key in MODEL_ALIASES:
-            fallback_result = _resolve_alias_fallback(raw_input)
-            if fallback_result is not None:
-                target_provider, new_model, resolved_alias = fallback_result
-                logger.debug(
-                    "Alias '%s' resolved via fallback to %s on %s",
-                    resolved_alias, new_model, target_provider,
-                )
+        target_provider = pdef.id
+
+        # If no model specified, try auto-detect from endpoint
+        if not new_model:
+            if pdef.base_url:
+                from hermes_cli.runtime_provider import _auto_detect_local_model
+                detected = _auto_detect_local_model(pdef.base_url)
+                if detected:
+                    new_model = detected
+                else:
+                    return ModelSwitchResult(
+                        success=False,
+                        target_provider=target_provider,
+                        provider_label=pdef.name,
+                        is_global=is_global,
+                        error_message=(
+                            f"No model detected on {pdef.name} ({pdef.base_url}). "
+                            f"Specify the model explicitly: /model <model-name> --provider {explicit_provider}"
+                        ),
+                    )
             else:
-                # Alias exists but no model found anywhere
-                identity = MODEL_ALIASES[key]
                 return ModelSwitchResult(
                     success=False,
+                    target_provider=target_provider,
+                    provider_label=pdef.name,
                     is_global=is_global,
                     error_message=(
-                        f"Alias '{key}' maps to {identity.vendor}/{identity.family} "
-                        f"but no matching model was found in any provider catalog. "
-                        f"Try specifying the full model name."
+                        f"Provider '{pdef.name}' has no base URL configured. "
+                        f"Specify a model: /model <model-name> --provider {explicit_provider}"
                     ),
                 )
+
+        # Resolve alias on the TARGET provider
+        alias_result = resolve_alias(new_model, target_provider)
+        if alias_result is not None:
+            _, new_model, resolved_alias = alias_result
+
+    # =================================================================
+    # PATH B: No explicit provider — resolve from model input
+    # =================================================================
+    else:
+        # --- Step a: Try alias resolution on current provider ---
+        alias_result = resolve_alias(raw_input, current_provider)
+
+        if alias_result is not None:
+            target_provider, new_model, resolved_alias = alias_result
+            logger.debug(
+                "Alias '%s' resolved to %s on %s",
+                resolved_alias, new_model, target_provider,
+            )
         else:
-            # --- Step c: aggregator vendor:model fixup ---
-            # If on an aggregator and the input looks like vendor:model
-            # where vendor is NOT a known Hermes provider, treat the colon
-            # as a vendor/model separator instead of provider:model.
-            target_provider = current_provider
-            new_model = raw_input.strip()
-
-            colon_pos = raw_input.find(":")
-            if colon_pos > 0 and is_aggregator(current_provider):
-                left = raw_input[:colon_pos].strip().lower()
-                right = raw_input[colon_pos + 1:].strip()
-                if left and right and left not in _KNOWN_PROVIDER_NAMES:
-                    # Convert vendor:model -> vendor/model for aggregator
-                    new_model = f"{left}/{right}"
-                    target_provider = current_provider
+            # --- Step b: Alias exists but not on current provider -> fallback ---
+            key = raw_input.strip().lower()
+            if key in MODEL_ALIASES:
+                fallback_result = _resolve_alias_fallback(raw_input)
+                if fallback_result is not None:
+                    target_provider, new_model, resolved_alias = fallback_result
                     logger.debug(
-                        "Converted vendor:model '%s' to aggregator slug '%s'",
-                        raw_input, new_model,
+                        "Alias '%s' resolved via fallback to %s on %s",
+                        resolved_alias, new_model, target_provider,
                     )
-
-            # --- Step d: Standard parse_model_input() ---
-            if new_model == raw_input.strip():
-                target_provider, new_model = parse_model_input(
-                    raw_input, current_provider,
-                )
-
-            # --- Step d2: If parsed model is a known alias, resolve it
-            #     on the TARGET provider.  This handles "anthropic:sonnet"
-            #     -> resolve "sonnet" alias on anthropic provider.
-            model_as_alias = new_model.strip().lower()
-            if model_as_alias in MODEL_ALIASES and target_provider != current_provider:
-                alias_on_target = resolve_alias(new_model, target_provider)
-                if alias_on_target is not None:
-                    _, new_model, resolved_alias = alias_on_target
-                    logger.debug(
-                        "Resolved alias '%s' on target provider %s -> %s",
-                        model_as_alias, target_provider, new_model,
+                else:
+                    identity = MODEL_ALIASES[key]
+                    return ModelSwitchResult(
+                        success=False,
+                        is_global=is_global,
+                        error_message=(
+                            f"Alias '{key}' maps to {identity.vendor}/{identity.family} "
+                            f"but no matching model was found in any provider catalog. "
+                            f"Try specifying the full model name."
+                        ),
                     )
-
-    # --- Step e: If on aggregator, try to resolve within aggregator catalog ---
-    if is_aggregator(target_provider) and not resolved_alias:
-        catalog = list_provider_models(target_provider)
-        if catalog:
-            new_model_lower = new_model.lower()
-            # Exact match
-            for mid in catalog:
-                if mid.lower() == new_model_lower:
-                    new_model = mid
-                    break
             else:
-                # Try matching bare name against catalog entries
+                # --- Step c: On aggregator, convert vendor:model to vendor/model ---
+                colon_pos = raw_input.find(":")
+                if colon_pos > 0 and is_aggregator(current_provider):
+                    left = raw_input[:colon_pos].strip().lower()
+                    right = raw_input[colon_pos + 1:].strip()
+                    if left and right:
+                        # Colons become slashes for aggregator slugs
+                        new_model = f"{left}/{right}"
+                        logger.debug(
+                            "Converted vendor:model '%s' to aggregator slug '%s'",
+                            raw_input, new_model,
+                        )
+
+        # --- Step d: Aggregator catalog search ---
+        if is_aggregator(target_provider) and not resolved_alias:
+            catalog = list_provider_models(target_provider)
+            if catalog:
+                new_model_lower = new_model.lower()
                 for mid in catalog:
-                    if "/" in mid:
-                        _, bare = mid.split("/", 1)
-                        if bare.lower() == new_model_lower:
-                            new_model = mid
-                            break
+                    if mid.lower() == new_model_lower:
+                        new_model = mid
+                        break
+                else:
+                    for mid in catalog:
+                        if "/" in mid:
+                            _, bare = mid.split("/", 1)
+                            if bare.lower() == new_model_lower:
+                                new_model = mid
+                                break
 
-    # --- Step f: Fall back to detect_provider_for_model() ---
-    # Only auto-detect when no explicit provider was given and we're not
-    # on a custom endpoint.
-    _base = current_base_url or ""
-    is_custom = current_provider == "custom" or (
-        "localhost" in _base or "127.0.0.1" in _base
-    )
+        # --- Step e: detect_provider_for_model() as last resort ---
+        _base = current_base_url or ""
+        is_custom = current_provider in ("custom", "local") or (
+            "localhost" in _base or "127.0.0.1" in _base
+        )
 
-    if (
-        target_provider == current_provider
-        and not is_custom
-        and not resolved_alias
-    ):
-        detected = detect_provider_for_model(new_model, current_provider)
-        if detected:
-            target_provider, new_model = detected
+        if (
+            target_provider == current_provider
+            and not is_custom
+            and not resolved_alias
+        ):
+            detected = detect_provider_for_model(new_model, current_provider)
+            if detected:
+                target_provider, new_model = detected
+
+    # =================================================================
+    # COMMON PATH: Resolve credentials, normalize, get metadata
+    # =================================================================
 
     provider_changed = target_provider != current_provider
+    provider_label = get_label(target_provider)
 
-    # --- Step g: Resolve credentials ---
+    # --- Resolve credentials ---
     api_key = current_api_key
     base_url = current_base_url
     api_mode = ""
-    provider_label = LABELS.get(target_provider, target_provider)
 
-    if provider_changed:
+    if provider_changed or explicit_provider:
         try:
             runtime = resolve_runtime_provider(requested=target_provider)
             api_key = runtime.get("api_key", "")
             base_url = runtime.get("base_url", "")
             api_mode = runtime.get("api_mode", "")
         except Exception as e:
-            if target_provider == "custom":
-                return ModelSwitchResult(
-                    success=False,
-                    target_provider=target_provider,
-                    provider_label=provider_label,
-                    is_global=is_global,
-                    error_message=(
-                        "No custom endpoint configured. Set model.base_url "
-                        "in config.yaml, or set OPENAI_BASE_URL in .env, "
-                        "or run: hermes setup -> Custom OpenAI-compatible endpoint"
-                    ),
-                )
             return ModelSwitchResult(
                 success=False,
                 target_provider=target_provider,
@@ -458,7 +479,6 @@ def switch_model(
                 ),
             )
     else:
-        # Re-resolve for current provider to get accurate base_url
         try:
             runtime = resolve_runtime_provider(requested=current_provider)
             api_key = runtime.get("api_key", "")
@@ -467,7 +487,7 @@ def switch_model(
         except Exception:
             pass
 
-    # --- Step h: Normalize model name for target provider ---
+    # --- Normalize model name for target provider ---
     new_model = normalize_model_for_provider(new_model, target_provider)
 
     # --- Validate ---
@@ -498,17 +518,20 @@ def switch_model(
         )
 
     # --- OpenCode api_mode override ---
-    if target_provider in {"opencode-zen", "opencode-go"}:
+    if target_provider in {"opencode-zen", "opencode-go", "opencode", "opencode-go"}:
         api_mode = opencode_model_api_mode(target_provider, new_model)
 
     # --- Determine api_mode if not already set ---
     if not api_mode:
         api_mode = determine_api_mode(target_provider, base_url)
 
-    # --- Step i: Get capabilities from models.dev ---
+    # --- Get capabilities (legacy) ---
     capabilities = get_model_capabilities(target_provider, new_model)
 
-    # --- Step j: Build result ---
+    # --- Get full model info from models.dev ---
+    model_info = get_model_info(target_provider, new_model)
+
+    # --- Build result ---
     return ModelSwitchResult(
         success=True,
         new_model=new_model,
@@ -521,6 +544,7 @@ def switch_model(
         provider_label=provider_label,
         resolved_via_alias=resolved_alias,
         capabilities=capabilities,
+        model_info=model_info,
         is_global=is_global,
     )
 
@@ -530,18 +554,7 @@ def switch_model(
 # ---------------------------------------------------------------------------
 
 def suggest_models(raw_input: str, limit: int = 3) -> List[str]:
-    """Return fuzzy model suggestions for a (possibly misspelled) input.
-
-    Searches the models.dev catalog across all providers and returns up
-    to *limit* model IDs that best match *raw_input*.
-
-    Args:
-        raw_input: The user's raw model input.
-        limit: Maximum number of suggestions.
-
-    Returns:
-        List of model ID strings (may be empty).
-    """
+    """Return fuzzy model suggestions for a (possibly misspelled) input."""
     query = raw_input.strip()
     if not query:
         return []
@@ -550,15 +563,8 @@ def suggest_models(raw_input: str, limit: int = 3) -> List[str]:
     suggestions: list[str] = []
     for r in results:
         mid = r.get("model_id", "")
-        prov = r.get("provider", "")
         if mid:
-            # For aggregator providers, model_id already has vendor/ prefix
-            if prov and is_aggregator(prov):
-                suggestions.append(mid)
-            elif prov:
-                suggestions.append(f"{prov}:{mid}")
-            else:
-                suggestions.append(mid)
+            suggestions.append(mid)
 
     return suggestions[:limit]
 
@@ -568,10 +574,7 @@ def suggest_models(raw_input: str, limit: int = 3) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def switch_to_custom_provider() -> CustomAutoResult:
-    """Handle bare '/model custom' -- resolve endpoint and auto-detect model.
-
-    Returns a result object; the caller handles persistence and output.
-    """
+    """Handle bare '/model --provider custom' — resolve endpoint and auto-detect model."""
     from hermes_cli.runtime_provider import (
         resolve_runtime_provider,
         _auto_detect_local_model,
@@ -607,7 +610,7 @@ def switch_to_custom_provider() -> CustomAutoResult:
             error_message=(
                 f"Custom endpoint at {cust_base} is reachable but no single "
                 f"model was auto-detected. Specify the model explicitly: "
-                f"/model custom:<model-name>"
+                f"/model <model-name> --provider custom"
             ),
         )
 

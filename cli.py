@@ -3523,51 +3523,63 @@ class HermesCLI:
         """Handle /model command — switch model for this session.
 
         Supports:
-          /model                     — show current model + usage hints
-          /model <name>              — switch for this session only
-          /model <name> --global     — switch and persist to config.yaml
-          /model provider:model      — switch provider + model
+          /model                              — show current model + usage hints
+          /model <name>                       — switch for this session only
+          /model <name> --global              — switch and persist to config.yaml
+          /model <name> --provider <provider> — switch provider + model
+          /model --provider <provider>        — switch to provider, auto-detect model
         """
-        from hermes_cli.model_switch import switch_model, ModelSwitchResult
-        from hermes_cli.models import _PROVIDER_LABELS
+        from hermes_cli.model_switch import switch_model, parse_model_flags
+        from hermes_cli.providers import get_label
 
         # Parse args from the original command
         parts = cmd_original.split(None, 1)  # split off '/model'
         raw_args = parts[1].strip() if len(parts) > 1 else ""
 
-        # Check for --global flag
-        persist_global = "--global" in raw_args
-        if persist_global:
-            raw_args = raw_args.replace("--global", "").strip()
+        # Parse --provider and --global flags
+        model_input, explicit_provider, persist_global = parse_model_flags(raw_args)
 
-        # No args: show current model info and usage
-        if not raw_args:
+        # No args at all: show current model info and usage
+        if not model_input and not explicit_provider:
             model_display = self.model or "unknown"
-            provider_display = _PROVIDER_LABELS.get(self.provider, self.provider) if self.provider else "unknown"
+            provider_display = get_label(self.provider) if self.provider else "unknown"
             _cprint(f"  Current model: {model_display}")
             _cprint(f"  Provider:      {provider_display} ({self.provider})")
             if self.base_url:
                 _cprint(f"  Endpoint:      {self.base_url}")
+
+            # Show model metadata if available
+            try:
+                from agent.models_dev import get_model_info
+                mi = get_model_info(self.provider, self.model)
+                if mi:
+                    _cprint(f"  Context:       {mi.context_window:,} tokens")
+                    if mi.max_output:
+                        _cprint(f"  Max output:    {mi.max_output:,} tokens")
+                    if mi.has_cost_data():
+                        _cprint(f"  Cost:          {mi.format_cost()}")
+                    _cprint(f"  Capabilities:  {mi.format_capabilities()}")
+            except Exception:
+                pass
+
             _cprint("")
-            _cprint("  Aliases:   /model sonnet")
-            _cprint("             /model opus")
-            _cprint("             /model gpt5")
-            _cprint("             /model gemini")
-            _cprint("")
-            _cprint("  Full name: /model anthropic/claude-sonnet-4.5")
-            _cprint("  Provider:  /model anthropic:sonnet      (switch to native Anthropic)")
-            _cprint("             /model deepseek:deepseek-chat (switch to native DeepSeek)")
-            _cprint("  Persist:   /model sonnet --global        (save to config)")
-            _cprint("  Custom:    /model custom:my-local-model")
+            _cprint("  Usage:")
+            _cprint("    /model sonnet                            (alias)")
+            _cprint("    /model anthropic/claude-sonnet-4.6       (full name)")
+            _cprint("    /model sonnet --provider anthropic       (switch provider)")
+            _cprint("    /model --provider my-ollama              (auto-detect model)")
+            _cprint("    /model sonnet --global                   (persist to config)")
             return
 
         # Perform the switch
         result = switch_model(
-            raw_input=raw_args,
+            raw_input=model_input,
             current_provider=self.provider or "",
             current_model=self.model or "",
             current_base_url=self.base_url or "",
             current_api_key=self.api_key or "",
+            is_global=persist_global,
+            explicit_provider=explicit_provider,
         )
 
         if not result.success:
@@ -3598,23 +3610,34 @@ class HermesCLI:
             except Exception as exc:
                 _cprint(f"  ⚠ Agent swap failed ({exc}); change applied to next session.")
 
-        # Display confirmation
+        # Display confirmation with full metadata
         provider_label = result.provider_label or result.target_provider
         _cprint(f"  ✓ Model switched: {result.new_model}")
         _cprint(f"    Provider: {provider_label}")
 
-        # Show context window info
-        try:
-            from agent.model_metadata import get_model_context_length
-            ctx = get_model_context_length(
-                result.new_model,
-                base_url=result.base_url or self.base_url,
-                api_key=result.api_key or self.api_key,
-                provider=result.target_provider,
-            )
-            _cprint(f"    Context: {ctx:,} tokens")
-        except Exception:
-            pass
+        # Rich metadata from models.dev
+        mi = result.model_info
+        if mi:
+            if mi.context_window:
+                _cprint(f"    Context: {mi.context_window:,} tokens")
+            if mi.max_output:
+                _cprint(f"    Max output: {mi.max_output:,} tokens")
+            if mi.has_cost_data():
+                _cprint(f"    Cost: {mi.format_cost()}")
+            _cprint(f"    Capabilities: {mi.format_capabilities()}")
+        else:
+            # Fallback to old context length lookup
+            try:
+                from agent.model_metadata import get_model_context_length
+                ctx = get_model_context_length(
+                    result.new_model,
+                    base_url=result.base_url or self.base_url,
+                    api_key=result.api_key or self.api_key,
+                    provider=result.target_provider,
+                )
+                _cprint(f"    Context: {ctx:,} tokens")
+            except Exception:
+                pass
 
         # Cache notice
         cache_enabled = (
