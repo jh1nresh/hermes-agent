@@ -4961,6 +4961,15 @@ class GatewayRunner:
         logger.info("User denied %d dangerous command(s) via /deny", count)
         return f"❌ Command{'s' if count > 1 else ''} denied{count_msg}."
 
+    # Platforms where /update is allowed.  ACP, API server, and webhooks are
+    # programmatic interfaces that should not trigger system updates.
+    _UPDATE_ALLOWED_PLATFORMS = frozenset({
+        Platform.TELEGRAM, Platform.DISCORD, Platform.SLACK, Platform.WHATSAPP,
+        Platform.SIGNAL, Platform.MATTERMOST, Platform.MATRIX,
+        Platform.HOMEASSISTANT, Platform.EMAIL, Platform.SMS, Platform.DINGTALK,
+        Platform.FEISHU, Platform.WECOM, Platform.LOCAL,
+    })
+
     async def _handle_update_command(self, event: MessageEvent) -> str:
         """Handle /update command — update Hermes Agent to the latest version.
 
@@ -4974,6 +4983,11 @@ class GatewayRunner:
         import subprocess
         from datetime import datetime
         from hermes_cli.config import is_managed, format_managed_message
+
+        # Block non-messaging platforms (API server, webhooks, ACP)
+        platform = event.source.platform
+        if platform not in self._UPDATE_ALLOWED_PLATFORMS:
+            return "✗ /update is only available from messaging platforms. Run `hermes update` from the terminal."
 
         if is_managed():
             return f"✗ {format_managed_message('update Hermes Agent')}"
