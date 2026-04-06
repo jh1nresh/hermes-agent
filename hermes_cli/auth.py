@@ -2462,14 +2462,14 @@ def _nous_device_code_login(
     """Run the Nous device-code flow and return full OAuth state without persisting."""
     pconfig = PROVIDER_REGISTRY["nous"]
     portal_base_url = (
-        portal_base_url
-        or os.getenv("HERMES_PORTAL_BASE_URL")
+        os.getenv("HERMES_PORTAL_BASE_URL")
         or os.getenv("NOUS_PORTAL_BASE_URL")
+        or portal_base_url
         or pconfig.portal_base_url
     ).rstrip("/")
     requested_inference_url = (
-        inference_base_url
-        or os.getenv("NOUS_INFERENCE_BASE_URL")
+        os.getenv("NOUS_INFERENCE_BASE_URL")
+        or inference_base_url
         or pconfig.inference_base_url
     ).rstrip("/")
     client_id = client_id or pconfig.client_id
