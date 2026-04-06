@@ -124,6 +124,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
                subcommands=("connect", "disconnect", "status")),
     CommandDef("plugins", "List installed plugins and their status",
                "Tools & Skills", cli_only=True),
+    CommandDef("workspace", "Workspace status, search, index, and root management",
+               "Tools & Skills", cli_only=True,
+               args_hint="[status|index|list|search|retrieve|roots]",
+               subcommands=("status", "index", "list", "search", "retrieve", "roots")),
 
     # Info
     CommandDef("commands", "Browse all commands and skills (paginated)", "Info",

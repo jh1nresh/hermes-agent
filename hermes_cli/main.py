@@ -5486,6 +5486,46 @@ Examples:
     logs_parser.set_defaults(func=cmd_logs)
 
     # =========================================================================
+    # hermes workspace
+    # =========================================================================
+    workspace_parser = subparsers.add_parser(
+        "workspace",
+        help="Manage workspace knowledgebase and RAG",
+        description="Inspect, index, search, and manage workspace roots for RAG retrieval",
+    )
+    workspace_subs = workspace_parser.add_subparsers(dest="workspace_action")
+    workspace_subs.add_parser("status", help="Show workspace status and root configuration")
+    ws_index = workspace_subs.add_parser("index", help="Rebuild chunk index for all workspace roots")
+    ws_list = workspace_subs.add_parser("list", help="List workspace files")
+    ws_list.add_argument("path", nargs="?", default="", help="Subpath to scope listing")
+    ws_list.add_argument("--recursive", action="store_true", default=True, help="Recurse into subdirectories")
+    ws_list.add_argument("--limit", type=int, default=20, help="Max entries to return")
+    ws_list.add_argument("--offset", type=int, default=0, help="Skip first N entries")
+    ws_search = workspace_subs.add_parser("search", help="Search workspace files by regex")
+    ws_search.add_argument("query", help="Regex search query")
+    ws_search.add_argument("--path", default="", help="Subpath to scope search")
+    ws_search.add_argument("--file-glob", dest="file_glob", default=None, help="Filename glob filter, e.g. '*.md'")
+    ws_search.add_argument("--limit", type=int, default=10, help="Max matches to return")
+    ws_search.add_argument("--offset", type=int, default=0, help="Skip first N matches")
+    ws_retrieve = workspace_subs.add_parser("retrieve", help="Hybrid RAG retrieval from workspace index")
+    ws_retrieve.add_argument("query", help="Retrieval query")
+    ws_retrieve.add_argument("--limit", type=int, default=8, help="Max results to return")
+    ws_roots = workspace_subs.add_parser("roots", help="Manage additional workspace roots")
+    ws_roots_subs = ws_roots.add_subparsers(dest="root_action")
+    ws_roots_subs.add_parser("list", help="List active workspace roots")
+    ws_roots_add = ws_roots_subs.add_parser("add", help="Add an additional workspace root")
+    ws_roots_add.add_argument("root_path", help="Directory path to add")
+    ws_roots_add.add_argument("--recursive", action="store_true", default=False, help="Index subdirectories recursively")
+    ws_roots_remove = ws_roots_subs.add_parser("remove", help="Remove a workspace root")
+    ws_roots_remove.add_argument("identifier", help="Path or label of the root to remove")
+
+    def cmd_workspace(args):
+        from hermes_cli.workspace import workspace_command
+        workspace_command(args)
+
+    workspace_parser.set_defaults(func=cmd_workspace)
+
+    # =========================================================================
     # Parse and execute
     # =========================================================================
     # Pre-process argv so unquoted multi-word session names after -c / -r

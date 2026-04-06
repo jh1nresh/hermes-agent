@@ -426,6 +426,19 @@ def build_welcome_banner(console: Console, model: str, cwd: str,
     except Exception:
         pass  # Never break the banner over a profiles.py bug
 
+    # Show active workspace roots
+    try:
+        from agent.workspace import get_workspace_root_specs
+        from hermes_cli.config import load_config as _load_config_for_banner
+        _ws_cfg = _load_config_for_banner()
+        if (_ws_cfg.get("workspace", {}) or {}).get("enabled", True):
+            _ws_roots = get_workspace_root_specs(_ws_cfg)
+            if _ws_roots:
+                _root_labels = [r.label for r in _ws_roots]
+                right_lines.append(f"[bold {accent}]Workspace:[/] [{text}]{', '.join(_root_labels)}[/]")
+    except Exception:
+        pass  # Never break the banner over a workspace bug
+
     right_lines.append(f"[dim {dim}]{' · '.join(summary_parts)}[/]")
 
     # Update check — use prefetched result if available

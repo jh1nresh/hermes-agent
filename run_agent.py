@@ -6907,6 +6907,17 @@ class AIAgent:
                 _should_review_memory = True
                 self._turns_since_memory = 0
 
+        # ── Workspace RAG context (turn-scoped, cache-safe) ──
+        # Appends relevant workspace chunks to this turn's user message only.
+        # Never touches the system prompt or cached prefix.
+        try:
+            from agent.workspace import workspace_context_for_turn
+            _ws_ctx = workspace_context_for_turn(user_message)
+            if _ws_ctx:
+                user_message = user_message + "\n\n" + _ws_ctx
+        except Exception:
+            pass  # graceful degradation — workspace not configured or deps missing
+
         # Add user message
         user_msg = {"role": "user", "content": user_message}
         messages.append(user_msg)
