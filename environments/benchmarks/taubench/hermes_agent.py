@@ -1,222 +1,324 @@
 """
-HermesAgent for tau-bench evaluation.
+HermesAgent for tau2-bench evaluation.
 
-Implements the tau-bench Agent interface using atroposlib's OpenAIServer for
-inference — the same server HermesAgentLoop uses in training environments.
-Tool execution goes through tau-bench's env.step() so the environment's
-state machine, user simulator, and reward computation work correctly.
+Implements the tau2 HalfDuplexAgent interface using litellm with OpenRouter,
+matching the inference path used across the rest of the Hermes Agent codebase.
 
 Usage:
     python environments/benchmarks/taubench/run_eval.py \\
-        --model anthropic/claude-sonnet-4-5 --base-url openrouter --env retail
+        --model anthropic/claude-sonnet-4-5 \\
+        --base-url openrouter \\
+        --env retail
 """
 
-import asyncio
 import json
-import logging
+import os
 import sys
-import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
-# Ensure hermes-agent repo root is on sys.path
+import litellm
+from pydantic import BaseModel
+
 _repo_root = Path(__file__).resolve().parent.parent.parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from tau_bench.agents.base import Agent
-from tau_bench.envs.base import Env
-from tau_bench.types import Action, SolveResult, RESPOND_ACTION_NAME
+from environments.tool_call_parsers import get_parser
 
-logger = logging.getLogger(__name__)
+from tau2.agent.base_agent import HalfDuplexAgent, ValidAgentInputMessage
+from tau2.data_model.message import (
+    AssistantMessage,
+    Message,
+    MultiToolMessage,
+    SystemMessage,
+    ToolCall,
+    ToolMessage,
+    UserMessage,
+)
+from tau2.environment.tool import Tool
 
 
-def _message_to_action(message: Dict[str, Any]) -> Action:
-    """Convert an OpenAI-format assistant message to a tau-bench Action."""
-    tool_calls = message.get("tool_calls")
-    if tool_calls and len(tool_calls) > 0 and tool_calls[0].get("function") is not None:
-        tc = tool_calls[0]
-        return Action(
-            name=tc["function"]["name"],
-            kwargs=json.loads(tc["function"]["arguments"]),
-        )
-    return Action(
-        name=RESPOND_ACTION_NAME,
-        kwargs={"content": message.get("content") or ""},
+class HermesAgentState(BaseModel):
+    system_messages: list[SystemMessage]
+    messages: list
+
+
+class HermesAgent(HalfDuplexAgent[HermesAgentState]):
+    """
+    tau2 HalfDuplexAgent backed by litellm, using OpenRouter (or any
+    OpenAI-compatible endpoint).
+
+    Registered as "hermes_agent" in the tau2 registry by run_eval.py.
+    """
+
+    SYSTEM_PROMPT = (
+        "You are a customer service agent that helps the user according to the "
+        "<policy> provided below.\n"
+        "In each turn you can either:\n"
+        "- Send a message to the user.\n"
+        "- Make a tool call.\n"
+        "You cannot do both at the same time.\n\n"
+        "Try to be helpful and always follow the policy. "
+        "Always make sure you generate valid JSON only.\n\n"
+        "<policy>\n{domain_policy}\n</policy>"
     )
 
-
-def _normalize_tool_calls(tool_calls) -> List[Dict[str, Any]]:
-    """Normalize tool_calls from OpenAI SDK objects or dicts to plain dicts."""
-    if not tool_calls:
-        return []
-    result = []
-    for tc in tool_calls:
-        if isinstance(tc, dict):
-            result.append({
-                "id": tc.get("id", f"call_{uuid.uuid4().hex[:8]}"),
-                "type": "function",
-                "function": {
-                    "name": tc.get("function", {}).get("name", ""),
-                    "arguments": tc.get("function", {}).get("arguments", "{}"),
-                },
-            })
-        else:
-            result.append({
-                "id": getattr(tc, "id", f"call_{uuid.uuid4().hex[:8]}"),
-                "type": "function",
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            })
-    return result
-
-class HermesAgent(Agent):
-    """
-    tau-bench Agent using atroposlib's OpenAIServer for inference.
-
-    Uses the same OpenAIServer abstraction as HermesAgentLoop so inference
-    goes through the same OpenAI-compatible client used in training.
-    Tool execution goes through tau-bench's env.step() — tau-bench tools are
-    retail/airline state-machine operations, not hermes tools.
-
-    Args:
-        server: atroposlib OpenAIServer instance (from build_server() in run_eval.py).
-        system_prompt: Optional system prompt override. Defaults to env.wiki.
-        temperature: Sampling temperature.
-        max_tokens: Optional token limit per generation step.
-        extra_body: Extra params forwarded to chat_completion (e.g. OR preferences).
-    """
+    # System prompt variant for qwen3_coder tool format — tools are embedded
+    # directly in the system prompt as <tools> XML instead of passed via the
+    # OpenAI tools= parameter.
+    SYSTEM_PROMPT_QWEN3_CODER = (
+        "You are a customer service agent that helps the user according to the "
+        "<policy> provided below.\n"
+        "In each turn you can either:\n"
+        "- Send a message to the user.\n"
+        "- Make a tool call.\n"
+        "You cannot do both at the same time.\n\n"
+        "Try to be helpful and always follow the policy. "
+        "Always make sure you generate valid JSON only.\n\n"
+        "You may call one or more functions to assist with the user query.\n\n"
+        "You are provided with function signatures within <tools></tools> XML tags:\n"
+        "<tools>\n{tools_json}\n</tools>\n\n"
+        "<policy>\n{domain_policy}\n</policy>"
+    )
 
     def __init__(
         self,
-        server,
-        system_prompt: Optional[str] = None,
+        tools: list[Tool],
+        domain_policy: str,
+        model: str,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: Optional[int] = None,
-        extra_body: Optional[Dict[str, Any]] = None,
+        top_p: Optional[float] = None,
+        thinking: bool = False,
+        tool_parser: Optional[str] = None,
     ):
-        self.server = server
-        self.system_prompt = system_prompt
+        super().__init__(tools=tools, domain_policy=domain_policy)
+        self.model = model
+        self.base_url = base_url
+        self.api_key = api_key
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.extra_body = extra_body
+        self.top_p = top_p
+        self.thinking = thinking
+        self.tool_parser = tool_parser
+        self._parser = get_parser(tool_parser) if tool_parser else None
 
-    def solve(
-        self,
-        env: Env,
-        task_index: Optional[int] = None,
-        max_num_steps: int = 30,
-    ) -> SolveResult:
-        """Synchronous entry point required by tau-bench. Runs the async loop."""
-        return asyncio.run(self._solve_async(env, task_index, max_num_steps))
-
-    async def _solve_async(
-        self,
-        env: Env,
-        task_index: Optional[int],
-        max_num_steps: int,
-    ) -> SolveResult:
-        env_reset = env.reset(task_index=task_index)
-        obs = env_reset.observation
-        info = env_reset.info.model_dump()
-        reward = 0.0
-
-        # Patch the user sim's generate_next_message to guard against None returns.
-        # tau-bench's user sim crashes env.step() when the LLM returns None content
-        # (e.g. emits a tool call instead of text). This wraps it to return "" instead.
-        _orig_gen = env.user.generate_next_message
-        def _safe_gen(messages):
-            result = _orig_gen(messages)
-            return result if result is not None else ""
-        env.user.generate_next_message = _safe_gen
-
-        system_content = self.system_prompt if self.system_prompt is not None else env.wiki
-        messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": obs},
-        ]
-
-        for step in range(max_num_steps):
-            chat_kwargs: Dict[str, Any] = {
-                "messages": messages,
-                "n": 1,
-                "temperature": self.temperature,
-                "tools": env.tools_info,
+        # OpenRouter requires specific headers; pass them via litellm extra_headers
+        self._extra_headers: dict = {}
+        if base_url and "openrouter" in base_url.lower():
+            self._extra_headers = {
+                "HTTP-Referer": "https://hermes-agent.nousresearch.com",
+                "X-Title": "Hermes Agent",
             }
-            if self.max_tokens is not None:
-                chat_kwargs["max_tokens"] = self.max_tokens
-            if self.extra_body:
-                chat_kwargs["extra_body"] = self.extra_body
 
-            try:
-                response = await self.server.chat_completion(**chat_kwargs)
-            except Exception as e:
-                logger.error("chat_completion failed on step %d: %s", step, e)
-                break
+    @property
+    def system_prompt(self) -> str:
+        if self.tool_parser == "qwen3_coder" and self.tools:
+            tools_json = json.dumps(
+                [t.openai_schema for t in self.tools], indent=2, ensure_ascii=False
+            )
+            return self.SYSTEM_PROMPT_QWEN3_CODER.format(
+                tools_json=tools_json,
+                domain_policy=self.domain_policy,
+            )
+        return self.SYSTEM_PROMPT.format(domain_policy=self.domain_policy)
 
-            if not response or not response.choices:
-                logger.warning("Empty response on step %d", step)
-                break
-
-            assistant_msg_raw = response.choices[0].message
-
-            if hasattr(assistant_msg_raw, "model_dump"):
-                assistant_msg = assistant_msg_raw.model_dump()
-                # model_dump() returns content=None when absent; normalize to ""
-                if assistant_msg.get("content") is None:
-                    assistant_msg["content"] = ""
-            else:
-                assistant_msg = {
-                    "role": "assistant",
-                    "content": assistant_msg_raw.content or "",
-                    "tool_calls": _normalize_tool_calls(
-                        getattr(assistant_msg_raw, "tool_calls", None)
-                    ),
-                }
-
-            action = _message_to_action(assistant_msg)
-            env_response = env.step(action)
-            reward = env_response.reward
-            info = {**info, **env_response.info.model_dump()}
-
-            if action.name != RESPOND_ACTION_NAME:
-                tool_calls = assistant_msg.get("tool_calls") or []
-                messages.append({
-                    "role": "assistant",
-                    "content": assistant_msg.get("content") or "",
-                    "tool_calls": tool_calls[:1],
-                })
-                if tool_calls:
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_calls[0].get("id", f"call_{uuid.uuid4().hex[:8]}"),
-                        "name": action.name,
-                        "content": env_response.observation,
-                    })
-                else:
-                    messages.append({"role": "user", "content": env_response.observation})
-            else:
-                messages.append({
-                    "role": "assistant",
-                    "content": assistant_msg.get("content") or "",
-                })
-                messages.append({"role": "user", "content": env_response.observation})
-
-            if env_response.done:
-                logger.info("Task complete at step %d, reward=%.3f", step + 1, reward)
-                break
-
-        # Close the underlying httpx client before the event loop shuts down.
-        # Without this, asyncio.run() closes the loop while httpx still has open
-        # connections, producing noisy "Event loop is closed" errors on cleanup.
-        if hasattr(self.server, "openai") and hasattr(self.server.openai, "close"):
-            await self.server.openai.close()
-
-        return SolveResult(
-            reward=reward,
-            info=info,
-            messages=messages,
-            total_cost=None,
+    def get_init_state(
+        self, message_history: Optional[list[Message]] = None
+    ) -> HermesAgentState:
+        return HermesAgentState(
+            system_messages=[SystemMessage(role="system", content=self.system_prompt)],
+            messages=list(message_history or []),
         )
+
+    def generate_next_message(
+        self, message: ValidAgentInputMessage, state: HermesAgentState
+    ) -> tuple[AssistantMessage, HermesAgentState]:
+        # Append incoming message(s) to history
+        if isinstance(message, MultiToolMessage):
+            state.messages.extend(message.tool_messages)
+        else:
+            state.messages.append(message)
+
+        # Build litellm-compatible message list
+        all_messages = state.system_messages + state.messages
+        lm_messages = [_to_litellm_message(m) for m in all_messages]
+
+        kwargs = dict(
+            model=self.model,
+            messages=lm_messages,
+            temperature=self.temperature,
+        )
+        if self.tools:
+            kwargs["tools"] = [t.openai_schema for t in self.tools]
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
+        if self.top_p is not None:
+            kwargs["top_p"] = self.top_p
+        # Enable thinking/reasoning mode. OpenRouter exposes this as
+        # `include_reasoning` for nemotron (per supported_parameters in the
+        # model metadata). Pass via extra_body to bypass litellm filtering.
+        if self.thinking:
+            kwargs["extra_body"] = {"include_reasoning": True}
+        # Only pass base_url when model doesn't already have a provider prefix
+        # (litellm uses either the prefix OR base_url, not both)
+        if self.base_url and not self.model.startswith("openrouter/"):
+            kwargs["base_url"] = self.base_url
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self._extra_headers:
+            kwargs["extra_headers"] = self._extra_headers
+
+        response = litellm.completion(**kwargs)
+        assistant_msg = _litellm_response_to_assistant_message(response, parser=self._parser)
+
+        state.messages.append(assistant_msg)
+        return assistant_msg, state
+
+
+# ---------------------------------------------------------------------------
+# Conversion helpers
+# ---------------------------------------------------------------------------
+
+
+def _to_litellm_message(msg) -> dict:
+    """Convert a tau2 message object to a litellm-compatible dict."""
+    if isinstance(msg, SystemMessage):
+        return {"role": "system", "content": msg.content or ""}
+
+    if isinstance(msg, UserMessage):
+        if msg.tool_calls:
+            # User tool calls (tau2 v2 feature — user has tools too)
+            return {
+                "role": "user",
+                "content": msg.content or "",
+                "tool_calls": [_tool_call_to_dict(tc) for tc in msg.tool_calls],
+            }
+        return {"role": "user", "content": msg.content or ""}
+
+    if isinstance(msg, AssistantMessage):
+        d: dict = {"role": "assistant", "content": msg.content or ""}
+        if msg.tool_calls:
+            d["tool_calls"] = [_tool_call_to_dict(tc) for tc in msg.tool_calls]
+        return d
+
+    if isinstance(msg, ToolMessage):
+        return {
+            "role": "tool",
+            "tool_call_id": msg.id,
+            "content": msg.content or "",
+        }
+
+    # Fallback
+    return {"role": getattr(msg, "role", "user"), "content": str(getattr(msg, "content", ""))}
+
+
+def _tool_call_to_dict(tc: ToolCall) -> dict:
+    import json
+    return {
+        "id": tc.id or "call_0",
+        "type": "function",
+        "function": {
+            "name": tc.name,
+            "arguments": json.dumps(tc.arguments),
+        },
+    }
+
+
+def _litellm_response_to_assistant_message(response, parser=None) -> AssistantMessage:
+    """Convert a litellm ModelResponse to a tau2 AssistantMessage."""
+    import json
+
+    choice = response.choices[0]
+    msg = choice.message
+
+    content = msg.content or ""
+    tool_calls_raw = getattr(msg, "tool_calls", None)
+
+    tau2_tool_calls: Optional[list[ToolCall]] = None
+
+    if parser and content:
+        # Use the custom tool parser (e.g. qwen3_coder) to extract tool calls
+        # from the raw text response.
+        parsed_content, parsed_tool_calls = parser.parse(content)
+        if parsed_tool_calls:
+            content = parsed_content or ""
+            tau2_tool_calls = []
+            for tc in parsed_tool_calls:
+                try:
+                    arguments = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    arguments = {}
+                tau2_tool_calls.append(
+                    ToolCall(
+                        id=tc.id or "call_0",
+                        name=tc.function.name,
+                        arguments=arguments,
+                        requestor="assistant",
+                    )
+                )
+    elif tool_calls_raw:
+        tau2_tool_calls = []
+        for tc in tool_calls_raw:
+            if hasattr(tc, "function"):
+                name = tc.function.name
+                try:
+                    arguments = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    arguments = {}
+                tau2_tool_calls.append(
+                    ToolCall(
+                        id=tc.id or "call_0",
+                        name=name,
+                        arguments=arguments,
+                        requestor="assistant",
+                    )
+                )
+
+    cost = None
+    try:
+        cost = litellm.completion_cost(response)
+    except Exception:
+        pass
+
+    usage = None
+    if hasattr(response, "usage") and response.usage:
+        usage = dict(response.usage)
+
+    return AssistantMessage(
+        role="assistant",
+        content=content if not tau2_tool_calls else None,
+        tool_calls=tau2_tool_calls,
+        cost=cost,
+        usage=usage,
+    )
+
+
+def create_hermes_agent(tools: list[Tool], domain_policy: str, **kwargs) -> HermesAgent:
+    """
+    Factory function registered with the tau2 registry.
+
+    Expected kwargs:
+        model (str): litellm model string
+        base_url (str): API base URL (optional)
+        api_key (str): API key (optional)
+        temperature (float): sampling temperature (default 0.0)
+        top_p (float): nucleus sampling (optional)
+        max_tokens (int): max tokens (optional)
+        thinking (bool): enable reasoning/thinking mode (default False)
+    """
+    return HermesAgent(
+        tools=tools,
+        domain_policy=domain_policy,
+        model=kwargs["model"],
+        base_url=kwargs.get("base_url"),
+        api_key=kwargs.get("api_key"),
+        temperature=kwargs.get("temperature", 0.0),
+        top_p=kwargs.get("top_p"),
+        max_tokens=kwargs.get("max_tokens"),
+        thinking=kwargs.get("thinking", False),
+        tool_parser=kwargs.get("tool_parser"),
+    )
