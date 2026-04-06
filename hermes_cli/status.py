@@ -124,6 +124,7 @@ def show_status(args):
         "Firecrawl": "FIRECRAWL_API_KEY",
         "Tavily": "TAVILY_API_KEY",
         "Browserbase": "BROWSERBASE_API_KEY",  # Optional — local browser works without this
+        "Browser Use": "BROWSER_USE_API_KEY",  # Optional — local browser works without this
         "FAL": "FAL_KEY",
         "Tinker": "TINKER_API_KEY",
         "WandB": "WANDB_API_KEY",

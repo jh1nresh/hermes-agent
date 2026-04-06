@@ -2,11 +2,11 @@
 """
 Browser Tool Module
 
-This module provides browser automation tools using agent-browser CLI.  It
-supports two backends — **Browserbase** (cloud) and **local Chromium** — with
-identical agent-facing behaviour.  The backend is auto-detected: if
-``BROWSERBASE_API_KEY`` is set the cloud service is used; otherwise a local
-headless Chromium instance is launched automatically.
+This module provides browser automation tools using agent-browser CLI. It
+supports local Chromium plus multiple cloud backends, including Browserbase
+and Browser Use, with identical agent-facing behaviour. The backend is selected
+from config when present and otherwise falls back to any configured cloud
+provider before using a local headless Chromium instance.
 
 The tool uses agent-browser's accessibility tree (ariaSnapshot) for text-based
 page representation, making it ideal for LLM agents without vision capabilities.
@@ -17,8 +17,7 @@ Features:
   ``agent-browser install`` (downloads Chromium) or
   ``agent-browser install --with-deps`` (also installs system libraries for
   Debian/Ubuntu/Docker).
-- **Cloud mode**: Browserbase cloud execution with stealth features, proxies,
-  and CAPTCHA solving.  Activated when BROWSERBASE_API_KEY is set.
+- **Cloud mode**: Browserbase or Browser Use cloud execution when configured.
 - Session isolation per task ID
 - Text-based page snapshots using accessibility tree
 - Element interaction via ref selectors (@e1, @e2, etc.)
@@ -26,8 +25,9 @@ Features:
 - Automatic cleanup of browser sessions
 
 Environment Variables:
-- BROWSERBASE_API_KEY: API key for Browserbase (enables cloud mode)
-- BROWSERBASE_PROJECT_ID: Project ID for Browserbase (required for cloud mode)
+- BROWSERBASE_API_KEY: API key for direct Browserbase cloud mode
+- BROWSERBASE_PROJECT_ID: Project ID for direct Browserbase cloud mode
+- BROWSER_USE_API_KEY: API key for direct Browser Use cloud mode
 - BROWSERBASE_PROXIES: Enable/disable residential proxies (default: "true")
 - BROWSERBASE_ADVANCED_STEALTH: Enable advanced stealth mode with custom Chromium,
   requires Scale Plan (default: "false")
@@ -248,8 +248,7 @@ def _get_cloud_provider() -> Optional[CloudBrowserProvider]:
 
     Reads ``config["browser"]["cloud_provider"]`` once and caches the result
     for the process lifetime. An explicit ``local`` provider disables cloud
-    fallback. If unset, fall back to Browserbase when direct or managed
-    Browserbase credentials are available.
+    fallback. If unset, fall back to the first configured cloud provider.
     """
     global _cached_cloud_provider, _cloud_provider_resolved
     if _cloud_provider_resolved:
@@ -278,21 +277,12 @@ def _get_cloud_provider() -> Optional[CloudBrowserProvider]:
         logger.debug("Could not read cloud_provider from config: %s", e)
 
     if _cached_cloud_provider is None:
-        fallback_provider = BrowserbaseProvider()
-        if fallback_provider.is_configured():
-            _cached_cloud_provider = fallback_provider
+        for fallback_provider in (BrowserbaseProvider(), BrowserUseProvider()):
+            if fallback_provider.is_configured():
+                _cached_cloud_provider = fallback_provider
+                break
 
     return _cached_cloud_provider
-
-
-def _get_browserbase_config_or_none() -> Optional[Dict[str, Any]]:
-    """Return Browserbase direct or managed config, or None when unavailable."""
-    return BrowserbaseProvider()._get_config_or_none()
-
-
-def _get_browserbase_config() -> Dict[str, Any]:
-    """Return Browserbase config or raise when neither direct nor managed mode is available."""
-    return BrowserbaseProvider()._get_config()
 
 
 def _is_local_mode() -> bool:
@@ -615,7 +605,7 @@ BROWSER_TOOL_SCHEMAS = [
     },
     {
         "name": "browser_close",
-        "description": "Close the browser session and release resources. Call this when done with browser tasks to free up Browserbase session quota.",
+        "description": "Close the browser session and release resources. Call this when done with browser tasks to free up cloud browser session quota.",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -738,6 +728,11 @@ def _get_session_info(task_id: Optional[str] = None) -> Dict[str, str]:
             session_info = _create_local_session(task_id)
         else:
             session_info = provider.create_session(task_id)
+            if session_info.get("cdp_url"):
+                # Some cloud providers (including Browser-Use v3) return an HTTP
+                # CDP discovery URL instead of a raw websocket endpoint.
+                session_info = dict(session_info)
+                session_info["cdp_url"] = _resolve_cdp_override(str(session_info["cdp_url"]))
     
     with _cleanup_lock:
         # Double-check: another thread may have created a session while we
@@ -872,11 +867,11 @@ def _run_browser_command(
         return {"success": False, "error": f"Failed to create browser session: {str(e)}"}
     
     # Build the command with the appropriate backend flag.
-    # Cloud mode: --cdp <websocket_url> connects to Browserbase.
+    # Cloud mode: --cdp <websocket_url> connects to a remote cloud browser.
     # Local mode: --session <name> launches a local headless Chromium.
     # The rest of the command (--json, command, args) is identical.
     if session_info.get("cdp_url"):
-        # Cloud mode — connect to remote Browserbase browser via CDP
+        # Cloud mode — connect to a remote cloud browser via CDP
         # IMPORTANT: Do NOT use --session with --cdp. In agent-browser >=0.13,
         # --session creates a local browser instance and silently ignores --cdp.
         backend_args = ["--cdp", session_info["cdp_url"]]
