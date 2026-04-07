@@ -37,8 +37,6 @@ _HERMES_CORE_TOOLS = [
     "read_file", "write_file", "patch", "search_files",
     # Vision + image generation
     "vision_analyze", "image_generate",
-    # MoA
-    "mixture_of_agents",
     # Skills
     "skills_list", "skill_view", "skill_manage",
     # Browser automation
@@ -214,7 +212,7 @@ TOOLSETS = {
     
     "safe": {
         "description": "Safe toolkit without terminal access",
-        "tools": ["mixture_of_agents"],
+        "tools": [],
         "includes": ["web", "vision", "image_gen"]
     },
     
@@ -255,8 +253,6 @@ TOOLSETS = {
             "read_file", "write_file", "patch", "search_files",
             # Vision + image generation
             "vision_analyze", "image_generate",
-            # MoA
-            "mixture_of_agents",
             # Skills
             "skills_list", "skill_view", "skill_manage",
             # Browser automation
