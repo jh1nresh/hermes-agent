@@ -250,6 +250,7 @@ class LocalEnvironment(BaseEnvironment):
         self.init_session()
 
     def _run_bash(self, cmd_string: str, *,
+                  timeout: int | None = None,
                   stdin_data: str | None = None) -> subprocess.Popen:
         run_env = _make_run_env(self.env)
         proc = subprocess.Popen(
@@ -274,7 +275,7 @@ class LocalEnvironment(BaseEnvironment):
             threading.Thread(target=_write, daemon=True).start()
         return proc
 
-    def _run_bash_login(self, cmd_string: str) -> subprocess.Popen:
+    def _run_bash_login(self, cmd_string: str, *, timeout: int | None = None) -> subprocess.Popen:
         """For snapshot creation: uses bash -l -c."""
         run_env = _make_run_env(self.env)
         return subprocess.Popen(

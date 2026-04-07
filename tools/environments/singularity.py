@@ -299,6 +299,7 @@ class SingularityEnvironment(BaseEnvironment):
     # ------------------------------------------------------------------
 
     def _run_bash(self, cmd_string: str, *,
+                  timeout: int | None = None,
                   stdin_data: str | None = None) -> subprocess.Popen:
         if not self._instance_started:
             raise RuntimeError("Singularity instance not started")
