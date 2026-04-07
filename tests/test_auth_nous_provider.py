@@ -7,7 +7,13 @@ from pathlib import Path
 import httpx
 import pytest
 
-from hermes_cli.auth import AuthError, get_provider_auth_state, resolve_nous_runtime_credentials
+from hermes_cli.auth import (
+    AuthError,
+    _nous_device_code_login,
+    format_auth_error,
+    get_provider_auth_state,
+    resolve_nous_runtime_credentials,
+)
 
 
 def _setup_nous_auth(
@@ -52,6 +58,69 @@ def _mint_payload(api_key: str = "agent-key") -> dict:
         "expires_in": 1800,
         "reused": False,
     }
+
+
+def test_format_auth_error_includes_billing_link_for_subscription_required(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    _setup_nous_auth(hermes_home)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    message = format_auth_error(
+        AuthError("subscription required", provider="nous", code="subscription_required")
+    )
+
+    assert "https://portal.example.com/billing" in message
+
+
+def test_format_auth_error_includes_billing_link_for_insufficient_credits(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    _setup_nous_auth(hermes_home)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    message = format_auth_error(
+        AuthError("credits exhausted", provider="nous", code="insufficient_credits")
+    )
+
+    assert "https://portal.example.com/billing" in message
+
+
+def test_nous_device_code_login_shows_billing_link_when_credits_exhausted(monkeypatch, capsys):
+    monkeypatch.setattr("hermes_cli.auth._is_remote_session", lambda: False)
+    monkeypatch.setattr(
+        "hermes_cli.auth._request_device_code",
+        lambda **kwargs: {
+            "verification_uri_complete": "https://portal.example.com/verify",
+            "user_code": "ABC-123",
+            "expires_in": 600,
+            "interval": 1,
+            "device_code": "device-code",
+        },
+    )
+    monkeypatch.setattr(
+        "hermes_cli.auth._poll_for_token",
+        lambda **kwargs: {
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        },
+    )
+    monkeypatch.setattr(
+        "hermes_cli.auth.refresh_nous_oauth_from_state",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AuthError("credits exhausted", provider="nous", code="insufficient_credits")
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        _nous_device_code_login(
+            portal_base_url="https://portal.example.com",
+            open_browser=False,
+        )
+
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "Top up credits here: https://portal.example.com/billing" in out
 
 
 def test_refresh_token_persisted_when_mint_returns_insufficient_credits(tmp_path, monkeypatch):

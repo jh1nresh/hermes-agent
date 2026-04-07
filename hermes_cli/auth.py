@@ -466,6 +466,23 @@ class AuthError(RuntimeError):
         self.relogin_required = relogin_required
 
 
+def _nous_billing_url(portal_base_url: Any = None) -> str:
+    """Return the Nous Portal billing URL, preferring the active portal origin."""
+    base_url = (
+        _optional_base_url(portal_base_url)
+        or _optional_base_url(os.getenv("HERMES_PORTAL_BASE_URL"))
+        or _optional_base_url(os.getenv("NOUS_PORTAL_BASE_URL"))
+    )
+    if not base_url:
+        try:
+            auth_state = get_provider_auth_state("nous") or {}
+        except Exception:
+            auth_state = {}
+        if isinstance(auth_state, dict):
+            base_url = _optional_base_url(auth_state.get("portal_base_url"))
+    return f"{(base_url or DEFAULT_NOUS_PORTAL_URL).rstrip('/')}/billing"
+
+
 def format_auth_error(error: Exception) -> str:
     """Map auth failures to concise user-facing guidance."""
     if not isinstance(error, AuthError):
@@ -477,13 +494,13 @@ def format_auth_error(error: Exception) -> str:
     if error.code == "subscription_required":
         return (
             "No active paid subscription found on Nous Portal. "
-            "Please purchase/activate a subscription, then retry."
+            f"Please purchase/activate a subscription at {_nous_billing_url()}, then retry."
         )
 
     if error.code == "insufficient_credits":
         return (
             "Subscription credits are exhausted. "
-            "Top up/renew credits in Nous Portal, then retry."
+            f"Top up/renew credits at {_nous_billing_url()}, then retry."
         )
 
     if error.code == "temporarily_unavailable":
@@ -2802,15 +2819,20 @@ def _nous_device_code_login(
             force_mint=True,
         )
     except AuthError as exc:
-        if exc.code == "subscription_required":
-            portal_url = auth_state.get(
-                "portal_base_url", DEFAULT_NOUS_PORTAL_URL
-            ).rstrip("/")
+        if exc.code in {"subscription_required", "insufficient_credits"}:
+            billing_url = _nous_billing_url(auth_state.get("portal_base_url"))
             print()
-            print("Your Nous Portal account does not have an active subscription.")
-            print(f"  Subscribe here: {portal_url}/billing")
+            if exc.code == "subscription_required":
+                print("Your Nous Portal account does not have an active subscription.")
+                print(f"  Subscribe here: {billing_url}")
+                print()
+                print("After subscribing, run `hermes model` again to finish setup.")
+            else:
+                print("Your Nous Portal credits are exhausted.")
+                print(f"  Top up credits here: {billing_url}")
+                print()
+                print("After topping up, run `hermes model` again to finish setup.")
             print()
-            print("After subscribing, run `hermes model` again to finish setup.")
             raise SystemExit(1)
         raise
 
