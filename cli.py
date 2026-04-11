@@ -4962,7 +4962,9 @@ class HermesCLI:
         elif canonical == "fast":
             self._handle_fast_command(cmd_original)
         elif canonical == "compress":
-            self._manual_compress()
+            self._manual_compress(cmd_original)
+        elif canonical == "context":
+            self._show_context_breakdown()
         elif canonical == "usage":
             self._show_usage()
         elif canonical == "insights":
@@ -5818,8 +5820,14 @@ class HermesCLI:
         self._reasoning_preview_buf = getattr(self, "_reasoning_preview_buf", "") + reasoning_text
         self._flush_reasoning_preview(force=False)
 
-    def _manual_compress(self):
-        """Manually trigger context compression on the current conversation."""
+    def _manual_compress(self, cmd_original: str = ""):
+        """Manually trigger context compression on the current conversation.
+
+        Accepts an optional focus topic: ``/compress <focus>`` guides the
+        summariser to preserve information related to *focus* while being
+        more aggressive about discarding everything else.  Inspired by
+        Claude Code's ``/compact <focus>`` feature.
+        """
         if not self.conversation_history or len(self.conversation_history) < 4:
             print("(._.) Not enough conversation to compress (need at least 4 messages).")
             return
@@ -5832,16 +5840,28 @@ class HermesCLI:
             print("(._.) Compression is disabled in config.")
             return
 
+        # Extract optional focus topic from the command (e.g. "/compress database schema")
+        focus_topic = ""
+        if cmd_original:
+            parts = cmd_original.strip().split(None, 1)
+            if len(parts) > 1:
+                focus_topic = parts[1].strip()
+
         original_count = len(self.conversation_history)
         try:
             from agent.model_metadata import estimate_messages_tokens_rough
             approx_tokens = estimate_messages_tokens_rough(self.conversation_history)
-            print(f"🗜️  Compressing {original_count} messages (~{approx_tokens:,} tokens)...")
+            if focus_topic:
+                print(f"🗜️  Compressing {original_count} messages (~{approx_tokens:,} tokens), "
+                      f"focus: \"{focus_topic}\"...")
+            else:
+                print(f"🗜️  Compressing {original_count} messages (~{approx_tokens:,} tokens)...")
 
             compressed, _new_system = self.agent._compress_context(
                 self.conversation_history,
                 self.agent._cached_system_prompt or "",
                 approx_tokens=approx_tokens,
+                focus_topic=focus_topic or None,
             )
             self.conversation_history = compressed
             new_count = len(self.conversation_history)
@@ -5853,6 +5873,198 @@ class HermesCLI:
 
         except Exception as e:
             print(f"  ❌ Compression failed: {e}")
+
+    def _show_context_breakdown(self):
+        """Show a live breakdown of context window usage by component.
+
+        Inspired by Claude Code's ``/context`` command — gives users visibility
+        into what is consuming their context window (system prompt, memory,
+        skills, context files, conversation messages, tool results, etc.).
+        """
+        if not self.agent:
+            print("(._.) No active agent — send a message first.")
+            return
+
+        from agent.model_metadata import (
+            estimate_tokens_rough,
+            estimate_messages_tokens_rough,
+        )
+
+        agent = self.agent
+        compressor = getattr(agent, "context_compressor", None)
+        context_length = getattr(compressor, "context_length", 0) or 0
+        if not context_length:
+            from agent.model_metadata import get_model_context_length
+            context_length = get_model_context_length(agent.model or "")
+
+        # ── System prompt breakdown ────────────────────────────────
+        system_prompt = getattr(agent, "_cached_system_prompt", "") or ""
+        system_total = estimate_tokens_rough(system_prompt)
+
+        # Attempt to break down the system prompt into its component layers.
+        # The prompt is assembled by joining parts with "\n\n", so we can
+        # identify known sections by their content signatures.
+        components = []
+        if system_prompt:
+            from agent.prompt_builder import load_soul_md, DEFAULT_AGENT_IDENTITY
+            # Identity block
+            soul = load_soul_md()
+            if soul and soul[:60] in system_prompt:
+                identity_tokens = estimate_tokens_rough(soul)
+                components.append(("  Identity (SOUL.md)", identity_tokens))
+            elif DEFAULT_AGENT_IDENTITY[:40] in system_prompt:
+                identity_tokens = estimate_tokens_rough(DEFAULT_AGENT_IDENTITY)
+                components.append(("  Identity (built-in)", identity_tokens))
+
+            # Memory
+            mem_store = getattr(agent, "_memory_store", None)
+            if mem_store:
+                mem_block = mem_store.format_for_system_prompt("memory")
+                if mem_block and mem_block[:30] in system_prompt:
+                    components.append(("  Memory", estimate_tokens_rough(mem_block)))
+                user_block = mem_store.format_for_system_prompt("user")
+                if user_block and user_block[:30] in system_prompt:
+                    components.append(("  User profile", estimate_tokens_rough(user_block)))
+
+            # Skills
+            skills_marker = "## Skills (mandatory)"
+            if skills_marker in system_prompt:
+                skills_start = system_prompt.index(skills_marker)
+                # Find the next major section after skills
+                _next_sections = ["\nConversation started:", "\nYou are running as"]
+                skills_end = len(system_prompt)
+                for _sect in _next_sections:
+                    idx = system_prompt.find(_sect, skills_start + 10)
+                    if idx != -1:
+                        skills_end = min(skills_end, idx)
+                skills_text = system_prompt[skills_start:skills_end]
+                components.append(("  Skills index", estimate_tokens_rough(skills_text)))
+
+            # Context files (AGENTS.md, .cursorrules, etc.)
+            ctx_marker = "# Project Context"
+            if ctx_marker in system_prompt:
+                ctx_start = system_prompt.index(ctx_marker)
+                ctx_text = system_prompt[ctx_start:]
+                # Trim to just the context files section
+                for _end_mark in ["\nConversation started:", "\n## Skills"]:
+                    idx = ctx_text.find(_end_mark, 10)
+                    if idx != -1:
+                        ctx_text = ctx_text[:idx]
+                        break
+                components.append(("  Context files", estimate_tokens_rough(ctx_text)))
+
+            # Tool-use guidance, platform hints, timestamps — remainder
+            accounted = sum(t for _, t in components)
+            remainder = max(0, system_total - accounted)
+            if remainder > 50:
+                components.append(("  Other (guidance, hints, timestamp)", remainder))
+
+        # ── Conversation breakdown ─────────────────────────────────
+        msgs = self.conversation_history or []
+        msg_counts = {"user": 0, "assistant": 0, "tool": 0, "system": 0}
+        msg_tokens = {"user": 0, "assistant": 0, "tool": 0, "system": 0}
+        tool_result_tokens = 0
+        tool_call_tokens = 0
+        compaction_summary_tokens = 0
+
+        from agent.context_compressor import SUMMARY_PREFIX, LEGACY_SUMMARY_PREFIX
+        for msg in msgs:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            content_str = str(content) if content else ""
+            tokens = estimate_tokens_rough(content_str)
+
+            # Count tool_calls in assistant messages
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                tc_str = str(tool_calls)
+                tool_call_tokens += estimate_tokens_rough(tc_str)
+
+            if role in msg_counts:
+                msg_counts[role] += 1
+                msg_tokens[role] += tokens
+            else:
+                msg_counts.setdefault(role, 0)
+                msg_tokens.setdefault(role, 0)
+                msg_counts[role] += 1
+                msg_tokens[role] += tokens
+
+            if role == "tool":
+                tool_result_tokens += tokens
+
+            # Detect compaction summaries
+            if content_str and (SUMMARY_PREFIX in content_str or LEGACY_SUMMARY_PREFIX in content_str):
+                compaction_summary_tokens += tokens
+
+        conversation_total = estimate_messages_tokens_rough(msgs)
+
+        # ── Tool schemas ───────────────────────────────────────────
+        tool_schemas_tokens = 0
+        try:
+            tool_schemas = getattr(agent, "_cached_tool_schemas", None)
+            if tool_schemas:
+                tool_schemas_tokens = estimate_tokens_rough(str(tool_schemas))
+        except Exception:
+            pass
+
+        # ── Grand total ────────────────────────────────────────────
+        grand_total = system_total + conversation_total + tool_schemas_tokens
+        percent = round((grand_total / context_length) * 100) if context_length else 0
+
+        # ── Render ─────────────────────────────────────────────────
+        def _bar(tokens, total, width=20):
+            if total <= 0:
+                return ""
+            filled = max(0, min(width, round((tokens / total) * width)))
+            return "█" * filled + "░" * (width - filled)
+
+        def _fmt(tokens):
+            if tokens >= 1000:
+                return f"{tokens / 1000:.1f}K"
+            return str(tokens)
+
+        print()
+        model_short = (agent.model or "unknown").split("/")[-1]
+        print(f"◎ Context Window — {model_short}")
+        print(f"  {_bar(grand_total, context_length, 30)}  {_fmt(grand_total)} / {_fmt(context_length)} tokens ({percent}%)")
+        print()
+
+        # System prompt
+        print(f"  ◆ System Prompt          {_fmt(system_total):>8}")
+        for label, toks in components:
+            print(f"    {label:<28} {_fmt(toks):>8}")
+
+        # Tool schemas
+        if tool_schemas_tokens:
+            n_tools = len(tool_schemas) if tool_schemas else 0
+            print(f"  ◆ Tool Schemas ({n_tools} tools)  {_fmt(tool_schemas_tokens):>8}")
+
+        # Conversation
+        total_msgs = sum(msg_counts.values())
+        print(f"  ◆ Conversation ({total_msgs} msgs)  {_fmt(conversation_total):>8}")
+        if msg_counts.get("user", 0):
+            print(f"      User messages ({msg_counts['user']})      {_fmt(msg_tokens['user']):>8}")
+        if msg_counts.get("assistant", 0):
+            print(f"      Assistant messages ({msg_counts['assistant']})  {_fmt(msg_tokens['assistant']):>8}")
+        if msg_counts.get("tool", 0):
+            print(f"      Tool results ({msg_counts['tool']})       {_fmt(tool_result_tokens):>8}")
+        if tool_call_tokens:
+            print(f"      Tool calls                 {_fmt(tool_call_tokens):>8}")
+        if compaction_summary_tokens:
+            print(f"      Compaction summaries       {_fmt(compaction_summary_tokens):>8}")
+
+        # Compression info
+        compressions = getattr(compressor, "compression_count", 0) or 0
+        if compressions:
+            print(f"\n  ⚙ Compressions this session: {compressions}")
+
+        # Threshold info
+        if compressor:
+            threshold = getattr(compressor, "threshold_tokens", 0) or 0
+            if threshold:
+                remaining = max(0, threshold - grand_total)
+                print(f"  ⚙ Auto-compress at: ~{_fmt(threshold)} tokens ({_fmt(remaining)} remaining)")
+        print()
 
     def _show_usage(self):
         """Show rate limits (if available) and session token usage."""
