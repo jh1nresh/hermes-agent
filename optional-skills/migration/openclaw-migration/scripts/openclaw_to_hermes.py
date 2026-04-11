@@ -1161,6 +1161,16 @@ class Migrator:
                 raw_key = provider_cfg.get("apiKey")
                 api_key = resolve_secret_input(raw_key, openclaw_env)
                 if not api_key:
+                    # Warn if a SecretRef with file/exec source was silently unresolvable
+                    if isinstance(raw_key, dict) and raw_key.get("source") in ("file", "exec"):
+                        self.record(
+                            "provider-keys",
+                            self.source_root / "openclaw.json",
+                            None,
+                            "skipped",
+                            f"Provider '{provider_name}' uses a {raw_key['source']}-backed SecretRef "
+                            f"that cannot be auto-migrated. Add this key to ~/.hermes/.env manually.",
+                        )
                     continue
 
                 base_url = provider_cfg.get("baseUrl", "")
@@ -2494,6 +2504,33 @@ class Migrator:
             notes.append("- Run `hermes cron` to recreate scheduled tasks (see archive/cron-config.json)")
         elif has_cron_store_archive:
             notes.append("- Run `hermes cron` to recreate scheduled tasks (see archived cron-store)")
+
+        # Check if skills were imported
+        has_skills = any(i.kind == "skills" and i.status == "migrated" for i in self.items)
+        if has_skills:
+            notes.extend([
+                "",
+                "## Imported Skills",
+                "",
+                "Imported skills require a new session to take effect. After migration,",
+                "restart your agent or start a new chat session, then run `/skills`",
+                "to verify they loaded correctly.",
+                "",
+            ])
+
+        # Check if WhatsApp was detected
+        has_whatsapp = any(i.kind == "whatsapp-settings" and i.status == "migrated" for i in self.items)
+        if has_whatsapp:
+            notes.extend([
+                "",
+                "## WhatsApp Requires Re-Pairing",
+                "",
+                "WhatsApp uses QR-code pairing, not token-based auth. Your allowlist",
+                "was migrated, but you must re-pair the device by running:",
+                "",
+                "    hermes whatsapp",
+                "",
+            ])
 
         notes.extend([
             "- Run `hermes gateway install` if you need the gateway service",
