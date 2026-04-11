@@ -617,6 +617,19 @@ class Migrator:
             candidate = self.source_root / rel
             if candidate.exists():
                 return candidate
+            # OpenClaw renamed workspace/ to workspace-main/ (and workspace-{agentId}
+            # for multi-agent).  Try the new path as a fallback.
+            if rel.startswith("workspace/"):
+                suffix = rel[len("workspace/"):]
+                for variant in ("workspace-main", "workspace-assistant"):
+                    alt = self.source_root / variant / suffix
+                    if alt.exists():
+                        return alt
+            elif rel.startswith("workspace.default/"):
+                suffix = rel[len("workspace.default/"):]
+                alt = self.source_root / "workspace-main" / suffix
+                if alt.exists():
+                    return alt
         return None
 
     def resolve_skill_destination(self, destination: Path) -> Path:
