@@ -1324,8 +1324,9 @@ class Migrator:
         tts_data: Dict[str, Any] = {}
 
         provider = tts.get("provider")
-        if isinstance(provider, str) and provider in ("elevenlabs", "openai", "edge"):
-            tts_data["provider"] = provider
+        if isinstance(provider, str) and provider in ("elevenlabs", "openai", "edge", "microsoft"):
+            # OpenClaw renamed "edge" to "microsoft"; Hermes still uses "edge"
+            tts_data["provider"] = "edge" if provider == "microsoft" else provider
 
         # TTS provider settings live under messages.tts.providers.{provider}
         # in OpenClaw (not messages.tts.elevenlabs directly)
@@ -1374,9 +1375,9 @@ class Migrator:
                 tts_data["openai"] = oai_settings
 
         edge_tts = (
-            (providers.get("edge") or {})
-            if isinstance(providers.get("edge"), dict) else
-            (tts.get("edge") or {})
+            (providers.get("edge") or providers.get("microsoft") or {})
+            if isinstance(providers.get("edge"), dict) or isinstance(providers.get("microsoft"), dict) else
+            (tts.get("edge") or tts.get("microsoft") or {})
         )
         if isinstance(edge_tts, dict):
             edge_voice = edge_tts.get("voice")
