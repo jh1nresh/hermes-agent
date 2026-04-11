@@ -1224,6 +1224,21 @@ class Migrator:
             if val and hermes_key not in secret_additions:
                 secret_additions[hermes_key] = val
 
+        # Check the openclaw.json "env" sub-object — some OpenClaw setups
+        # store API keys here instead of in a separate .env file.
+        # Keys can be at env.<KEY> or env.vars.<KEY>.
+        json_env = config.get("env")
+        if isinstance(json_env, dict):
+            env_vars = json_env.get("vars")
+            sources = [json_env]
+            if isinstance(env_vars, dict):
+                sources.append(env_vars)
+            for src in sources:
+                for oc_key, hermes_key in env_key_mapping.items():
+                    val = src.get(oc_key)
+                    if isinstance(val, str) and val.strip() and hermes_key not in secret_additions:
+                        secret_additions[hermes_key] = val.strip()
+
         # Check per-agent auth-profiles.json for additional credentials
         auth_profiles_path = self.source_root / "agents" / "main" / "agent" / "auth-profiles.json"
         if auth_profiles_path.exists():
