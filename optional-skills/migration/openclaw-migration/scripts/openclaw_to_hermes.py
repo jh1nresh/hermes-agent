@@ -1033,11 +1033,8 @@ class Migrator:
     def migrate_secret_settings(self, config: Dict[str, Any]) -> None:
         secret_additions: Dict[str, str] = {}
 
-        telegram_token = (
-            config.get("channels", {})
-            .get("telegram", {})
-            .get("botToken")
-        )
+        tg_cfg = config.get("channels", {}).get("telegram", {})
+        telegram_token = self._get_channel_field(tg_cfg, "botToken") if isinstance(tg_cfg, dict) else None
         if isinstance(telegram_token, str) and telegram_token.strip():
             secret_additions["TELEGRAM_BOT_TOKEN"] = telegram_token.strip()
 
@@ -1057,15 +1054,28 @@ class Migrator:
         """Resolve a channel config value that may be a SecretRef."""
         return resolve_secret_input(value, self.load_openclaw_env())
 
+    @staticmethod
+    def _get_channel_field(ch_cfg: Dict[str, Any], field: str) -> Any:
+        """Get a field from channel config, checking both flat and accounts.default layout."""
+        val = ch_cfg.get(field)
+        if val is not None:
+            return val
+        accounts = ch_cfg.get("accounts")
+        if isinstance(accounts, dict):
+            default = accounts.get("default")
+            if isinstance(default, dict):
+                return default.get(field)
+        return None
+
     def migrate_discord_settings(self, config: Optional[Dict[str, Any]] = None) -> None:
         config = config or self.load_openclaw_config()
         additions: Dict[str, str] = {}
         discord = config.get("channels", {}).get("discord", {})
         if isinstance(discord, dict):
-            token = discord.get("token")
+            token = self._get_channel_field(discord, "token")
             if isinstance(token, str) and token.strip():
                 additions["DISCORD_BOT_TOKEN"] = token.strip()
-            allow_from = discord.get("allowFrom", [])
+            allow_from = self._get_channel_field(discord, "allowFrom") or []
             if isinstance(allow_from, list):
                 users = [str(u).strip() for u in allow_from if str(u).strip()]
                 if users:
@@ -1080,13 +1090,13 @@ class Migrator:
         additions: Dict[str, str] = {}
         slack = config.get("channels", {}).get("slack", {})
         if isinstance(slack, dict):
-            bot_token = slack.get("botToken")
+            bot_token = self._get_channel_field(slack, "botToken")
             if isinstance(bot_token, str) and bot_token.strip():
                 additions["SLACK_BOT_TOKEN"] = bot_token.strip()
-            app_token = slack.get("appToken")
+            app_token = self._get_channel_field(slack, "appToken")
             if isinstance(app_token, str) and app_token.strip():
                 additions["SLACK_APP_TOKEN"] = app_token.strip()
-            allow_from = slack.get("allowFrom", [])
+            allow_from = self._get_channel_field(slack, "allowFrom") or []
             if isinstance(allow_from, list):
                 users = [str(u).strip() for u in allow_from if str(u).strip()]
                 if users:
@@ -1101,7 +1111,7 @@ class Migrator:
         additions: Dict[str, str] = {}
         whatsapp = config.get("channels", {}).get("whatsapp", {})
         if isinstance(whatsapp, dict):
-            allow_from = whatsapp.get("allowFrom", [])
+            allow_from = self._get_channel_field(whatsapp, "allowFrom") or []
             if isinstance(allow_from, list):
                 users = [str(u).strip() for u in allow_from if str(u).strip()]
                 if users:
@@ -1116,13 +1126,13 @@ class Migrator:
         additions: Dict[str, str] = {}
         signal = config.get("channels", {}).get("signal", {})
         if isinstance(signal, dict):
-            account = signal.get("account")
+            account = self._get_channel_field(signal, "account")
             if isinstance(account, str) and account.strip():
                 additions["SIGNAL_ACCOUNT"] = account.strip()
-            http_url = signal.get("httpUrl")
+            http_url = self._get_channel_field(signal, "httpUrl")
             if isinstance(http_url, str) and http_url.strip():
                 additions["SIGNAL_HTTP_URL"] = http_url.strip()
-            allow_from = signal.get("allowFrom", [])
+            allow_from = self._get_channel_field(signal, "allowFrom") or []
             if isinstance(allow_from, list):
                 users = [str(u).strip() for u in allow_from if str(u).strip()]
                 if users:
@@ -2160,19 +2170,20 @@ class Migrator:
             if not ch_cfg:
                 continue
 
-            # Extract tokens
-            if ch_mapping.get("token") and ch_cfg.get("botToken") and self.migrate_secrets:
-                self._set_env_var(ch_mapping["token"], ch_cfg["botToken"],
+            # Extract tokens (check flat path, then accounts.default)
+            bot_token = self._get_channel_field(ch_cfg, "botToken")
+            if ch_mapping.get("token") and bot_token and self.migrate_secrets:
+                self._set_env_var(ch_mapping["token"], str(bot_token),
                                   f"channels.{ch_name}.botToken")
-            if ch_mapping.get("allowFrom") and ch_cfg.get("allowFrom"):
-                allow_val = ch_cfg["allowFrom"]
+            allow_val = self._get_channel_field(ch_cfg, "allowFrom")
+            if ch_mapping.get("allowFrom") and allow_val:
                 if isinstance(allow_val, list):
                     allow_val = ",".join(str(x) for x in allow_val)
                 self._set_env_var(ch_mapping["allowFrom"], str(allow_val),
                                   f"channels.{ch_name}.allowFrom")
             # Extra fields
             for oc_key, env_key in (ch_mapping.get("extras") or {}).items():
-                val = ch_cfg.get(oc_key)
+                val = self._get_channel_field(ch_cfg, oc_key)
                 if val:
                     if isinstance(val, list):
                         val = ",".join(str(x) for x in val)
