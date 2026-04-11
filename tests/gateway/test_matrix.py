@@ -1064,6 +1064,7 @@ class TestMatrixMegolmEventHandling:
         fake_event.room_id = "!room:example.org"
         fake_event.event_id = "$encrypted_event"
         fake_event.sender = "@alice:example.org"
+        fake_event.timestamp = int(time.time() * 1000)
 
         await adapter._on_encrypted_event(fake_event)
 
@@ -1088,6 +1089,7 @@ class TestMatrixMegolmEventHandling:
             evt.room_id = "!room:example.org"
             evt.event_id = f"$event_{i}"
             evt.sender = "@alice:example.org"
+            evt.timestamp = int(time.time() * 1000)
             await adapter._on_encrypted_event(evt)
 
         assert len(adapter._pending_megolm) == _MAX_PENDING_EVENTS

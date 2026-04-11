@@ -976,9 +976,6 @@ class MatrixAdapter(BasePlatformAdapter):
             thread_id=thread_id,
         )
 
-        if thread_id:
-            self._track_thread(thread_id)
-
         self._background_read_receipt(room_id, event_id)
 
         return body, is_dm, chat_type, thread_id, display_name, source
@@ -1181,10 +1178,20 @@ class MatrixAdapter(BasePlatformAdapter):
 
     async def _on_encrypted_event(self, event: Any) -> None:
         """Handle encrypted events that could not be auto-decrypted."""
+        sender = str(getattr(event, "sender", ""))
+        if sender == self._user_id:
+            return
+
         room_id = str(getattr(event, "room_id", ""))
         event_id = str(getattr(event, "event_id", ""))
 
         if self._is_duplicate_event(event_id):
+            return
+
+        # Skip old events from initial sync.
+        raw_ts = getattr(event, "timestamp", None) or getattr(event, "server_timestamp", None) or 0
+        event_ts = raw_ts / 1000.0 if raw_ts else 0.0
+        if event_ts and event_ts < self._startup_ts - _STARTUP_GRACE_SECONDS:
             return
 
         logger.warning(
