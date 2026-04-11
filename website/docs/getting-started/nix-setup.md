@@ -122,6 +122,17 @@ services.hermes-agent.environmentFiles = [ "/var/lib/hermes/env" ];
 Setting `addToSystemPackages = true` does two things: puts the `hermes` CLI on your system PATH **and** sets `HERMES_HOME` system-wide so the interactive CLI shares state (sessions, skills, cron) with the gateway service. Without it, running `hermes` in your shell creates a separate `~/.hermes/` directory.
 :::
 
+:::info Container-aware CLI
+When `container.enable = true` and `addToSystemPackages = true`, running `hermes chat` on the host **automatically routes into the managed container**. This means your interactive CLI session runs inside the same environment as the gateway service — with access to all container-installed packages and tools.
+
+- The routing is transparent: `hermes chat` detects container mode and does `podman exec` / `docker exec` under the hood
+- All CLI flags are forwarded: `-m`, `--resume`, `--query`, etc. work as normal
+- Use `hermes chat --host` to bypass container routing and run directly on the host
+- If the container isn't running, the CLI falls back to host execution automatically
+
+Other `hermes` subcommands (`version`, `config`, `sessions`, `setup`) always run on the host since they only need access to shared state files.
+:::
+
 ### Verify It Works
 
 After `nixos-rebuild switch`, check that the service is running:

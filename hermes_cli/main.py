@@ -528,6 +528,56 @@ def _resolve_last_cli_session() -> Optional[str]:
     return None
 
 
+def _exec_in_container(container_info: dict, cli_args: list):
+    """Replace the current process with a command inside the managed container.
+
+    Uses os.execvp to hand off to docker/podman exec, preserving the TTY
+    so the interactive CLI works seamlessly inside the container.
+
+    Args:
+        container_info: dict with backend, container_name, hermes_bin
+        cli_args: the original CLI arguments (everything after 'hermes')
+    """
+    import shutil
+    import subprocess
+
+    backend = container_info["backend"]
+    container_name = container_info["container_name"]
+    hermes_bin = container_info["hermes_bin"]
+
+    # Find the container runtime on PATH
+    runtime = shutil.which(backend)
+    if not runtime:
+        print(f"Warning: {backend} not found on PATH, falling back to host CLI.",
+              file=sys.stderr)
+        return  # Fall through to normal CLI
+
+    # Check if the container is actually running
+    try:
+        result = subprocess.run(
+            [runtime, "inspect", "--format", "{{.State.Running}}", container_name],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0 or result.stdout.strip().lower() != "true":
+            print(f"Warning: container '{container_name}' is not running, falling back to host CLI.",
+                  file=sys.stderr)
+            return
+    except (subprocess.TimeoutExpired, OSError):
+        return  # Fall through on any error
+
+    # Filter out --host flag from forwarded args (it's not meaningful inside)
+    forwarded_args = [a for a in cli_args if a != "--host"]
+
+    # Build the exec command
+    exec_cmd = [runtime, "exec", "-it", container_name, hermes_bin] + forwarded_args
+
+    print(f"Routing to container '{container_name}' via {backend}...",
+          file=sys.stderr)
+
+    # Replace the current process — this never returns on success
+    os.execvp(runtime, exec_cmd)
+
+
 def _resolve_session_by_name_or_id(name_or_id: str) -> Optional[str]:
     """Resolve a session name (title) or ID to a session ID.
 
@@ -556,6 +606,21 @@ def _resolve_session_by_name_or_id(name_or_id: str) -> Optional[str]:
 
 def cmd_chat(args):
     """Run interactive chat CLI."""
+    # ── Container-aware routing ──────────────────────────────────────────
+    # When NixOS container mode is active and we're on the host, exec into
+    # the managed container instead of running locally. --host bypasses this.
+    if not getattr(args, "host", False):
+        try:
+            from hermes_cli.config import get_container_exec_info
+            container_info = get_container_exec_info()
+            if container_info:
+                _exec_in_container(container_info, sys.argv[1:])
+                # _exec_in_container calls os.execvp which replaces the process.
+                # If we get here, the exec failed.
+                sys.exit(1)
+        except Exception:
+            pass  # Fall through to normal CLI on any detection error
+
     # Resolve --continue into --resume with the latest CLI session or by name
     continue_val = getattr(args, "continue_last", None)
     if continue_val and not getattr(args, "resume", None):
@@ -4385,6 +4450,12 @@ For more help on a command:
         "--source",
         default=None,
         help="Session source tag for filtering (default: cli). Use 'tool' for third-party integrations that should not appear in user session lists."
+    )
+    chat_parser.add_argument(
+        "--host",
+        action="store_true",
+        default=False,
+        help="Run on the host even when NixOS container mode is active (bypass container exec)"
     )
     chat_parser.set_defaults(func=cmd_chat)
 
