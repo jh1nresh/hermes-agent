@@ -73,20 +73,20 @@ class TestCheckWatchPatterns:
         """No watch_patterns → no notifications."""
         session = _make_session(watch_patterns=[])
         registry._check_watch_patterns(session, "ERROR: something broke\n")
-        assert registry.watch_queue.empty()
+        assert registry.completion_queue.empty()
 
     def test_no_match_no_notification(self, registry):
         """Output that doesn't match any pattern → no notification."""
         session = _make_session(watch_patterns=["ERROR", "FAIL"])
         registry._check_watch_patterns(session, "INFO: all good\nDEBUG: fine\n")
-        assert registry.watch_queue.empty()
+        assert registry.completion_queue.empty()
 
     def test_basic_match(self, registry):
         """Single matching line triggers a notification."""
         session = _make_session(watch_patterns=["ERROR"])
         registry._check_watch_patterns(session, "INFO: ok\nERROR: disk full\n")
-        assert not registry.watch_queue.empty()
-        evt = registry.watch_queue.get_nowait()
+        assert not registry.completion_queue.empty()
+        evt = registry.completion_queue.get_nowait()
         assert evt["type"] == "watch_match"
         assert evt["pattern"] == "ERROR"
         assert "disk full" in evt["output"]
@@ -96,7 +96,7 @@ class TestCheckWatchPatterns:
         """First matching pattern is reported."""
         session = _make_session(watch_patterns=["WARN", "ERROR"])
         registry._check_watch_patterns(session, "ERROR: bad\nWARN: hmm\n")
-        evt = registry.watch_queue.get_nowait()
+        evt = registry.completion_queue.get_nowait()
         # ERROR appears first in the output, and we check patterns in order
         # so "WARN" won't match "ERROR: bad" but "ERROR" will
         assert evt["pattern"] == "ERROR"
@@ -107,7 +107,7 @@ class TestCheckWatchPatterns:
         session = _make_session(watch_patterns=["ERROR"])
         session._watch_disabled = True
         registry._check_watch_patterns(session, "ERROR: boom\n")
-        assert registry.watch_queue.empty()
+        assert registry.completion_queue.empty()
 
     def test_hit_counter_increments(self, registry):
         """Each delivered notification increments _watch_hits."""
@@ -123,7 +123,7 @@ class TestCheckWatchPatterns:
         # Generate 30 matching lines (more than the 20-line cap)
         text = "\n".join(f"X line {i}" for i in range(30)) + "\n"
         registry._check_watch_patterns(session, text)
-        evt = registry.watch_queue.get_nowait()
+        evt = registry.completion_queue.get_nowait()
         # Should only have 20 lines max
         assert evt["output"].count("\n") <= 20
 
@@ -138,7 +138,7 @@ class TestRateLimiting:
         session = _make_session(watch_patterns=["E"])
         for i in range(WATCH_MAX_PER_WINDOW):
             registry._check_watch_patterns(session, f"E {i}\n")
-        assert registry.watch_queue.qsize() == WATCH_MAX_PER_WINDOW
+        assert registry.completion_queue.qsize() == WATCH_MAX_PER_WINDOW
 
     def test_exceeds_window_limit(self, registry):
         """Notifications beyond the rate limit are suppressed."""
@@ -146,7 +146,7 @@ class TestRateLimiting:
         for i in range(WATCH_MAX_PER_WINDOW + 5):
             registry._check_watch_patterns(session, f"E {i}\n")
         # Only WATCH_MAX_PER_WINDOW should be in the queue
-        assert registry.watch_queue.qsize() == WATCH_MAX_PER_WINDOW
+        assert registry.completion_queue.qsize() == WATCH_MAX_PER_WINDOW
         assert session._watch_suppressed == 5
 
     def test_window_resets(self, registry):
@@ -163,7 +163,7 @@ class TestRateLimiting:
         session._watch_window_start = time.time() - WATCH_WINDOW_SECONDS - 1
         registry._check_watch_patterns(session, "E after reset\n")
         # Should deliver now (window reset)
-        assert registry.watch_queue.qsize() == WATCH_MAX_PER_WINDOW + 1
+        assert registry.completion_queue.qsize() == WATCH_MAX_PER_WINDOW + 1
 
     def test_suppressed_count_in_next_delivery(self, registry):
         """Suppressed count is reported in the next successful delivery."""
@@ -180,8 +180,8 @@ class TestRateLimiting:
         registry._check_watch_patterns(session, "E back\n")
         # Drain to the last event
         last_evt = None
-        while not registry.watch_queue.empty():
-            last_evt = registry.watch_queue.get_nowait()
+        while not registry.completion_queue.empty():
+            last_evt = registry.completion_queue.get_nowait()
         assert last_evt["suppressed"] == 3
         assert session._watch_suppressed == 0  # reset after delivery
 
@@ -207,8 +207,8 @@ class TestOverloadKillSwitch:
         assert session._watch_disabled is True
         # Should have a watch_disabled event in the queue
         disabled_evts = []
-        while not registry.watch_queue.empty():
-            evt = registry.watch_queue.get_nowait()
+        while not registry.completion_queue.empty():
+            evt = registry.completion_queue.get_nowait()
             if evt.get("type") == "watch_disabled":
                 disabled_evts.append(evt)
         assert len(disabled_evts) == 1

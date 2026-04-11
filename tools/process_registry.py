@@ -127,15 +127,12 @@ class ProcessRegistry:
         # Side-channel for check_interval watchers (gateway reads after agent run)
         self.pending_watchers: List[Dict[str, Any]] = []
 
-        # Completion notifications — processes with notify_on_complete push here
-        # on exit.  CLI process_loop and gateway drain this after each agent turn
-        # to auto-trigger a new agent turn with the process results.
+        # Notification queue — unified queue for all background process events.
+        # Completion notifications (notify_on_complete) and watch pattern matches
+        # both land here, distinguished by "type" field.  CLI process_loop and
+        # gateway drain this after each agent turn to auto-trigger new turns.
         import queue as _queue_mod
         self.completion_queue: _queue_mod.Queue = _queue_mod.Queue()
-
-        # Watch pattern notifications — processes with watch_patterns push here
-        # when output matches a pattern.  Same consumption model as completion_queue.
-        self.watch_queue: _queue_mod.Queue = _queue_mod.Queue()
 
     @staticmethod
     def _clean_shell_noise(text: str) -> str:
@@ -186,7 +183,7 @@ class ProcessRegistry:
                     session._watch_overload_since = now
                 elif now - session._watch_overload_since > WATCH_OVERLOAD_KILL_SECONDS:
                     session._watch_disabled = True
-                    self.watch_queue.put({
+                    self.completion_queue.put({
                         "session_id": session.id,
                         "command": session.command,
                         "type": "watch_disabled",
@@ -214,7 +211,7 @@ class ProcessRegistry:
         if len(output) > 2000:
             output = output[:2000] + "\n...(truncated)"
 
-        self.watch_queue.put({
+        self.completion_queue.put({
             "session_id": session.id,
             "command": session.command,
             "type": "watch_match",
@@ -605,6 +602,7 @@ class ProcessRegistry:
             from tools.ansi_strip import strip_ansi
             output_tail = strip_ansi(session.output_buffer[-2000:]) if session.output_buffer else ""
             self.completion_queue.put({
+                "type": "completion",
                 "session_id": session.id,
                 "command": session.command,
                 "exit_code": session.exit_code,

@@ -476,6 +476,33 @@ def _resolve_hermes_bin() -> Optional[list[str]]:
     return None
 
 
+def _format_gateway_process_notification(evt: dict) -> "str | None":
+    """Format a watch pattern event from completion_queue into a [SYSTEM:] message."""
+    evt_type = evt.get("type", "completion")
+    _sid = evt.get("session_id", "unknown")
+    _cmd = evt.get("command", "unknown")
+
+    if evt_type == "watch_disabled":
+        return f"[SYSTEM: {evt.get('message', '')}]"
+
+    if evt_type == "watch_match":
+        _pat = evt.get("pattern", "?")
+        _out = evt.get("output", "")
+        _sup = evt.get("suppressed", 0)
+        text = (
+            f"[SYSTEM: Background process {_sid} matched "
+            f"watch pattern \"{_pat}\".\n"
+            f"Command: {_cmd}\n"
+            f"Matched output:\n{_out}"
+        )
+        if _sup:
+            text += f"\n({_sup} earlier matches were suppressed by rate limit)"
+        text += "]"
+        return text
+
+    return None
+
+
 class GatewayRunner:
     """
     Main gateway controller.
@@ -3430,34 +3457,26 @@ class GatewayRunner:
             except Exception as e:
                 logger.error("Process watcher setup error: %s", e)
 
-            # Drain watch pattern notifications that arrived during the agent run
+            # Drain watch pattern notifications that arrived during the agent run.
+            # Watch events and completions share the same queue; completions are
+            # already handled by the per-process watcher task above, so we only
+            # inject watch-type events here.
             try:
                 from tools.process_registry import process_registry as _pr
-                while not _pr.watch_queue.empty():
-                    watch_evt = _pr.watch_queue.get_nowait()
-                    _wsid = watch_evt.get("session_id", "unknown")
-                    _wcmd = watch_evt.get("command", "unknown")
-                    _wtype = watch_evt.get("type", "watch_match")
-                    if _wtype == "watch_disabled":
-                        synth_text = f"[SYSTEM: {watch_evt.get('message', '')}]"
-                    else:
-                        _wpat = watch_evt.get("pattern", "?")
-                        _wout = watch_evt.get("output", "")
-                        _wsup = watch_evt.get("suppressed", 0)
-                        synth_text = (
-                            f"[SYSTEM: Background process {_wsid} matched "
-                            f"watch pattern \"{_wpat}\".\n"
-                            f"Command: {_wcmd}\n"
-                            f"Matched output:\n{_wout}"
-                        )
-                        if _wsup:
-                            synth_text += f"\n({_wsup} earlier matches were suppressed by rate limit)"
-                        synth_text += "]"
-                    # Inject as synthetic message to trigger a new agent turn
-                    try:
-                        await self._inject_watch_notification(synth_text, event)
-                    except Exception as e2:
-                        logger.error("Watch notification injection error: %s", e2)
+                _watch_events = []
+                while not _pr.completion_queue.empty():
+                    evt = _pr.completion_queue.get_nowait()
+                    evt_type = evt.get("type", "completion")
+                    if evt_type in ("watch_match", "watch_disabled"):
+                        _watch_events.append(evt)
+                    # else: completion events are handled by the watcher task
+                for evt in _watch_events:
+                    synth_text = _format_gateway_process_notification(evt)
+                    if synth_text:
+                        try:
+                            await self._inject_watch_notification(synth_text, event)
+                        except Exception as e2:
+                            logger.error("Watch notification injection error: %s", e2)
             except Exception as e:
                 logger.debug("Watch queue drain error: %s", e)
 
