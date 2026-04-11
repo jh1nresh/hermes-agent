@@ -2890,7 +2890,23 @@ def _update_via_zip(args):
                 check=True,
             )
         _install_python_dependencies_with_optional_fallback(pip_cmd)
-    
+
+    # Build web UI frontend (optional — requires npm)
+    web_dir = PROJECT_ROOT / "web"
+    if (web_dir / "package.json").exists():
+        import shutil as _shutil
+        if _shutil.which("npm"):
+            print("→ Building web UI...")
+            r1 = subprocess.run(["npm", "install", "--silent"], cwd=web_dir, capture_output=True)
+            if r1.returncode == 0:
+                r2 = subprocess.run(["npm", "run", "build"], cwd=web_dir, capture_output=True)
+                if r2.returncode == 0:
+                    print("  ✓ Web UI built")
+                else:
+                    print("  ⚠ Web UI build failed (hermes web will not be available)")
+            else:
+                print("  ⚠ Web UI npm install failed (hermes web will not be available)")
+
     # Sync skills
     try:
         from tools.skills_sync import sync_skills
@@ -3637,7 +3653,23 @@ def cmd_update(args):
             if shutil.which("npm"):
                 print("→ Updating Node.js dependencies...")
                 subprocess.run(["npm", "install", "--silent"], cwd=PROJECT_ROOT, check=False)
-        
+
+        # Build web UI frontend (optional — requires npm)
+        web_dir = PROJECT_ROOT / "web"
+        if (web_dir / "package.json").exists():
+            import shutil as _shutil_web
+            if _shutil_web.which("npm"):
+                print("→ Building web UI...")
+                r1 = subprocess.run(["npm", "install", "--silent"], cwd=web_dir, capture_output=True)
+                if r1.returncode == 0:
+                    r2 = subprocess.run(["npm", "run", "build"], cwd=web_dir, capture_output=True)
+                    if r2.returncode == 0:
+                        print("  ✓ Web UI built")
+                    else:
+                        print("  ⚠ Web UI build failed (hermes web will not be available)")
+                else:
+                    print("  ⚠ Web UI npm install failed (hermes web will not be available)")
+
         print()
         print("✓ Code updated!")
         
@@ -3899,7 +3931,7 @@ def _coalesce_session_name_args(argv: list) -> list:
         "chat", "model", "gateway", "setup", "whatsapp", "login", "logout", "auth",
         "status", "cron", "doctor", "config", "pairing", "skills", "tools",
         "mcp", "sessions", "insights", "version", "update", "uninstall",
-        "profile",
+        "profile", "web",
     }
     _SESSION_FLAGS = {"-c", "--continue", "-r", "--resume"}
 
@@ -4169,6 +4201,50 @@ def cmd_profile(args):
         except (ValueError, FileExistsError, FileNotFoundError) as e:
             print(f"Error: {e}")
             sys.exit(1)
+
+
+def cmd_web(args):
+    """Start the web UI server."""
+    try:
+        import fastapi  # noqa: F401
+        import uvicorn  # noqa: F401
+    except ImportError:
+        print("Web UI dependencies not installed.")
+        print("Install them with:  pip install hermes-agent[web]")
+        sys.exit(1)
+
+    web_dist = PROJECT_ROOT / "hermes_cli" / "web_dist"
+    web_src = PROJECT_ROOT / "web"
+    if not web_dist.exists() and (web_src / "package.json").exists():
+        import shutil
+        npm = shutil.which("npm")
+        if npm:
+            import subprocess
+            print("→ Web UI not built yet — building now...")
+            r1 = subprocess.run([npm, "install", "--silent"], cwd=web_src, capture_output=True)
+            if r1.returncode == 0:
+                r2 = subprocess.run([npm, "run", "build"], cwd=web_src, capture_output=True)
+                if r2.returncode == 0:
+                    print("  ✓ Web UI built")
+                else:
+                    print("  ✗ Web UI build failed")
+                    print("  Run manually:  cd web && npm install && npm run build")
+                    sys.exit(1)
+            else:
+                print("  ✗ npm install failed")
+                print("  Run manually:  cd web && npm install && npm run build")
+                sys.exit(1)
+        else:
+            print("Web UI frontend not built and npm is not available.")
+            print("Install Node.js, then run:  cd web && npm install && npm run build")
+            sys.exit(1)
+
+    from hermes_cli.web_server import start_server
+    start_server(
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_open,
+    )
 
 
 def cmd_completion(args):
@@ -5577,6 +5653,19 @@ For more help on a command:
         help="Shell type (default: bash)",
     )
     completion_parser.set_defaults(func=cmd_completion)
+
+    # =========================================================================
+    # web command
+    # =========================================================================
+    web_parser = subparsers.add_parser(
+        "web",
+        help="Start the web UI dashboard",
+        description="Launch the Hermes Agent web dashboard for managing config, API keys, and sessions",
+    )
+    web_parser.add_argument("--port", type=int, default=9119, help="Port (default 9119)")
+    web_parser.add_argument("--host", default="127.0.0.1", help="Host (default 127.0.0.1)")
+    web_parser.add_argument("--no-open", action="store_true", help="Don't open browser automatically")
+    web_parser.set_defaults(func=cmd_web)
 
     # =========================================================================
     # logs command
