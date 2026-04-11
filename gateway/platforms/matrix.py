@@ -357,7 +357,7 @@ class MatrixAdapter(BasePlatformAdapter):
                 # pickle_key secures in-memory serialisation; derive from
                 # the same user_id:device_id pair used for the on-disk HMAC.
                 _acct_id = self._user_id or "hermes"
-                _pickle_key = f"{self._user_id}:{self._device_id}"
+                _pickle_key = f"{_acct_id}:{self._device_id}"
                 crypto_store = MemoryCryptoStore(
                     account_id=_acct_id,
                     pickle_key=_pickle_key,
