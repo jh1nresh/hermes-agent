@@ -1890,11 +1890,11 @@ class Migrator:
         if defaults.get("thinkingDefault"):
             # Map OpenClaw thinking -> Hermes reasoning_effort
             thinking = defaults["thinkingDefault"]
-            if thinking in ("always", "high"):
+            if thinking in ("always", "high", "xhigh"):
                 agent_cfg["reasoning_effort"] = "high"
-            elif thinking in ("auto", "medium"):
+            elif thinking in ("auto", "medium", "adaptive"):
                 agent_cfg["reasoning_effort"] = "medium"
-            elif thinking in ("off", "low", "none"):
+            elif thinking in ("off", "low", "none", "minimal"):
                 agent_cfg["reasoning_effort"] = "low"
             changes = True
 
@@ -2099,10 +2099,14 @@ class Migrator:
                                 f"Provider '{prov_name}' already exists")
                     continue
 
-                api_type = prov_cfg.get("apiType") or prov_cfg.get("type") or "openai"
+                api_type = prov_cfg.get("apiType") or prov_cfg.get("api") or prov_cfg.get("type") or "openai"
                 api_mode_map = {
                     "openai": "chat_completions",
+                    "openai-completions": "chat_completions",
+                    "openai-responses": "chat_completions",
                     "anthropic": "anthropic_messages",
+                    "anthropic-messages": "anthropic_messages",
+                    "google-generative-ai": "chat_completions",
                     "cohere": "chat_completions",
                 }
                 entry = {
@@ -2142,7 +2146,7 @@ class Migrator:
 
         # Extended channel token/allowlist mapping
         CHANNEL_ENV_MAP = {
-            "matrix": {"token": "MATRIX_ACCESS_TOKEN", "allowFrom": "MATRIX_ALLOWED_USERS",
+            "matrix": {"token": "MATRIX_ACCESS_TOKEN", "tokenField": "accessToken", "allowFrom": "MATRIX_ALLOWED_USERS",
                         "extras": {"homeserverUrl": "MATRIX_HOMESERVER_URL", "userId": "MATRIX_USER_ID"}},
             "mattermost": {"token": "MATTERMOST_BOT_TOKEN", "allowFrom": "MATTERMOST_ALLOWED_USERS",
                            "extras": {"url": "MATTERMOST_URL", "teamId": "MATTERMOST_TEAM_ID"}},
@@ -2161,9 +2165,11 @@ class Migrator:
                 continue
 
             # Extract tokens
-            if ch_mapping.get("token") and ch_cfg.get("botToken") and self.migrate_secrets:
-                self._set_env_var(ch_mapping["token"], ch_cfg["botToken"],
-                                  f"channels.{ch_name}.botToken")
+            token_field = ch_mapping.get("tokenField", "botToken")
+            ch_token = ch_cfg.get(token_field)
+            if ch_mapping.get("token") and ch_token and self.migrate_secrets:
+                self._set_env_var(ch_mapping["token"], str(ch_token),
+                                  f"channels.{ch_name}.{token_field}")
             if ch_mapping.get("allowFrom") and ch_cfg.get("allowFrom"):
                 allow_val = ch_cfg["allowFrom"]
                 if isinstance(allow_val, list):
