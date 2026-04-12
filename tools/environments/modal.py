@@ -293,7 +293,9 @@ class ModalEnvironment(BaseEnvironment):
                 offset += chunk_size
             proc.stdin.write_eof()
             await proc.stdin.drain.aio()
-            await proc.wait.aio()
+            exit_code = await proc.wait.aio()
+            if exit_code != 0:
+                raise RuntimeError(f"Modal upload failed (exit {exit_code})")
 
         self._worker.run_coroutine(_write(), timeout=30)
 

@@ -191,11 +191,13 @@ class SSHEnvironment(BaseEnvironment):
                 _, ssh_stderr = ssh_proc.communicate(timeout=120)
                 # Use communicate() instead of wait() to drain stderr and
                 # avoid deadlock if tar produces more than PIPE_BUF of errors.
+                # stdout is already closed (for SIGPIPE); only drain stderr.
+                # Cannot use communicate() here — it would call fileno()
+                # on the closed stdout fd and raise ValueError.
                 tar_stderr_raw = b""
                 if tar_proc.poll() is None:
-                    _, tar_stderr_raw = tar_proc.communicate(timeout=10)
-                else:
-                    tar_stderr_raw = tar_proc.stderr.read() if tar_proc.stderr else b""
+                    tar_proc.wait(timeout=10)
+                tar_stderr_raw = tar_proc.stderr.read() if tar_proc.stderr else b""
             except subprocess.TimeoutExpired:
                 tar_proc.kill()
                 ssh_proc.kill()
