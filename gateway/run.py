@@ -631,7 +631,18 @@ class GatewayRunner:
         # Track background tasks to prevent garbage collection mid-execution
         self._background_tasks: set = set()
 
-
+        # MCP config watcher state — detect header changes (e.g. OAuth token refresh)
+        self._mcp_config_mtime: float = 0.0
+        self._mcp_config_servers: dict = {}
+        try:
+            from hermes_cli.config import get_config_path, load_config
+            cfg_path = get_config_path()
+            if cfg_path.exists():
+                self._mcp_config_mtime = cfg_path.stat().st_mtime
+                cfg = load_config()
+                self._mcp_config_servers = cfg.get("mcp_servers") or {}
+        except Exception:
+            pass
 
 
     # -- Setup skill availability ----------------------------------------
@@ -1690,10 +1701,111 @@ class GatewayRunner:
             )
         asyncio.create_task(self._platform_reconnect_watcher())
 
+        # Start background MCP config watcher for auto-reloading on token refresh
+        asyncio.create_task(self._mcp_config_watcher())
+
         logger.info("Press Ctrl+C to stop")
         
         return True
     
+    async def _mcp_config_watcher(self, interval: int = 30, _initial_delay: int = 30) -> None:
+        """Background task that detects MCP config changes and auto-reloads connections.
+
+        Polls config.yaml every ``interval`` seconds.  When the ``mcp_servers``
+        section changes (e.g. OAuth token refresh updates the Authorization
+        header), triggers a full MCP shutdown + reconnect so the running
+        gateway picks up new credentials without a restart.
+
+        Mirrors the CLI's ``_check_config_mcp_changes`` but adapted for the
+        async gateway event loop.
+        """
+        # Initial delay — let startup finish. Sleep in 1s increments for quick shutdown.
+        for _ in range(_initial_delay):
+            if not self._running:
+                return
+            await asyncio.sleep(1)
+        logger.info("MCP config watcher started (checking every %ds)", interval)
+
+        while self._running:
+            try:
+                from hermes_cli.config import get_config_path
+                import yaml as _yaml
+
+                cfg_path = get_config_path()
+                if not cfg_path.exists():
+                    await asyncio.sleep(interval)
+                    continue
+
+                try:
+                    mtime = cfg_path.stat().st_mtime
+                except OSError:
+                    await asyncio.sleep(interval)
+                    continue
+
+                if mtime == self._mcp_config_mtime:
+                    await asyncio.sleep(interval)
+                    continue
+
+                # File changed — read and compare mcp_servers section
+                self._mcp_config_mtime = mtime
+                try:
+                    with open(cfg_path, encoding="utf-8") as f:
+                        new_cfg = _yaml.safe_load(f) or {}
+                except Exception:
+                    await asyncio.sleep(interval)
+                    continue
+
+                new_mcp = new_cfg.get("mcp_servers") or {}
+                if new_mcp == self._mcp_config_servers:
+                    # Some other config section changed, not MCP
+                    await asyncio.sleep(interval)
+                    continue
+
+                self._mcp_config_servers = new_mcp
+                logger.info("MCP config change detected — reloading connections...")
+
+                # Perform the reload in a thread to avoid blocking the event loop
+                loop = asyncio.get_event_loop()
+                try:
+                    from tools.mcp_tool import shutdown_mcp_servers, discover_mcp_tools, _servers, _lock
+
+                    with _lock:
+                        old_servers = set(_servers.keys())
+
+                    await loop.run_in_executor(None, shutdown_mcp_servers)
+                    new_tools = await loop.run_in_executor(None, discover_mcp_tools)
+
+                    with _lock:
+                        connected_servers = set(_servers.keys())
+
+                    added = connected_servers - old_servers
+                    removed = old_servers - connected_servers
+                    reconnected = connected_servers & old_servers
+
+                    parts = []
+                    if reconnected:
+                        parts.append(f"♻️ Reconnected: {', '.join(sorted(reconnected))}")
+                    if added:
+                        parts.append(f"➕ Added: {', '.join(sorted(added))}")
+                    if removed:
+                        parts.append(f"➖ Removed: {', '.join(sorted(removed))}")
+                    parts.append(
+                        f"🔧 {len(new_tools)} tool(s) from {len(connected_servers)} server(s)"
+                    )
+                    logger.info("MCP auto-reload complete: %s", "; ".join(parts))
+
+                except Exception as e:
+                    logger.warning("MCP auto-reload failed: %s", e)
+
+            except Exception as e:
+                logger.debug("MCP config watcher error: %s", e)
+
+            # Sleep in 1-second increments so we respond quickly to shutdown
+            for _ in range(interval):
+                if not self._running:
+                    return
+                await asyncio.sleep(1)
+
     async def _session_expiry_watcher(self, interval: int = 300):
         """Background task that proactively flushes memories for expired sessions.
         
