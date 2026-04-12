@@ -1,51 +1,29 @@
 ---
 name: github-code-review
-description: Review code changes by analyzing git diffs, leaving inline comments on PRs, and performing thorough pre-push review. Works with gh CLI or falls back to git + GitHub REST API via curl.
-version: 1.1.0
+description: Review code changes by analyzing git diffs, leaving inline comments on PRs, and performing thorough pre-push review. Uses GitHub MCP tools (mcp_github_*) as the primary interface, with git CLI for local diff operations.
+version: 2.0.0
 author: Hermes Agent
 license: MIT
 metadata:
   hermes:
-    tags: [GitHub, Code-Review, Pull-Requests, Git, Quality]
+    tags: [GitHub, Code-Review, Pull-Requests, Git, Quality, MCP]
     related_skills: [github-auth, github-pr-workflow]
 ---
 
 # GitHub Code Review
 
-Perform code reviews on local changes before pushing, or review open PRs on GitHub. Most of this skill uses plain `git` — the `gh`/`curl` split only matters for PR-level interactions.
+Perform code reviews on local changes before pushing, or review open PRs on GitHub. This skill uses **GitHub MCP tools** (`mcp_github_*`) as the primary interface for all GitHub API interactions, with plain `git` for local diff operations.
 
 ## Prerequisites
 
-- Authenticated with GitHub (see `github-auth` skill)
-- Inside a git repository
-
-### Setup (for PR interactions)
-
-```bash
-if command -v gh &>/dev/null && gh auth status &>/dev/null; then
-  AUTH="gh"
-else
-  AUTH="git"
-  if [ -z "$GITHUB_TOKEN" ]; then
-    if [ -f ~/.hermes/.env ] && grep -q "^GITHUB_TOKEN=" ~/.hermes/.env; then
-      GITHUB_TOKEN=$(grep "^GITHUB_TOKEN=" ~/.hermes/.env | head -1 | cut -d= -f2 | tr -d '\n\r')
-    elif grep -q "github.com" ~/.git-credentials 2>/dev/null; then
-      GITHUB_TOKEN=$(grep "github.com" ~/.git-credentials 2>/dev/null | head -1 | sed 's|https://[^:]*:\([^@]*\)@.*|\1|')
-    fi
-  fi
-fi
-
-REMOTE_URL=$(git remote get-url origin)
-OWNER_REPO=$(echo "$REMOTE_URL" | sed -E 's|.*github\.com[:/]||; s|\.git$||')
-OWNER=$(echo "$OWNER_REPO" | cut -d/ -f1)
-REPO=$(echo "$OWNER_REPO" | cut -d/ -f2)
-```
+- GitHub MCP server configured (provides `mcp_github_*` tools)
+- Inside a git repository (for local diff operations)
 
 ---
 
 ## 1. Reviewing Local Changes (Pre-Push)
 
-This is pure `git` — works everywhere, no API needed.
+Local diffs use plain `git` — no API needed.
 
 ### Get the Diff
 
@@ -122,157 +100,205 @@ When reviewing local changes, present findings in this structure:
 
 ---
 
-## 2. Reviewing a Pull Request on GitHub
+## 2. Reviewing a Pull Request on GitHub (MCP Tools)
 
-### View PR Details
+### Step 1: Gather PR Context
 
-**With gh:**
+Use MCP tools to get PR metadata, description, and changed files:
 
-```bash
-gh pr view 123
-gh pr diff 123
-gh pr diff 123 --name-only
+```
+# Get PR details (title, author, description, branch, status)
+mcp_github_pull_request_read(method="get", owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
+
+# Get the diff
+mcp_github_pull_request_read(method="get_diff", owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
+
+# Get list of changed files with additions/deletions
+mcp_github_pull_request_read(method="get_files", owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
+
+# Get CI/CD status
+mcp_github_pull_request_read(method="get_status", owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
+
+# Get check runs (individual CI jobs)
+mcp_github_pull_request_read(method="get_check_runs", owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
 ```
 
-**With git + curl:**
+### Step 2: Read File Contents for Context
 
-```bash
-PR_NUMBER=123
+For each changed file, read the full file to understand the surrounding context:
 
-# Get PR details
-curl -s \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER \
-  | python3 -c "
-import sys, json
-pr = json.load(sys.stdin)
-print(f\"Title: {pr['title']}\")
-print(f\"Author: {pr['user']['login']}\")
-print(f\"Branch: {pr['head']['ref']} -> {pr['base']['ref']}\")
-print(f\"State: {pr['state']}\")
-print(f\"Body:\n{pr['body']}\")"
-
-# List changed files
-curl -s \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER/files \
-  | python3 -c "
-import sys, json
-for f in json.load(sys.stdin):
-    print(f\"{f['status']:10} +{f['additions']:-4} -{f['deletions']:-4}  {f['filename']}\")"
+```
+# Read specific files from the PR branch
+mcp_github_get_file_contents(owner=OWNER, repo=REPO, path="src/auth/login.py", ref="refs/pull/PR_NUMBER/head")
 ```
 
-### Check Out PR Locally for Full Review
+### Step 3: Check Out Locally (Optional — for running tests)
 
-This works with plain `git` — no `gh` needed:
-
-```bash
-# Fetch the PR branch and check it out
-git fetch origin pull/123/head:pr-123
-git checkout pr-123
-
-# Now you can use read_file, search_files, run tests, etc.
-
-# View diff against the base branch
-git diff main...pr-123
-```
-
-**With gh (shortcut):**
+If you need to run tests or linters locally:
 
 ```bash
-gh pr checkout 123
+git fetch origin pull/PR_NUMBER/head:pr-PR_NUMBER
+git checkout pr-PR_NUMBER
+
+# Run tests
+python -m pytest 2>&1 | tail -20
+
+# Run linter
+ruff check . 2>&1 | head -30
 ```
 
-### Leave Comments on a PR
+### Step 4: Get Existing Review Comments
 
-**General PR comment — with gh:**
+Check what's already been discussed:
+
+```
+# Get review threads (grouped comments on code locations)
+mcp_github_pull_request_read(method="get_review_comments", owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
+
+# Get general PR comments
+mcp_github_pull_request_read(method="get_comments", owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
+
+# Get formal reviews (approvals, change requests)
+mcp_github_pull_request_read(method="get_reviews", owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
+```
+
+### Step 5: Apply the Review Checklist (Section 3)
+
+Go through each category systematically.
+
+### Step 6: Submit a Formal Review with Inline Comments
+
+Use the MCP review tools to submit findings:
+
+**Create a pending review, add inline comments, then submit:**
+
+```
+# Step A: Create a pending review (omit "event" to keep it pending)
+mcp_github_pull_request_review_write(
+    method="create",
+    owner=OWNER,
+    repo=REPO,
+    pullNumber=PR_NUMBER
+)
+
+# Step B: Add inline comments to the pending review
+mcp_github_add_comment_to_pending_review(
+    owner=OWNER,
+    repo=REPO,
+    pullNumber=PR_NUMBER,
+    path="src/auth.py",
+    line=45,
+    body="🔴 **Critical:** User input passed directly to SQL query — use parameterized queries.",
+    subjectType="LINE",
+    side="RIGHT"
+)
+
+mcp_github_add_comment_to_pending_review(
+    owner=OWNER,
+    repo=REPO,
+    pullNumber=PR_NUMBER,
+    path="src/models/user.py",
+    line=23,
+    body="⚠️ **Warning:** Password stored without hashing. Use bcrypt or argon2.",
+    subjectType="LINE",
+    side="RIGHT"
+)
+
+# Step C: Submit the pending review
+mcp_github_pull_request_review_write(
+    method="submit_pending",
+    owner=OWNER,
+    repo=REPO,
+    pullNumber=PR_NUMBER,
+    event="REQUEST_CHANGES",  # or "APPROVE" or "COMMENT"
+    body="## Hermes Agent Review\n\nFound 2 issues. See inline comments."
+)
+```
+
+**Or submit a review directly (no pending step):**
+
+```
+# Approve
+mcp_github_pull_request_review_write(
+    method="create",
+    owner=OWNER,
+    repo=REPO,
+    pullNumber=PR_NUMBER,
+    event="APPROVE",
+    body="LGTM! Code looks clean — good test coverage, no security concerns."
+)
+
+# Request changes
+mcp_github_pull_request_review_write(
+    method="create",
+    owner=OWNER,
+    repo=REPO,
+    pullNumber=PR_NUMBER,
+    event="REQUEST_CHANGES",
+    body="Found a few issues — see inline comments."
+)
+```
+
+### Step 7: Post a Summary Comment
+
+Leave a top-level summary so the PR author gets the full picture:
+
+```
+mcp_github_add_issue_comment(
+    owner=OWNER,
+    repo=REPO,
+    issue_number=PR_NUMBER,
+    body="""## Code Review Summary
+
+**Verdict: Changes Requested** (2 issues, 1 suggestion)
+
+### 🔴 Critical
+- **src/auth.py:45** — SQL injection vulnerability
+
+### ⚠️ Warnings
+- **src/models.py:23** — Plaintext password storage
+
+### 💡 Suggestions
+- **src/utils.py:8** — Duplicated logic, consider consolidating
+
+### ✅ Looks Good
+- Clean API design
+- Good error handling in the middleware layer
+
+---
+*Reviewed by Hermes Agent*"""
+)
+```
+
+### Step 8: Reply to Existing Comments
+
+If the PR author responds to your review:
+
+```
+# Reply to a specific review comment
+mcp_github_add_reply_to_pull_request_comment(
+    owner=OWNER,
+    repo=REPO,
+    pullNumber=PR_NUMBER,
+    commentId=COMMENT_ID,
+    body="Good point! That approach works too."
+)
+```
+
+### Step 9: Request Copilot Review (Optional)
+
+For automated AI feedback before your review:
+
+```
+mcp_github_request_copilot_review(owner=OWNER, repo=REPO, pullNumber=PR_NUMBER)
+```
+
+### Step 10: Clean Up (if checked out locally)
 
 ```bash
-gh pr comment 123 --body "Overall looks good, a few suggestions below."
+git checkout main
+git branch -D pr-PR_NUMBER
 ```
-
-**General PR comment — with curl:**
-
-```bash
-curl -s -X POST \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/issues/$PR_NUMBER/comments \
-  -d '{"body": "Overall looks good, a few suggestions below."}'
-```
-
-### Leave Inline Review Comments
-
-**Single inline comment — with gh (via API):**
-
-```bash
-HEAD_SHA=$(gh pr view 123 --json headRefOid --jq '.headRefOid')
-
-gh api repos/$OWNER/$REPO/pulls/123/comments \
-  --method POST \
-  -f body="This could be simplified with a list comprehension." \
-  -f path="src/auth/login.py" \
-  -f commit_id="$HEAD_SHA" \
-  -f line=45 \
-  -f side="RIGHT"
-```
-
-**Single inline comment — with curl:**
-
-```bash
-# Get the head commit SHA
-HEAD_SHA=$(curl -s \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['head']['sha'])")
-
-curl -s -X POST \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments \
-  -d "{
-    \"body\": \"This could be simplified with a list comprehension.\",
-    \"path\": \"src/auth/login.py\",
-    \"commit_id\": \"$HEAD_SHA\",
-    \"line\": 45,
-    \"side\": \"RIGHT\"
-  }"
-```
-
-### Submit a Formal Review (Approve / Request Changes)
-
-**With gh:**
-
-```bash
-gh pr review 123 --approve --body "LGTM!"
-gh pr review 123 --request-changes --body "See inline comments."
-gh pr review 123 --comment --body "Some suggestions, nothing blocking."
-```
-
-**With curl — multi-comment review submitted atomically:**
-
-```bash
-HEAD_SHA=$(curl -s \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['head']['sha'])")
-
-curl -s -X POST \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews \
-  -d "{
-    \"commit_id\": \"$HEAD_SHA\",
-    \"event\": \"COMMENT\",
-    \"body\": \"Code review from Hermes Agent\",
-    \"comments\": [
-      {\"path\": \"src/auth.py\", \"line\": 45, \"body\": \"Use parameterized queries to prevent SQL injection.\"},
-      {\"path\": \"src/models/user.py\", \"line\": 23, \"body\": \"Hash passwords with bcrypt before storing.\"},
-      {\"path\": \"tests/test_auth.py\", \"line\": 1, \"body\": \"Add test for expired token edge case.\"}
-    ]
-  }"
-```
-
-Event values: `"APPROVE"`, `"REQUEST_CHANGES"`, `"COMMENT"`
-
-The `line` field refers to the line number in the *new* version of the file. For deleted lines, use `"side": "LEFT"`.
 
 ---
 
@@ -290,6 +316,7 @@ When performing a code review (local or PR), systematically check:
 - Input validation on user-facing inputs
 - No SQL injection, XSS, or path traversal
 - Auth/authz checks where needed
+- Use `mcp_github_run_secret_scanning` on changed files for automated secret detection
 
 ### Code Quality
 - Clear naming (variables, functions, classes)
@@ -327,151 +354,30 @@ When the user asks you to "review the code" or "check before pushing":
 
 ---
 
-## 5. PR Review Workflow (End-to-End)
+## 5. PR Review Workflow (End-to-End with MCP Tools)
 
-When the user asks you to "review PR #N", "look at this PR", or gives you a PR URL, follow this recipe:
+When the user asks you to "review PR #N", "look at this PR", or gives you a PR URL:
 
-### Step 1: Set up environment
+### Quick Reference
 
-```bash
-source ~/.hermes/skills/github/github-auth/scripts/gh-env.sh
-# Or run the inline setup block from the top of this skill
-```
-
-### Step 2: Gather PR context
-
-Get the PR metadata, description, and list of changed files to understand scope before diving into code.
-
-**With gh:**
-```bash
-gh pr view 123
-gh pr diff 123 --name-only
-gh pr checks 123
-```
-
-**With curl:**
-```bash
-PR_NUMBER=123
-
-# PR details (title, author, description, branch)
-curl -s -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$GH_OWNER/$GH_REPO/pulls/$PR_NUMBER
-
-# Changed files with line counts
-curl -s -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$GH_OWNER/$GH_REPO/pulls/$PR_NUMBER/files
-```
-
-### Step 3: Check out the PR locally
-
-This gives you full access to `read_file`, `search_files`, and the ability to run tests.
-
-```bash
-git fetch origin pull/$PR_NUMBER/head:pr-$PR_NUMBER
-git checkout pr-$PR_NUMBER
-```
-
-### Step 4: Read the diff and understand changes
-
-```bash
-# Full diff against the base branch
-git diff main...HEAD
-
-# Or file-by-file for large PRs
-git diff main...HEAD --name-only
-# Then for each file:
-git diff main...HEAD -- path/to/file.py
-```
-
-For each changed file, use `read_file` to see full context around the changes — diffs alone can miss issues visible only with surrounding code.
-
-### Step 5: Run automated checks locally (if applicable)
-
-```bash
-# Run tests if there's a test suite
-python -m pytest 2>&1 | tail -20
-# or: npm test, cargo test, go test ./..., etc.
-
-# Run linter if configured
-ruff check . 2>&1 | head -30
-# or: eslint, clippy, etc.
-```
-
-### Step 6: Apply the review checklist (Section 3)
-
-Go through each category: Correctness, Security, Code Quality, Testing, Performance, Documentation.
-
-### Step 7: Post the review to GitHub
-
-Collect your findings and submit them as a formal review with inline comments.
-
-**With gh:**
-```bash
-# If no issues — approve
-gh pr review $PR_NUMBER --approve --body "Reviewed by Hermes Agent. Code looks clean — good test coverage, no security concerns."
-
-# If issues found — request changes with inline comments
-gh pr review $PR_NUMBER --request-changes --body "Found a few issues — see inline comments."
-```
-
-**With curl — atomic review with multiple inline comments:**
-```bash
-HEAD_SHA=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$GH_OWNER/$GH_REPO/pulls/$PR_NUMBER \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['head']['sha'])")
-
-# Build the review JSON — event is APPROVE, REQUEST_CHANGES, or COMMENT
-curl -s -X POST \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$GH_OWNER/$GH_REPO/pulls/$PR_NUMBER/reviews \
-  -d "{
-    \"commit_id\": \"$HEAD_SHA\",
-    \"event\": \"REQUEST_CHANGES\",
-    \"body\": \"## Hermes Agent Review\n\nFound 2 issues, 1 suggestion. See inline comments.\",
-    \"comments\": [
-      {\"path\": \"src/auth.py\", \"line\": 45, \"body\": \"🔴 **Critical:** User input passed directly to SQL query — use parameterized queries.\"},
-      {\"path\": \"src/models.py\", \"line\": 23, \"body\": \"⚠️ **Warning:** Password stored without hashing.\"},
-      {\"path\": \"src/utils.py\", \"line\": 8, \"body\": \"💡 **Suggestion:** This duplicates logic in core/utils.py:34.\"}
-    ]
-  }"
-```
-
-### Step 8: Also post a summary comment
-
-In addition to inline comments, leave a top-level summary so the PR author gets the full picture at a glance. Use the review output format from `references/review-output-template.md`.
-
-**With gh:**
-```bash
-gh pr comment $PR_NUMBER --body "$(cat <<'EOF'
-## Code Review Summary
-
-**Verdict: Changes Requested** (2 issues, 1 suggestion)
-
-### 🔴 Critical
-- **src/auth.py:45** — SQL injection vulnerability
-
-### ⚠️ Warnings
-- **src/models.py:23** — Plaintext password storage
-
-### 💡 Suggestions
-- **src/utils.py:8** — Duplicated logic, consider consolidating
-
-### ✅ Looks Good
-- Clean API design
-- Good error handling in the middleware layer
-
----
-*Reviewed by Hermes Agent*
-EOF
-)"
-```
-
-### Step 9: Clean up
-
-```bash
-git checkout main
-git branch -D pr-$PR_NUMBER
-```
+| Task | MCP Tool |
+|------|----------|
+| Get PR details | `mcp_github_pull_request_read(method="get")` |
+| Get PR diff | `mcp_github_pull_request_read(method="get_diff")` |
+| Get changed files | `mcp_github_pull_request_read(method="get_files")` |
+| Get CI status | `mcp_github_pull_request_read(method="get_status")` |
+| Get check runs | `mcp_github_pull_request_read(method="get_check_runs")` |
+| Read file contents | `mcp_github_get_file_contents(ref="refs/pull/N/head")` |
+| Get review threads | `mcp_github_pull_request_read(method="get_review_comments")` |
+| Get PR comments | `mcp_github_pull_request_read(method="get_comments")` |
+| Get reviews | `mcp_github_pull_request_read(method="get_reviews")` |
+| Create pending review | `mcp_github_pull_request_review_write(method="create")` |
+| Add inline comment | `mcp_github_add_comment_to_pending_review()` |
+| Submit review | `mcp_github_pull_request_review_write(method="submit_pending")` |
+| Add PR comment | `mcp_github_add_issue_comment()` |
+| Reply to comment | `mcp_github_add_reply_to_pull_request_comment()` |
+| Scan for secrets | `mcp_github_run_secret_scanning()` |
+| Request Copilot review | `mcp_github_request_copilot_review()` |
 
 ### Decision: Approve vs Request Changes vs Comment
 
