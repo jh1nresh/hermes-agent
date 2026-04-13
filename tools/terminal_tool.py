@@ -636,6 +636,8 @@ def _create_environment(env_type: str, image: str, cwd: str, timeout: int,
     
     elif env_type == "modal":
         sandbox_kwargs = {}
+        lifetime = cc.get("lifetime_seconds", 3600)
+        sandbox_kwargs["timeout"] = int(lifetime)
         if cpu > 0:
             sandbox_kwargs["cpu"] = cpu
         if memory > 0:
@@ -1119,6 +1121,7 @@ def terminal_tool(
                                 "modal_mode": config.get("modal_mode", "auto"),
                                 "docker_volumes": config.get("docker_volumes", []),
                                 "docker_mount_cwd_to_workspace": config.get("docker_mount_cwd_to_workspace", False),
+                                "lifetime_seconds": config.get("lifetime_seconds", 3600),
                             }
 
                         local_config = None

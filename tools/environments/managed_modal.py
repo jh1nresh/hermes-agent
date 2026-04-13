@@ -185,7 +185,7 @@ class ManagedModalEnvironment(BaseModalExecutionEnvironment):
             "cwd": self.cwd,
             "cpu": cpu,
             "memoryMiB": memory,
-            "timeoutMs": 3_600_000,
+            "timeoutMs": int(self._sandbox_kwargs.get("timeout", 3600)) * 1000,
             "idleTimeoutMs": max(300_000, int(self.timeout * 1000)),
             "persistentFilesystem": self._persistent,
             "logicalKey": self._task_id,
