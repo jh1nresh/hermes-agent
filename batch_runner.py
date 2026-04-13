@@ -538,6 +538,7 @@ class BatchRunner:
         reasoning_config: Dict[str, Any] = None,
         prefill_messages: List[Dict[str, Any]] = None,
         max_samples: int = None,
+        output_dir: str = None,
     ):
         """
         Initialize the batch runner.
@@ -590,7 +591,7 @@ class BatchRunner:
             raise ValueError(f"Unknown distribution: {distribution}. Available: {list(list_distributions().keys())}")
         
         # Setup output directory
-        self.output_dir = Path("data") / run_name
+        self.output_dir = Path(output_dir) if output_dir else Path("data") / run_name
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Checkpoint file
@@ -1124,6 +1125,7 @@ def main(
     verbose: bool = False,
     list_distributions: bool = False,
     ephemeral_system_prompt: str = None,
+    ephemeral_system_prompt_file: str = None,
     log_prefix_chars: int = 100,
     providers_allowed: str = None,
     providers_ignored: str = None,
@@ -1134,6 +1136,7 @@ def main(
     reasoning_disabled: bool = False,
     prefill_messages_file: str = None,
     max_samples: int = None,
+    output_dir: str = None,
 ):
     """
     Run batch processing of agent prompts from a dataset.
@@ -1200,6 +1203,11 @@ def main(
         print("                         --run_name=my_run --distribution=<name>")
         return
     
+    # Load system prompt from file if provided
+    if ephemeral_system_prompt_file and not ephemeral_system_prompt:
+        with open(ephemeral_system_prompt_file) as _f:
+            ephemeral_system_prompt = _f.read()
+
     # Validate required arguments
     if not dataset_file:
         print("❌ Error: --dataset_file is required")
@@ -1271,6 +1279,7 @@ def main(
             reasoning_config=reasoning_config,
             prefill_messages=prefill_messages,
             max_samples=max_samples,
+            output_dir=output_dir,
         )
 
         runner.run(resume=resume)

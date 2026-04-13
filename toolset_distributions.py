@@ -37,7 +37,8 @@ DISTRIBUTIONS = {
             "terminal": 100,
             "file": 100,
             "moa": 100,
-            "browser": 100
+            "browser": 100,
+            "delegation": 100
         }
     },
     
