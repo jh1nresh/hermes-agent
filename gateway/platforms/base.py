@@ -1669,6 +1669,10 @@ class BasePlatformAdapter(ABC):
                         inline_keyboard, text_content = self.extract_inline_keyboard(text_content)
                     except Exception as kb_err:
                         logger.warning("[%s] Failed to extract inline keyboard: %s", self.name, kb_err)
+                # If the response was only a keyboard block, provide minimal
+                # placeholder text so there's a message to attach buttons to.
+                if inline_keyboard and not text_content:
+                    text_content = "Please choose:"
 
                 if images:
                     logger.info("[%s] extract_images found %d image(s) in response (%d chars)", self.name, len(images), len(response))

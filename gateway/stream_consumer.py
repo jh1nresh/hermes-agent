@@ -241,6 +241,10 @@ class GatewayStreamConsumer:
                             inline_keyboard, self._accumulated = self.adapter.extract_inline_keyboard(self._accumulated)
                         except Exception as kb_err:
                             logger.warning("Stream: failed to extract keyboard tag: %s", kb_err)
+                    # Keyboard-only response: provide placeholder so there's
+                    # a message to attach buttons to.
+                    if inline_keyboard and not self._accumulated:
+                        self._accumulated = "Please choose:"
 
                     # Final edit without cursor. If progressive editing failed
                     # mid-stream, send a single continuation/fallback message

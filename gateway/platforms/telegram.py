@@ -1545,12 +1545,21 @@ class TelegramAdapter(BasePlatformAdapter):
             except Exception:
                 pass
 
+        # Re-inject as a virtual user message.
+        # We use _build_message_event(query.message) to inherit the correct
+        # chat/thread context (the bot's reply lives in the same chat).
+        # message_id is intentionally kept as the bot's message so the
+        # agent's response threads off the keyboard message (better UX).
+        from_user = getattr(query, "from_user", None)
+        if not from_user:
+            logger.warning("[%s] ck: callback has no from_user, cannot re-inject", self.name)
+            return
+
         try:
             event = self._build_message_event(query.message, MessageType.TEXT)
             event.text = data
-            if event.source and getattr(query, "from_user", None):
-                event.source.user_id = str(query.from_user.id)
-                event.source.user_name = query.from_user.full_name
+            event.source.user_id = str(from_user.id)
+            event.source.user_name = from_user.full_name
             await self.handle_message(event)
         except Exception as exc:
             logger.error(
