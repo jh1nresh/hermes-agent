@@ -8,19 +8,23 @@ import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import CronPage from "@/pages/CronPage";
 import SkillsPage from "@/pages/SkillsPage";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useI18n } from "@/i18n";
 
 const NAV_ITEMS = [
-  { path: "/", label: "Status", icon: Activity },
-  { path: "/sessions", label: "Sessions", icon: MessageSquare },
-  { path: "/analytics", label: "Analytics", icon: BarChart3 },
-  { path: "/logs", label: "Logs", icon: FileText },
-  { path: "/cron", label: "Cron", icon: Clock },
-  { path: "/skills", label: "Skills", icon: Package },
-  { path: "/config", label: "Config", icon: Settings },
-  { path: "/env", label: "Keys", icon: KeyRound },
+  { path: "/", labelKey: "status" as const, icon: Activity },
+  { path: "/sessions", labelKey: "sessions" as const, icon: MessageSquare },
+  { path: "/analytics", labelKey: "analytics" as const, icon: BarChart3 },
+  { path: "/logs", labelKey: "logs" as const, icon: FileText },
+  { path: "/cron", labelKey: "cron" as const, icon: Clock },
+  { path: "/skills", labelKey: "skills" as const, icon: Package },
+  { path: "/config", labelKey: "config" as const, icon: Settings },
+  { path: "/env", labelKey: "keys" as const, icon: KeyRound },
 ] as const;
 
 export default function App() {
+  const { t } = useI18n();
+
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground overflow-x-hidden">
       <div className="noise-overlay" />
@@ -35,7 +39,7 @@ export default function App() {
           </div>
 
           <nav className="flex items-stretch overflow-x-auto scrollbar-none">
-            {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
+            {NAV_ITEMS.map(({ path, labelKey, icon: Icon }) => (
               <NavLink
                 key={path}
                 to={path}
@@ -51,7 +55,7 @@ export default function App() {
                 {({ isActive }) => (
                   <>
                     <Icon className="h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0" />
-                    <span className="hidden sm:inline">{label}</span>
+                    <span className="hidden sm:inline">{t.app.nav[labelKey]}</span>
                     <span className="absolute inset-0 bg-foreground pointer-events-none transition-opacity duration-150 group-hover:opacity-5 opacity-0" />
                     {isActive && (
                       <span className="absolute bottom-0 left-0 right-0 h-px bg-foreground" />
@@ -62,9 +66,10 @@ export default function App() {
             ))}
           </nav>
 
-          <div className="ml-auto hidden sm:flex items-center px-4 text-muted-foreground">
-            <span className="font-display text-[0.7rem] tracking-[0.15em] uppercase opacity-50">
-              Web UI
+          <div className="ml-auto flex items-center gap-2 px-2 sm:px-4">
+            <LanguageSwitcher />
+            <span className="hidden sm:inline font-display text-[0.7rem] tracking-[0.15em] uppercase opacity-50">
+              {t.app.webUi}
             </span>
           </div>
         </div>
@@ -87,10 +92,10 @@ export default function App() {
       <footer className="relative z-2 border-t border-border">
         <div className="mx-auto flex max-w-[1400px] items-center justify-between px-3 sm:px-6 py-3">
           <span className="font-display text-[0.7rem] sm:text-[0.8rem] tracking-[0.12em] uppercase opacity-50">
-            Hermes Agent
+            {t.app.footer.name}
           </span>
           <span className="font-display text-[0.6rem] sm:text-[0.7rem] tracking-[0.15em] uppercase text-foreground/40">
-            Nous Research
+            {t.app.footer.org}
           </span>
         </div>
       </footer>

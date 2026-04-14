@@ -1618,6 +1618,10 @@ def _model_flow_custom(config):
             model_name = input("Model name (e.g. gpt-4, llama-3-70b): ").strip()
 
         context_length_str = input("Context length in tokens [leave blank for auto-detect]: ").strip()
+
+        # Prompt for a display name — shown in the provider menu on future runs
+        default_name = _auto_provider_name(effective_url)
+        display_name = input(f"Display name [{default_name}]: ").strip() or default_name
     except (KeyboardInterrupt, EOFError):
         print("\nCancelled.")
         return
@@ -1673,15 +1677,37 @@ def _model_flow_custom(config):
         print("Endpoint saved. Use `/model` in chat or `hermes model` to set a model.")
 
     # Auto-save to custom_providers so it appears in the menu next time
-    _save_custom_provider(effective_url, effective_key, model_name or "", context_length=context_length)
+    _save_custom_provider(effective_url, effective_key, model_name or "",
+                          context_length=context_length, name=display_name)
 
 
-def _save_custom_provider(base_url, api_key="", model="", context_length=None):
+def _auto_provider_name(base_url: str) -> str:
+    """Generate a display name from a custom endpoint URL.
+
+    Returns a human-friendly label like "Local (localhost:11434)" or
+    "RunPod (xyz.runpod.io)".  Used as the default when prompting the
+    user for a display name during custom endpoint setup.
+    """
+    import re
+    clean = base_url.replace("https://", "").replace("http://", "").rstrip("/")
+    clean = re.sub(r"/v1/?$", "", clean)
+    name = clean.split("/")[0]
+    if "localhost" in name or "127.0.0.1" in name:
+        name = f"Local ({name})"
+    elif "runpod" in name.lower():
+        name = f"RunPod ({name})"
+    else:
+        name = name.capitalize()
+    return name
+
+
+def _save_custom_provider(base_url, api_key="", model="", context_length=None,
+                          name=None):
     """Save a custom endpoint to custom_providers in config.yaml.
 
     Deduplicates by base_url — if the URL already exists, updates the
     model name and context_length but doesn't add a duplicate entry.
-    Auto-generates a display name from the URL hostname.
+    Uses *name* when provided, otherwise auto-generates from the URL.
     """
     from hermes_cli.config import load_config, save_config
 
@@ -1709,20 +1735,9 @@ def _save_custom_provider(base_url, api_key="", model="", context_length=None):
                 save_config(cfg)
             return  # already saved, updated if needed
 
-    # Auto-generate a name from the URL
-    import re
-    clean = base_url.replace("https://", "").replace("http://", "").rstrip("/")
-    # Remove /v1 suffix for cleaner names
-    clean = re.sub(r"/v1/?$", "", clean)
-    # Use hostname:port as the name
-    name = clean.split("/")[0]
-    # Capitalize for readability
-    if "localhost" in name or "127.0.0.1" in name:
-        name = f"Local ({name})"
-    elif "runpod" in name.lower():
-        name = f"RunPod ({name})"
-    else:
-        name = name.capitalize()
+    # Use provided name or auto-generate from URL
+    if not name:
+        name = _auto_provider_name(base_url)
 
     entry = {"name": name, "base_url": base_url}
     if api_key:
@@ -4021,7 +4036,40 @@ def cmd_update(args):
                                     capture_output=True, text=True, timeout=15,
                                 )
                                 if restart.returncode == 0:
-                                    restarted_services.append(svc_name)
+                                    # Verify the service actually survived the
+                                    # restart.  systemctl restart returns 0 even
+                                    # if the new process crashes immediately.
+                                    import time as _time
+                                    _time.sleep(3)
+                                    verify = subprocess.run(
+                                        scope_cmd + ["is-active", svc_name],
+                                        capture_output=True, text=True, timeout=5,
+                                    )
+                                    if verify.stdout.strip() == "active":
+                                        restarted_services.append(svc_name)
+                                    else:
+                                        # Retry once — transient startup failures
+                                        # (stale module cache, import race) often
+                                        # resolve on the second attempt.
+                                        print(f"  ⚠ {svc_name} died after restart, retrying...")
+                                        retry = subprocess.run(
+                                            scope_cmd + ["restart", svc_name],
+                                            capture_output=True, text=True, timeout=15,
+                                        )
+                                        _time.sleep(3)
+                                        verify2 = subprocess.run(
+                                            scope_cmd + ["is-active", svc_name],
+                                            capture_output=True, text=True, timeout=5,
+                                        )
+                                        if verify2.stdout.strip() == "active":
+                                            restarted_services.append(svc_name)
+                                            print(f"  ✓ {svc_name} recovered on retry")
+                                        else:
+                                            print(
+                                                f"  ✗ {svc_name} failed to stay running after restart.\n"
+                                                f"    Check logs: journalctl --user -u {svc_name} --since '2 min ago'\n"
+                                                f"    Restart manually: systemctl {'--user ' if scope == 'user' else ''}restart {svc_name}"
+                                            )
                                 else:
                                     print(f"  ⚠ Failed to restart {svc_name}: {restart.stderr.strip()}")
                     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -4109,6 +4157,8 @@ def _coalesce_session_name_args(argv: list) -> list:
         "status", "cron", "doctor", "config", "pairing", "skills", "tools",
         "mcp", "sessions", "insights", "version", "update", "uninstall",
         "profile", "dashboard",
+        "honcho", "claw", "plugins", "acp",
+        "webhook", "memory", "dump", "debug", "backup", "import", "completion", "logs",
     }
     _SESSION_FLAGS = {"-c", "--continue", "-r", "--resume"}
 
@@ -4404,17 +4454,20 @@ def cmd_dashboard(args):
         host=args.host,
         port=args.port,
         open_browser=not args.no_open,
+        allow_public=getattr(args, "insecure", False),
     )
 
 
-def cmd_completion(args):
+def cmd_completion(args, parser=None):
     """Print shell completion script."""
-    from hermes_cli.profiles import generate_bash_completion, generate_zsh_completion
+    from hermes_cli.completion import generate_bash, generate_zsh, generate_fish
     shell = getattr(args, "shell", "bash")
     if shell == "zsh":
-        print(generate_zsh_completion())
+        print(generate_zsh(parser))
+    elif shell == "fish":
+        print(generate_fish(parser))
     else:
-        print(generate_bash_completion())
+        print(generate_bash(parser))
 
 
 def cmd_logs(args):
@@ -5894,13 +5947,13 @@ Examples:
     # =========================================================================
     completion_parser = subparsers.add_parser(
         "completion",
-        help="Print shell completion script (bash or zsh)",
+        help="Print shell completion script (bash, zsh, or fish)",
     )
     completion_parser.add_argument(
-        "shell", nargs="?", default="bash", choices=["bash", "zsh"],
+        "shell", nargs="?", default="bash", choices=["bash", "zsh", "fish"],
         help="Shell type (default: bash)",
     )
-    completion_parser.set_defaults(func=cmd_completion)
+    completion_parser.set_defaults(func=lambda args: cmd_completion(args, parser))
 
     # =========================================================================
     # dashboard command
@@ -5913,6 +5966,10 @@ Examples:
     dashboard_parser.add_argument("--port", type=int, default=9119, help="Port (default 9119)")
     dashboard_parser.add_argument("--host", default="127.0.0.1", help="Host (default 127.0.0.1)")
     dashboard_parser.add_argument("--no-open", action="store_true", help="Don't open browser automatically")
+    dashboard_parser.add_argument(
+        "--insecure", action="store_true",
+        help="Allow binding to non-localhost (DANGEROUS: exposes API keys on the network)",
+    )
     dashboard_parser.set_defaults(func=cmd_dashboard)
 
     # =========================================================================

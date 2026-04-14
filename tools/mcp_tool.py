@@ -70,6 +70,7 @@ Thread safety:
 """
 
 import asyncio
+import concurrent.futures
 import inspect
 import json
 import logging
@@ -216,6 +217,58 @@ def _sanitize_error(text: str) -> str:
     accidental credential exposure in tool error responses.
     """
     return _CREDENTIAL_PATTERN.sub("[REDACTED]", text)
+
+
+# ---------------------------------------------------------------------------
+# MCP tool description content scanning
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate potential prompt injection in MCP tool descriptions.
+# These are WARNING-level — we log but don't block, since false positives
+# would break legitimate MCP servers.
+_MCP_INJECTION_PATTERNS = [
+    (re.compile(r"ignore\s+(all\s+)?previous\s+instructions", re.I),
+     "prompt override attempt ('ignore previous instructions')"),
+    (re.compile(r"you\s+are\s+now\s+a", re.I),
+     "identity override attempt ('you are now a...')"),
+    (re.compile(r"your\s+new\s+(task|role|instructions?)\s+(is|are)", re.I),
+     "task override attempt"),
+    (re.compile(r"system\s*:\s*", re.I),
+     "system prompt injection attempt"),
+    (re.compile(r"<\s*(system|human|assistant)\s*>", re.I),
+     "role tag injection attempt"),
+    (re.compile(r"do\s+not\s+(tell|inform|mention|reveal)", re.I),
+     "concealment instruction"),
+    (re.compile(r"(curl|wget|fetch)\s+https?://", re.I),
+     "network command in description"),
+    (re.compile(r"base64\.(b64decode|decodebytes)", re.I),
+     "base64 decode reference"),
+    (re.compile(r"exec\s*\(|eval\s*\(", re.I),
+     "code execution reference"),
+    (re.compile(r"import\s+(subprocess|os|shutil|socket)", re.I),
+     "dangerous import reference"),
+]
+
+
+def _scan_mcp_description(server_name: str, tool_name: str, description: str) -> List[str]:
+    """Scan an MCP tool description for prompt injection patterns.
+
+    Returns a list of finding strings (empty = clean).
+    """
+    findings = []
+    if not description:
+        return findings
+    for pattern, reason in _MCP_INJECTION_PATTERNS:
+        if pattern.search(description):
+            findings.append(reason)
+    if findings:
+        logger.warning(
+            "MCP server '%s' tool '%s': suspicious description content — %s. "
+            "Description: %.200s",
+            server_name, tool_name, "; ".join(findings),
+            description,
+        )
+    return findings
 
 
 def _prepend_path(env: dict, directory: str) -> dict:
@@ -797,6 +850,9 @@ class MCPServerTask:
         from toolsets import TOOLSETS
 
         async with self._refresh_lock:
+            # Capture old tool names for change diff
+            old_tool_names = set(self._registered_tool_names)
+
             # 1. Fetch current tool list from server
             tools_result = await self.session.list_tools()
             new_mcp_tools = tools_result.tools if hasattr(tools_result, "tools") else []
@@ -816,10 +872,26 @@ class MCPServerTask:
                 self.name, self, self._config
             )
 
-            logger.info(
-                "MCP server '%s': dynamically refreshed %d tool(s)",
-                self.name, len(self._registered_tool_names),
-            )
+            # 5. Log what changed (user-visible notification)
+            new_tool_names = set(self._registered_tool_names)
+            added = new_tool_names - old_tool_names
+            removed = old_tool_names - new_tool_names
+            changes = []
+            if added:
+                changes.append(f"added: {', '.join(sorted(added))}")
+            if removed:
+                changes.append(f"removed: {', '.join(sorted(removed))}")
+            if changes:
+                logger.warning(
+                    "MCP server '%s': tools changed dynamically — %s. "
+                    "Verify these changes are expected.",
+                    self.name, "; ".join(changes),
+                )
+            else:
+                logger.info(
+                    "MCP server '%s': dynamically refreshed %d tool(s) (no changes)",
+                    self.name, len(self._registered_tool_names),
+                )
 
     async def _run_stdio(self, config: dict):
         """Run the server using stdio transport."""
@@ -1167,13 +1239,43 @@ def _ensure_mcp_loop():
 
 
 def _run_on_mcp_loop(coro, timeout: float = 30):
-    """Schedule a coroutine on the MCP event loop and block until done."""
+    """Schedule a coroutine on the MCP event loop and block until done.
+
+    Poll in short intervals so the calling agent thread can honor user
+    interrupts while the MCP work is still running on the background loop.
+    """
+    from tools.interrupt import is_interrupted
+
     with _lock:
         loop = _mcp_loop
     if loop is None or not loop.is_running():
         raise RuntimeError("MCP event loop is not running")
     future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=timeout)
+    deadline = None if timeout is None else time.monotonic() + timeout
+
+    while True:
+        if is_interrupted():
+            future.cancel()
+            raise InterruptedError("User sent a new message")
+
+        wait_timeout = 0.1
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return future.result(timeout=0)
+            wait_timeout = min(wait_timeout, remaining)
+
+        try:
+            return future.result(timeout=wait_timeout)
+        except concurrent.futures.TimeoutError:
+            continue
+
+
+def _interrupted_call_result() -> str:
+    """Standardized JSON error for a user-interrupted MCP tool call."""
+    return json.dumps({
+        "error": "MCP call interrupted: user sent a new message"
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -1299,6 +1401,8 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
 
         try:
             return _run_on_mcp_loop(_call(), timeout=tool_timeout)
+        except InterruptedError:
+            return _interrupted_call_result()
         except Exception as exc:
             logger.error(
                 "MCP tool %s/%s call failed: %s",
@@ -1342,6 +1446,8 @@ def _make_list_resources_handler(server_name: str, tool_timeout: float):
 
         try:
             return _run_on_mcp_loop(_call(), timeout=tool_timeout)
+        except InterruptedError:
+            return _interrupted_call_result()
         except Exception as exc:
             logger.error(
                 "MCP %s/list_resources failed: %s", server_name, exc,
@@ -1386,6 +1492,8 @@ def _make_read_resource_handler(server_name: str, tool_timeout: float):
 
         try:
             return _run_on_mcp_loop(_call(), timeout=tool_timeout)
+        except InterruptedError:
+            return _interrupted_call_result()
         except Exception as exc:
             logger.error(
                 "MCP %s/read_resource failed: %s", server_name, exc,
@@ -1433,6 +1541,8 @@ def _make_list_prompts_handler(server_name: str, tool_timeout: float):
 
         try:
             return _run_on_mcp_loop(_call(), timeout=tool_timeout)
+        except InterruptedError:
+            return _interrupted_call_result()
         except Exception as exc:
             logger.error(
                 "MCP %s/list_prompts failed: %s", server_name, exc,
@@ -1488,6 +1598,8 @@ def _make_get_prompt_handler(server_name: str, tool_timeout: float):
 
         try:
             return _run_on_mcp_loop(_call(), timeout=tool_timeout)
+        except InterruptedError:
+            return _interrupted_call_result()
         except Exception as exc:
             logger.error(
                 "MCP %s/get_prompt failed: %s", server_name, exc,
@@ -1797,6 +1909,10 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
         if not _should_register(mcp_tool.name):
             logger.debug("MCP server '%s': skipping tool '%s' (filtered by config)", name, mcp_tool.name)
             continue
+
+        # Scan tool description for prompt injection patterns
+        _scan_mcp_description(name, mcp_tool.name, mcp_tool.description or "")
+
         schema = _convert_mcp_schema(name, mcp_tool)
         tool_name_prefixed = schema["name"]
 
