@@ -1366,6 +1366,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         "response": completed_env,
                         "conversation_history": full_history,
                         "instructions": instructions,
+                        "session_id": session_id,
                     })
                     if conversation:
                         self._response_store.set_conversation(conversation, response_id)
@@ -1459,14 +1460,21 @@ class APIServerAdapter(BasePlatformAdapter):
             if previous_response_id:
                 logger.debug("Both conversation_history and previous_response_id provided; using conversation_history")
 
-        if not conversation_history and previous_response_id:
+        # Reuse session_id from previous response when chaining, so the
+        # entire conversation appears as a single session in the dashboard.
+        chained_session_id = None
+
+        if previous_response_id:
             stored = self._response_store.get(previous_response_id)
-            if stored is None:
+            if stored is None and not conversation_history:
                 return web.json_response(_openai_error(f"Previous response not found: {previous_response_id}"), status=404)
-            conversation_history = list(stored.get("conversation_history", []))
-            # If no instructions provided, carry forward from previous
-            if instructions is None:
-                instructions = stored.get("instructions")
+            if stored is not None:
+                chained_session_id = stored.get("session_id")
+                if not conversation_history:
+                    conversation_history = list(stored.get("conversation_history", []))
+                    # If no instructions provided, carry forward from previous
+                    if instructions is None:
+                        instructions = stored.get("instructions")
 
         # Append new input messages to history (all but the last become history)
         for msg in input_messages[:-1]:
@@ -1481,8 +1489,8 @@ class APIServerAdapter(BasePlatformAdapter):
         if body.get("truncation") == "auto" and len(conversation_history) > 100:
             conversation_history = conversation_history[-100:]
 
-        # Run the agent (with Idempotency-Key support)
-        session_id = str(uuid.uuid4())
+        # Reuse chained session or mint a new one for the first request
+        session_id = chained_session_id or str(uuid.uuid4())
 
         stream = bool(body.get("stream", False))
         if stream:
@@ -1631,6 +1639,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 "response": response_data,
                 "conversation_history": full_history,
                 "instructions": instructions,
+                "session_id": session_id,
             })
             # Update conversation mapping so the next request with the same
             # conversation name automatically chains to this response
