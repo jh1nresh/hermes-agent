@@ -1237,16 +1237,12 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         if normalized == "copilot-acp":
             return list(_PROVIDER_MODELS.get("copilot", []))
     if normalized == "nous":
-        # Try live Nous Portal /models endpoint
-        try:
-            from hermes_cli.auth import fetch_nous_models, resolve_nous_runtime_credentials
-            creds = resolve_nous_runtime_credentials()
-            if creds:
-                live = fetch_nous_models(api_key=creds.get("api_key", ""), inference_base_url=creds.get("base_url", ""))
-                if live:
-                    return live
-        except Exception:
-            pass
+        # Use curated list — the live /models endpoint returns 300+ models
+        # (including non-agentic ones like image generators and rerankers).
+        # The curated list matches the `hermes model` and gateway pickers.
+        curated = _PROVIDER_MODELS.get("nous", [])
+        if curated:
+            return list(curated)
     if normalized == "anthropic":
         live = _fetch_anthropic_models()
         if live:
