@@ -348,3 +348,79 @@ class TestPoolRotationCycle:
         )
         assert recovered is False
         assert has_retried is False
+
+
+class TestAuthExhaustionNotification:
+    """Verify user-facing notification when all credentials are rejected (401)."""
+
+    def _make_agent_with_empty_auth_pool(self):
+        from run_agent import AIAgent
+
+        with patch.object(AIAgent, "__init__", lambda self, **kw: None):
+            agent = AIAgent()
+
+        pool = MagicMock()
+        pool.has_credentials.return_value = True
+        pool.try_refresh_current.return_value = None
+        pool.mark_exhausted_and_rotate.return_value = None  # no more credentials
+        agent._credential_pool = pool
+        agent._swap_credential = MagicMock()
+        agent.log_prefix = ""
+        agent.provider = "copilot"
+        agent.status_callback = None
+
+        # Capture _emit_status calls
+        agent._emit_status_calls = []
+        original_emit = getattr(AIAgent, "_emit_status", None)
+
+        def capture_emit(self_inner, msg):
+            agent._emit_status_calls.append(msg)
+        agent._emit_status = lambda msg: capture_emit(agent, msg)
+
+        return agent, pool
+
+    def test_auth_failure_emits_notification_when_pool_exhausted(self):
+        """When all credentials are 401'd, user should see actionable message."""
+        from agent.error_classifier import FailoverReason
+
+        agent, pool = self._make_agent_with_empty_auth_pool()
+
+        recovered, _ = agent._recover_with_credential_pool(
+            status_code=401, has_retried_429=False,
+            classified_reason=FailoverReason.auth,
+        )
+        assert recovered is False
+        assert len(agent._emit_status_calls) == 1
+        msg = agent._emit_status_calls[0]
+        assert "copilot" in msg
+        assert "401" in msg
+        assert "hermes auth reset" in msg
+
+    def test_auth_failure_no_notification_when_rotation_succeeds(self):
+        """When rotation succeeds, no exhaustion warning should be emitted."""
+        from agent.error_classifier import FailoverReason
+        from run_agent import AIAgent
+
+        with patch.object(AIAgent, "__init__", lambda self, **kw: None):
+            agent = AIAgent()
+
+        next_entry = MagicMock()
+        next_entry.id = "cred-2"
+        pool = MagicMock()
+        pool.has_credentials.return_value = True
+        pool.try_refresh_current.return_value = None
+        pool.mark_exhausted_and_rotate.return_value = next_entry
+        agent._credential_pool = pool
+        agent._swap_credential = MagicMock()
+        agent.log_prefix = ""
+        agent.provider = "copilot"
+
+        agent._emit_status_calls = []
+        agent._emit_status = lambda msg: agent._emit_status_calls.append(msg)
+
+        recovered, _ = agent._recover_with_credential_pool(
+            status_code=401, has_retried_429=False,
+            classified_reason=FailoverReason.auth,
+        )
+        assert recovered is True
+        assert len(agent._emit_status_calls) == 0

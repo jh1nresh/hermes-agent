@@ -1156,3 +1156,117 @@ def test_load_pool_does_not_seed_qwen_oauth_when_no_token(tmp_path, monkeypatch)
 
     assert not pool.has_credentials()
     assert pool.entries() == []
+
+
+# ---------------------------------------------------------------------------
+# Auth failure TTL — 401/403 credentials stay exhausted for 24 hours
+# ---------------------------------------------------------------------------
+
+
+def test_exhausted_401_entry_stays_exhausted_after_one_hour(tmp_path, monkeypatch):
+    """401-exhausted credentials should NOT reset after just 1 hour (token invalid)."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "openrouter": [
+                    {
+                        "id": "cred-1",
+                        "label": "primary",
+                        "auth_type": "api_key",
+                        "priority": 0,
+                        "source": "manual",
+                        "access_token": "***",
+                        "base_url": "https://openrouter.ai/api/v1",
+                        "last_status": "exhausted",
+                        "last_status_at": time.time() - 3700,  # ~1h2m ago
+                        "last_error_code": 401,
+                    }
+                ]
+            },
+        },
+    )
+
+    from agent.credential_pool import load_pool
+
+    pool = load_pool("openrouter")
+    entry = pool.select()
+
+    # 401 uses a 24-hour cooldown — 1 hour is NOT enough to reset
+    assert entry is None
+
+
+def test_exhausted_401_entry_resets_after_24_hours(tmp_path, monkeypatch):
+    """401-exhausted credentials should reset after 24 hours."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "openrouter": [
+                    {
+                        "id": "cred-1",
+                        "label": "primary",
+                        "auth_type": "api_key",
+                        "priority": 0,
+                        "source": "manual",
+                        "access_token": "***",
+                        "base_url": "https://openrouter.ai/api/v1",
+                        "last_status": "exhausted",
+                        "last_status_at": time.time() - 90000,  # ~25 hours ago
+                        "last_error_code": 401,
+                    }
+                ]
+            },
+        },
+    )
+
+    from agent.credential_pool import load_pool
+
+    pool = load_pool("openrouter")
+    entry = pool.select()
+
+    assert entry is not None
+    assert entry.id == "cred-1"
+    assert entry.last_status == "ok"
+
+
+def test_exhausted_403_entry_stays_exhausted_after_one_hour(tmp_path, monkeypatch):
+    """403-exhausted credentials should NOT reset after just 1 hour."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "credential_pool": {
+                "openrouter": [
+                    {
+                        "id": "cred-1",
+                        "label": "primary",
+                        "auth_type": "api_key",
+                        "priority": 0,
+                        "source": "manual",
+                        "access_token": "***",
+                        "base_url": "https://openrouter.ai/api/v1",
+                        "last_status": "exhausted",
+                        "last_status_at": time.time() - 3700,  # ~1h2m ago
+                        "last_error_code": 403,
+                    }
+                ]
+            },
+        },
+    )
+
+    from agent.credential_pool import load_pool
+
+    pool = load_pool("openrouter")
+    entry = pool.select()
+
+    # 403 uses a 24-hour cooldown — 1 hour is NOT enough to reset
+    assert entry is None

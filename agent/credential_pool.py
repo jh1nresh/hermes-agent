@@ -69,10 +69,10 @@ SUPPORTED_POOL_STRATEGIES = {
 }
 
 # Cooldown before retrying an exhausted credential.
-# 429 (rate-limited) and 402 (billing/quota) both cool down after 1 hour.
 # Provider-supplied reset_at timestamps override these defaults.
-EXHAUSTED_TTL_429_SECONDS = 60 * 60          # 1 hour
-EXHAUSTED_TTL_DEFAULT_SECONDS = 60 * 60      # 1 hour
+EXHAUSTED_TTL_429_SECONDS = 60 * 60          # 1 hour  (rate limits)
+EXHAUSTED_TTL_AUTH_SECONDS = 24 * 60 * 60    # 24 hours (401/403 — token invalid)
+EXHAUSTED_TTL_DEFAULT_SECONDS = 60 * 60      # 1 hour  (everything else)
 
 # Pool key prefix for custom OpenAI-compatible endpoints.
 # Custom endpoints all share provider='custom' but are keyed by their
@@ -193,6 +193,10 @@ def _exhausted_ttl(error_code: Optional[int]) -> int:
     """Return cooldown seconds based on the HTTP status that caused exhaustion."""
     if error_code == 429:
         return EXHAUSTED_TTL_429_SECONDS
+    if error_code in (401, 403):
+        # Auth failures are permanent until the user re-authenticates.
+        # Use a long cooldown to avoid retrying dead tokens every hour.
+        return EXHAUSTED_TTL_AUTH_SECONDS
     return EXHAUSTED_TTL_DEFAULT_SECONDS
 
 

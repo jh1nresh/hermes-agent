@@ -4754,6 +4754,14 @@ class AIAgent:
                 )
                 self._swap_credential(next_entry)
                 return True, False
+            # All credentials for this provider are exhausted due to auth failure.
+            # Emit an actionable notification so the user knows how to fix it.
+            _provider_label = getattr(self, "provider", "unknown")
+            self._emit_status(
+                f"🔐 All {_provider_label} credentials rejected (HTTP {rotate_status}). "
+                f"Run `hermes auth reset {_provider_label}` to clear, "
+                f"or `hermes model` to re-authenticate."
+            )
 
         return False, has_retried_429
 
