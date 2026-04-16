@@ -35,11 +35,67 @@ You need at least one way to connect to an LLM. Use `hermes model` to switch pro
 | **DeepSeek** | `DEEPSEEK_API_KEY` in `~/.hermes/.env` (provider: `deepseek`) |
 | **Hugging Face** | `HF_TOKEN` in `~/.hermes/.env` (provider: `huggingface`, aliases: `hf`) |
 | **Google / Gemini** | `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) in `~/.hermes/.env` (provider: `gemini`) |
+| **Google Gemini (OAuth)** | `hermes model` → "Google Gemini (OAuth)" (provider: `google-gemini-cli`, browser PKCE login, requires `HERMES_GEMINI_CLIENT_ID`) |
 | **Custom Endpoint** | `hermes model` → choose "Custom endpoint" (saved in `config.yaml`) |
 
 :::tip Model key alias
 In the `model:` config section, you can use either `default:` or `model:` as the key name for your model ID. Both `model: { default: my-model }` and `model: { model: my-model }` work identically.
 :::
+
+
+### Google Gemini via OAuth (`google-gemini-cli`)
+
+The `google-gemini-cli` provider lets you authenticate with your Google account
+via a browser-based Authorization Code + PKCE flow — no API key copy-paste, and
+credentials are refreshed automatically before every request.
+
+**Quick start:**
+
+```bash
+# 1. Set your OAuth client ID (see "Registering a Desktop OAuth client" below)
+export HERMES_GEMINI_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+
+# 2. Run the login flow
+hermes model
+# → pick "Google Gemini (OAuth)"
+# → a browser opens to accounts.google.com, sign in, Hermes captures the callback
+
+# 3. Chat as normal
+hermes chat
+```
+
+**Storage:** tokens are persisted to `~/.hermes/auth/google_oauth.json` with
+0600 permissions, atomic writes, and a cross-process fcntl lock so multiple
+Hermes instances can safely share a session.
+
+**Endpoint:** requests are routed to Google's OpenAI-compatible Gemini endpoint
+(`https://generativelanguage.googleapis.com/v1beta/openai`) with a Bearer
+access token. Supports the full Gemini 2.5 / 3.x lineup and Gemma open models.
+
+#### Registering a Desktop OAuth client
+
+Hermes does not ship with a default OAuth client ID — you register one yourself
+in Google Cloud Console so quota and consent screens are scoped to your
+organization:
+
+1. Go to <https://console.cloud.google.com/apis/credentials>.
+2. Create (or pick) a project and click **"Create Credentials" → "OAuth client ID"**.
+3. Choose **Application type: Desktop app**, name it "Hermes Agent".
+4. Enable the **Generative Language API** for the project under APIs & Services.
+5. Download the JSON and set `HERMES_GEMINI_CLIENT_ID` in `~/.hermes/.env`
+   (client secret is optional for Desktop clients but can be set via
+   `HERMES_GEMINI_CLIENT_SECRET` if required by your org policy).
+
+#### Troubleshooting
+
+- **Port 8085 already in use** — Hermes will automatically fall back to an
+  ephemeral port. Add that exact URL to your OAuth client's authorized redirect
+  URIs if Google refuses it.
+- **"State mismatch — aborting for safety"** — someone hit the callback URL
+  with a stale/forged request. Re-run the login.
+- **Refresh failures persist** — re-run login (`hermes auth add --provider
+  google-gemini-cli`); stale refresh tokens can happen after password changes
+  or scope revocation.
 
 :::info Codex Note
 The OpenAI Codex provider authenticates via device code (open a URL, enter a code). Hermes stores the resulting credentials in its own auth store under `~/.hermes/auth.json` and can import existing Codex CLI credentials from `~/.codex/auth.json` when present. No Codex CLI installation is required.

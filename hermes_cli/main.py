@@ -1118,6 +1118,8 @@ def select_provider_and_model(args=None):
         _model_flow_openai_codex(config, current_model)
     elif selected_provider == "qwen-oauth":
         _model_flow_qwen_oauth(config, current_model)
+    elif selected_provider == "google-gemini-cli":
+        _model_flow_google_gemini_cli(config, current_model)
     elif selected_provider == "copilot-acp":
         _model_flow_copilot_acp(config, current_model)
     elif selected_provider == "copilot":
@@ -1518,6 +1520,63 @@ def _model_flow_qwen_oauth(_config, current_model=""):
         print(f"Default model set to: {selected} (via Qwen OAuth)")
     else:
         print("No change.")
+
+
+def _model_flow_google_gemini_cli(_config, current_model=""):
+    """Google Gemini OAuth (PKCE): runs the browser login, then picks a model.
+
+    The flow:
+      1. If no creds are on disk (or --force), run the PKCE flow via
+         ``agent.google_oauth.start_oauth_flow``.
+      2. Validate the access token.
+      3. Prompt for a model from the curated list.
+      4. Save selection to ``~/.hermes/config.yaml``.
+    """
+    from hermes_cli.auth import (
+        DEFAULT_GEMINI_OAUTH_BASE_URL,
+        get_gemini_oauth_auth_status,
+        resolve_gemini_oauth_runtime_credentials,
+        _prompt_model_selection,
+        _save_model_choice,
+        _update_config_for_provider,
+    )
+    from hermes_cli.models import _PROVIDER_MODELS
+
+    status = get_gemini_oauth_auth_status()
+    if not status.get("logged_in"):
+        print("Not logged into Google Gemini OAuth.")
+        if status.get("error"):
+            print(f"  {status['error']}")
+        choice = input("Run OAuth login now? [Y/n]: ").strip().lower()
+        if choice in {"", "y", "yes"}:
+            try:
+                from agent.google_oauth import start_oauth_flow
+
+                start_oauth_flow(force_relogin=True)
+            except Exception as exc:
+                print(f"OAuth login failed: {exc}")
+                return
+        else:
+            print("Skipping login; no change.")
+            return
+
+    # Verify creds resolve
+    try:
+        resolve_gemini_oauth_runtime_credentials(force_refresh=False)
+    except Exception as exc:
+        print(f"Failed to resolve Gemini OAuth credentials: {exc}")
+        return
+
+    models = list(_PROVIDER_MODELS.get("google-gemini-cli") or [])
+    default = current_model or (models[0] if models else "gemini-2.5-flash")
+    selected = _prompt_model_selection(models, current_model=default)
+    if selected:
+        _save_model_choice(selected)
+        _update_config_for_provider("google-gemini-cli", DEFAULT_GEMINI_OAUTH_BASE_URL)
+        print(f"Default model set to: {selected} (via Google Gemini OAuth)")
+    else:
+        print("No change.")
+
 
 
 
