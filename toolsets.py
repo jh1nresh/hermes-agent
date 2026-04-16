@@ -30,13 +30,13 @@ from typing import List, Dict, Any, Set, Optional
 # Edit this once to update all platforms simultaneously.
 _HERMES_CORE_TOOLS = [
     # Web
-    "web_search", "web_extract",
+    "web_search", "web_extract", "x_search",
     # Terminal + process management
     "terminal", "process",
     # File manipulation
     "read_file", "write_file", "patch", "search_files",
     # Vision + image generation
-    "vision_analyze", "image_generate",
+    "vision_analyze", "image_generate", "video_generate",
     # Skills
     "skills_list", "skill_view", "skill_manage",
     # Browser automation
@@ -78,6 +78,12 @@ TOOLSETS = {
         "tools": ["web_search"],
         "includes": []
     },
+
+    "x_search": {
+        "description": "Search X (Twitter) posts and threads using xAI",
+        "tools": ["x_search"],
+        "includes": []
+    },
     
     "vision": {
         "description": "Image analysis and vision tools",
@@ -88,6 +94,12 @@ TOOLSETS = {
     "image_gen": {
         "description": "Creative generation tools (images)",
         "tools": ["image_generate"],
+        "includes": []
+    },
+
+    "video_gen": {
+        "description": "Creative generation tools (video)",
+        "tools": ["video_generate"],
         "includes": []
     },
     
@@ -213,7 +225,7 @@ TOOLSETS = {
     "safe": {
         "description": "Safe toolkit without terminal access",
         "tools": [],
-        "includes": ["web", "vision", "image_gen"]
+        "includes": ["web", "x_search", "vision", "image_gen", "video_gen"]
     },
     
     # ==========================================================================
@@ -246,13 +258,13 @@ TOOLSETS = {
         "description": "OpenAI-compatible API server — full agent tools accessible via HTTP (no interactive UI tools like clarify or send_message)",
         "tools": [
             # Web
-            "web_search", "web_extract",
+            "web_search", "web_extract", "x_search",
             # Terminal + process management
             "terminal", "process",
             # File manipulation
             "read_file", "write_file", "patch", "search_files",
             # Vision + image generation
-            "vision_analyze", "image_generate",
+            "vision_analyze", "image_generate", "video_generate",
             # Skills
             "skills_list", "skill_view", "skill_manage",
             # Browser automation

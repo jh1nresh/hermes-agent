@@ -2,8 +2,9 @@
 """
 Image Generation Tools Module
 
-This module provides image generation tools using FAL.ai's FLUX 2 Pro model with 
-automatic upscaling via FAL.ai's Clarity Upscaler for enhanced image quality.
+This module provides image generation tools using either:
+- FAL.ai FLUX 2 Pro with automatic Clarity upscaling
+- xAI grok-imagine-image
 
 Available tools:
 - image_generate_tool: Generate images from text prompts with automatic upscaling
@@ -34,17 +35,22 @@ import os
 import datetime
 import threading
 import uuid
+import requests
 from typing import Dict, Any, Optional, Union
 from urllib.parse import urlencode
-import fal_client
 from tools.debug_helpers import DebugSession
 from tools.managed_tool_gateway import resolve_managed_tool_gateway
 from tools.tool_backend_helpers import managed_nous_tools_enabled
+from tools.xai_http import hermes_xai_user_agent
 
 logger = logging.getLogger(__name__)
 
 # Configuration for image generation
+DEFAULT_PROVIDER = "auto"
+DEFAULT_OPERATION = "generate"
 DEFAULT_MODEL = "fal-ai/flux-2-pro"
+DEFAULT_XAI_MODEL = "grok-imagine-image"
+DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 DEFAULT_ASPECT_RATIO = "landscape"
 DEFAULT_NUM_INFERENCE_STEPS = 50
 DEFAULT_GUIDANCE_SCALE = 4.5
@@ -79,11 +85,42 @@ VALID_IMAGE_SIZES = [
 ]
 VALID_OUTPUT_FORMATS = ["jpeg", "png"]
 VALID_ACCELERATION_MODES = ["none", "regular", "high"]
+XAI_ASPECT_RATIO_MAP = {
+    "landscape": "16:9",
+    "square": "1:1",
+    "portrait": "9:16",
+}
+VALID_XAI_ASPECT_RATIOS = {
+    "auto",
+    "1:1",
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "3:2",
+    "2:3",
+    "2:1",
+    "1:2",
+    "19.5:9",
+    "9:19.5",
+    "20:9",
+    "9:20",
+}
+VALID_XAI_RESOLUTIONS = {"1k", "2k"}
+VALID_XAI_RESPONSE_FORMATS = {"url", "b64_json"}
+VALID_XAI_OPERATIONS = {"generate", "edit"}
 
 _debug = DebugSession("image_tools", env_var="IMAGE_TOOLS_DEBUG")
 _managed_fal_client = None
 _managed_fal_client_config = None
 _managed_fal_client_lock = threading.Lock()
+
+
+def _import_fal_client():
+    """Lazy import fal_client so xAI-only users can still use image generation."""
+    import fal_client
+
+    return fal_client
 
 
 def _resolve_managed_fal_gateway():
@@ -104,6 +141,7 @@ class _ManagedFalSyncClient:
     """Small per-instance wrapper around fal_client.SyncClient for managed queue hosts."""
 
     def __init__(self, *, key: str, queue_run_origin: str):
+        fal_client = _import_fal_client()
         sync_client_class = getattr(fal_client, "SyncClient", None)
         if sync_client_class is None:
             raise RuntimeError("fal_client.SyncClient is required for managed FAL gateway mode")
@@ -204,6 +242,7 @@ def _submit_fal_request(model: str, arguments: Dict[str, Any]):
     request_headers = {"x-idempotency-key": str(uuid.uuid4())}
     managed_gateway = _resolve_managed_fal_gateway()
     if managed_gateway is None:
+        fal_client = _import_fal_client()
         return fal_client.submit(model, arguments=arguments, headers=request_headers)
 
     managed_client = _get_managed_fal_client(managed_gateway)
@@ -212,6 +251,246 @@ def _submit_fal_request(model: str, arguments: Dict[str, Any]):
         arguments=arguments,
         headers=request_headers,
     )
+
+
+def _has_fal_backend() -> bool:
+    """Return True when FAL image generation can run with direct or managed auth."""
+    if not (os.getenv("FAL_KEY") or _resolve_managed_fal_gateway()):
+        return False
+    try:
+        _import_fal_client()
+        return True
+    except ImportError:
+        return False
+
+
+def _has_xai_image_backend() -> bool:
+    return bool(os.getenv("XAI_API_KEY", "").strip())
+
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    normalized = (provider or DEFAULT_PROVIDER).lower().strip()
+    aliases = {
+        "grok": "xai",
+        "x-ai": "xai",
+        "x.ai": "xai",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in {"auto", "fal", "xai"}:
+        raise ValueError("provider must be one of: auto, fal, xai")
+    return normalized
+
+
+def _resolve_image_provider(
+    provider: Optional[str],
+    *,
+    prefer_xai: bool = False,
+) -> str:
+    requested = _normalize_provider(provider)
+    if requested == "auto" and not prefer_xai:
+        try:
+            from hermes_cli.config import load_config
+
+            configured_provider = _normalize_provider(
+                (load_config().get("image_generation", {}) or {}).get("provider")
+            )
+            if configured_provider != "auto":
+                requested = configured_provider
+        except Exception:
+            pass
+    if requested != "auto":
+        return requested
+    if prefer_xai and _has_xai_image_backend():
+        return "xai"
+    if prefer_xai:
+        raise ValueError(
+            "This image request requires xAI image support. Configure XAI_API_KEY or call image_generate with provider='fal' only for basic generation."
+        )
+    if _has_fal_backend():
+        return "fal"
+    if _has_xai_image_backend():
+        return "xai"
+    return "fal"
+
+
+def _data_uri_from_b64(encoded: str, output_format: str) -> str:
+    mime = "image/png" if output_format == "png" else "image/jpeg"
+    return f"data:{mime};base64,{encoded}"
+
+
+def _normalize_xai_aspect_ratio(aspect_ratio: Optional[str]) -> str:
+    normalized = (aspect_ratio or DEFAULT_ASPECT_RATIO).strip().lower()
+    return XAI_ASPECT_RATIO_MAP.get(normalized, normalized)
+
+
+def _normalize_xai_operation(
+    operation: Optional[str],
+    source_image_url: Optional[str],
+    source_image_urls: Optional[list[str]],
+) -> str:
+    normalized = (operation or "").strip().lower()
+    if not normalized:
+        return "edit" if ((source_image_url or "").strip() or (source_image_urls or [])) else DEFAULT_OPERATION
+    aliases = {
+        "generate_image": "generate",
+        "edit_image": "edit",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in VALID_XAI_OPERATIONS:
+        raise ValueError(f"operation must be one of {sorted(VALID_XAI_OPERATIONS)}")
+    return normalized
+
+
+def _normalize_xai_source_images(
+    source_image_url: Optional[str],
+    source_image_urls: Optional[list[str]],
+) -> list[dict[str, str]]:
+    merged: list[str] = []
+    if source_image_url and source_image_url.strip():
+        merged.append(source_image_url.strip())
+    for value in source_image_urls or []:
+        normalized = (value or "").strip()
+        if normalized:
+            merged.append(normalized)
+
+    deduped: list[str] = []
+    seen = set()
+    for value in merged:
+        if value not in seen:
+            seen.add(value)
+            deduped.append(value)
+    return [{"type": "image_url", "url": value} for value in deduped]
+
+
+def _normalize_xai_reference_images(
+    reference_image_urls: Optional[list[str]],
+) -> list[dict[str, str]]:
+    deduped: list[str] = []
+    seen = set()
+    for value in reference_image_urls or []:
+        normalized = (value or "").strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            deduped.append(normalized)
+    return [{"type": "image_url", "url": value} for value in deduped]
+
+
+def _generate_image_with_xai(
+    prompt: str,
+    operation: str,
+    aspect_ratio: Optional[str],
+    num_images: int,
+    output_format: str,
+    resolution: Optional[str] = None,
+    response_format: str = "url",
+    source_image_url: Optional[str] = None,
+    source_image_urls: Optional[list[str]] = None,
+    reference_image_urls: Optional[list[str]] = None,
+) -> list[Dict[str, Any]]:
+    api_key = os.getenv("XAI_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("XAI_API_KEY environment variable not set")
+
+    base_url = (os.getenv("XAI_BASE_URL") or DEFAULT_XAI_BASE_URL).strip().rstrip("/")
+    normalized_operation = _normalize_xai_operation(
+        operation,
+        source_image_url,
+        source_image_urls,
+    )
+    normalized_aspect_ratio = _normalize_xai_aspect_ratio(aspect_ratio)
+    normalized_response_format = (response_format or "url").strip().lower()
+    if normalized_response_format not in VALID_XAI_RESPONSE_FORMATS:
+        raise ValueError(
+            f"response_format must be one of {sorted(VALID_XAI_RESPONSE_FORMATS)}"
+        )
+
+    normalized_resolution = None
+    if resolution:
+        normalized_resolution = (resolution or "").strip().lower()
+        if normalized_resolution not in VALID_XAI_RESOLUTIONS:
+            raise ValueError(
+                f"resolution must be one of {sorted(VALID_XAI_RESOLUTIONS)}"
+            )
+
+    payload: Dict[str, Any] = {
+        "model": DEFAULT_XAI_MODEL,
+        "prompt": prompt.strip(),
+        "n": num_images,
+    }
+    source_images = _normalize_xai_source_images(
+        source_image_url,
+        source_image_urls,
+    )
+    reference_images = _normalize_xai_reference_images(reference_image_urls)
+
+    if normalized_operation == "generate":
+        if source_images:
+            raise ValueError("source images are only supported for xAI image edit")
+        if len(reference_images) > 5:
+            raise ValueError("xAI image generation supports at most 5 reference images")
+        if normalized_aspect_ratio not in VALID_XAI_ASPECT_RATIOS:
+            raise ValueError(
+                f"aspect_ratio must be one of {sorted(VALID_XAI_ASPECT_RATIOS)} or landscape/square/portrait"
+            )
+        payload["aspect_ratio"] = normalized_aspect_ratio
+        if reference_images:
+            payload["reference_images"] = reference_images
+        endpoint = "images/generations"
+    else:
+        if not source_images:
+            raise ValueError("source_image_url or source_image_urls is required for xAI image edit")
+        if len(source_images) + len(reference_images) > 5:
+            raise ValueError("xAI image edit supports at most 5 combined source and reference images")
+        if len(source_images) == 1:
+            payload["image"] = source_images[0]
+        else:
+            if normalized_aspect_ratio not in VALID_XAI_ASPECT_RATIOS:
+                raise ValueError(
+                    f"aspect_ratio must be one of {sorted(VALID_XAI_ASPECT_RATIOS)} or landscape/square/portrait"
+                )
+            payload["images"] = source_images
+            payload["aspect_ratio"] = normalized_aspect_ratio
+        if reference_images:
+            payload["reference_images"] = reference_images
+        endpoint = "images/edits"
+
+    if normalized_resolution:
+        payload["resolution"] = normalized_resolution
+    if normalized_response_format == "b64_json":
+        payload["response_format"] = "b64_json"
+
+    response = requests.post(
+        f"{base_url}/{endpoint}",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": hermes_xai_user_agent(),
+            "x-idempotency-key": str(uuid.uuid4()),
+        },
+        json=payload,
+        timeout=120,
+    )
+    response.raise_for_status()
+
+    result = response.json()
+    images = []
+    for item in result.get("data", []):
+        image_url = item.get("url")
+        if not image_url and item.get("b64_json"):
+            image_url = _data_uri_from_b64(item["b64_json"], output_format)
+        if not image_url:
+            continue
+        images.append(
+            {
+                "url": image_url,
+                "width": item.get("width", 0),
+                "height": item.get("height", 0),
+                "upscaled": False,
+                "provider": "xai",
+                "operation": normalized_operation,
+            }
+        )
+    return images
 
 
 def _validate_parameters(
@@ -351,11 +630,18 @@ def _upscale_image(image_url: str, original_prompt: str) -> Dict[str, Any]:
 def image_generate_tool(
     prompt: str,
     aspect_ratio: str = DEFAULT_ASPECT_RATIO,
+    operation: str = DEFAULT_OPERATION,
     num_inference_steps: int = DEFAULT_NUM_INFERENCE_STEPS,
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE,
     num_images: int = DEFAULT_NUM_IMAGES,
     output_format: str = DEFAULT_OUTPUT_FORMAT,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    provider: str = DEFAULT_PROVIDER,
+    resolution: Optional[str] = None,
+    response_format: str = "url",
+    source_image_url: Optional[str] = None,
+    source_image_urls: Optional[list[str]] = None,
+    reference_image_urls: Optional[list[str]] = None,
 ) -> str:
     """
     Generate images from text prompts using FAL.ai's FLUX 2 Pro model with automatic upscaling.
@@ -397,7 +683,11 @@ def image_generate_tool(
             "guidance_scale": guidance_scale,
             "num_images": num_images,
             "output_format": output_format,
-            "seed": seed
+            "seed": seed,
+            "provider": provider,
+            "operation": operation,
+            "resolution": resolution,
+            "response_format": response_format,
         },
         "error": None,
         "success": False,
@@ -408,98 +698,133 @@ def image_generate_tool(
     start_time = datetime.datetime.now()
     
     try:
-        logger.info("Generating %s image(s) with FLUX 2 Pro: %s", num_images, prompt[:80])
+        normalized_operation = _normalize_xai_operation(
+            operation,
+            source_image_url,
+            source_image_urls,
+        )
+        prefer_xai = (
+            normalized_operation == "edit"
+            or bool((source_image_url or "").strip())
+            or bool(source_image_urls)
+            or bool(reference_image_urls)
+            or bool(resolution)
+            or (response_format or "").strip().lower() == "b64_json"
+            or _normalize_xai_aspect_ratio(aspect_ratio) not in {"16:9", "1:1", "9:16"}
+        )
+        resolved_provider = _resolve_image_provider(provider, prefer_xai=prefer_xai)
+        debug_call_data["parameters"]["resolved_provider"] = resolved_provider
+
+        logger.info(
+            "Generating %s image(s) with %s image backend: %s",
+            num_images,
+            resolved_provider,
+            prompt[:80],
+        )
         
         # Validate prompt
         if not prompt or not isinstance(prompt, str) or len(prompt.strip()) == 0:
             raise ValueError("Prompt is required and must be a non-empty string")
         
-        # Check API key availability
-        if not (os.getenv("FAL_KEY") or _resolve_managed_fal_gateway()):
-            message = "FAL_KEY environment variable not set"
-            if managed_nous_tools_enabled():
-                message += " and managed FAL gateway is unavailable"
-            raise ValueError(message)
-        
         # Validate other parameters
         validated_params = _validate_parameters(
             image_size, num_inference_steps, guidance_scale, num_images, output_format, "none"
         )
-        
-        # Prepare arguments for FAL.ai FLUX 2 Pro API
-        arguments = {
-            "prompt": prompt.strip(),
-            "image_size": validated_params["image_size"],
-            "num_inference_steps": validated_params["num_inference_steps"],
-            "guidance_scale": validated_params["guidance_scale"],
-            "num_images": validated_params["num_images"],
-            "output_format": validated_params["output_format"],
-            "enable_safety_checker": ENABLE_SAFETY_CHECKER,
-            "safety_tolerance": SAFETY_TOLERANCE,
-            "sync_mode": True  # Use sync mode for immediate results
-        }
-        
-        # Add seed if provided
-        if seed is not None and isinstance(seed, int):
-            arguments["seed"] = seed
-        
-        logger.info("Submitting generation request to FAL.ai FLUX 2 Pro...")
-        logger.info("  Model: %s", DEFAULT_MODEL)
-        logger.info("  Aspect Ratio: %s -> %s", aspect_ratio_lower, image_size)
-        logger.info("  Steps: %s", validated_params['num_inference_steps'])
-        logger.info("  Guidance: %s", validated_params['guidance_scale'])
-        
-        # Submit request to FAL.ai using sync API (avoids cached event loop issues)
-        handler = _submit_fal_request(
-            DEFAULT_MODEL,
-            arguments=arguments,
-        )
-        
-        # Get the result (sync — blocks until done)
-        result = handler.get()
-        
-        generation_time = (datetime.datetime.now() - start_time).total_seconds()
-        
-        # Process the response
-        if not result or "images" not in result:
-            raise ValueError("Invalid response from FAL.ai API - no images returned")
-        
-        images = result.get("images", [])
-        if not images:
-            raise ValueError("No images were generated")
-        
-        # Format image data and upscale images
-        formatted_images = []
-        for img in images:
-            if isinstance(img, dict) and "url" in img:
-                original_image = {
-                    "url": img["url"],
-                    "width": img.get("width", 0),
-                    "height": img.get("height", 0)
-                }
-                
-                # Attempt to upscale the image
-                upscaled_image = _upscale_image(img["url"], prompt.strip())
-                
-                if upscaled_image:
-                    # Use upscaled image if successful
-                    formatted_images.append(upscaled_image)
-                else:
-                    # Fall back to original image if upscaling fails
-                    logger.warning("Using original image as fallback")
-                    original_image["upscaled"] = False
-                    formatted_images.append(original_image)
-        
+
+        if resolved_provider == "fal":
+            if source_image_url or source_image_urls or reference_image_urls or normalized_operation == "edit":
+                raise ValueError("FAL image backend only supports generation. Use provider='xai' for image edit/reference workflows.")
+            if not (os.getenv("FAL_KEY") or _resolve_managed_fal_gateway()):
+                message = "FAL_KEY environment variable not set"
+                if managed_nous_tools_enabled():
+                    message += " and managed FAL gateway is unavailable"
+                raise ValueError(message)
+
+            arguments = {
+                "prompt": prompt.strip(),
+                "image_size": validated_params["image_size"],
+                "num_inference_steps": validated_params["num_inference_steps"],
+                "guidance_scale": validated_params["guidance_scale"],
+                "num_images": validated_params["num_images"],
+                "output_format": validated_params["output_format"],
+                "enable_safety_checker": ENABLE_SAFETY_CHECKER,
+                "safety_tolerance": SAFETY_TOLERANCE,
+                "sync_mode": True,
+            }
+
+            if seed is not None and isinstance(seed, int):
+                arguments["seed"] = seed
+
+            logger.info("Submitting generation request to FAL.ai FLUX 2 Pro...")
+            logger.info("  Model: %s", DEFAULT_MODEL)
+            logger.info("  Aspect Ratio: %s -> %s", aspect_ratio_lower, image_size)
+            logger.info("  Steps: %s", validated_params["num_inference_steps"])
+            logger.info("  Guidance: %s", validated_params["guidance_scale"])
+
+            handler = _submit_fal_request(
+                DEFAULT_MODEL,
+                arguments=arguments,
+            )
+            result = handler.get()
+
+            if not result or "images" not in result:
+                raise ValueError("Invalid response from FAL.ai API - no images returned")
+
+            images = result.get("images", [])
+            if not images:
+                raise ValueError("No images were generated")
+
+            formatted_images = []
+            for img in images:
+                if isinstance(img, dict) and "url" in img:
+                    original_image = {
+                        "url": img["url"],
+                        "width": img.get("width", 0),
+                        "height": img.get("height", 0),
+                        "provider": "fal",
+                    }
+
+                    upscaled_image = _upscale_image(img["url"], prompt.strip())
+
+                    if upscaled_image:
+                        upscaled_image["provider"] = "fal"
+                        formatted_images.append(upscaled_image)
+                    else:
+                        logger.warning("Using original image as fallback")
+                        original_image["upscaled"] = False
+                        formatted_images.append(original_image)
+        else:
+            logger.info("Submitting generation request to xAI image API...")
+            logger.info("  Model: %s", DEFAULT_XAI_MODEL)
+            logger.info("  Operation: %s", normalized_operation)
+            formatted_images = _generate_image_with_xai(
+                prompt=prompt,
+                operation=normalized_operation,
+                aspect_ratio=aspect_ratio,
+                num_images=validated_params["num_images"],
+                output_format=validated_params["output_format"],
+                resolution=resolution,
+                response_format=response_format,
+                source_image_url=source_image_url,
+                source_image_urls=source_image_urls,
+                reference_image_urls=reference_image_urls,
+            )
+
         if not formatted_images:
-            raise ValueError("No valid image URLs returned from API")
-        
+            raise ValueError(f"No valid image URLs returned from {resolved_provider} API")
+
+        generation_time = (datetime.datetime.now() - start_time).total_seconds()
+
         upscaled_count = sum(1 for img in formatted_images if img.get("upscaled", False))
         logger.info("Generated %s image(s) in %.1fs (%s upscaled)", len(formatted_images), generation_time, upscaled_count)
         
         # Prepare successful response - minimal format
         response_data = {
             "success": True,
-            "image": formatted_images[0]["url"] if formatted_images else None
+            "image": formatted_images[0]["url"] if formatted_images else None,
+            "provider": resolved_provider,
+            "operation": formatted_images[0].get("operation", normalized_operation),
+            "images": formatted_images,
         }
         
         debug_call_data["success"] = True
@@ -551,15 +876,11 @@ def check_image_generation_requirements() -> bool:
         bool: True if requirements are met, False otherwise
     """
     try:
-        # Check API key
-        if not check_fal_api_key():
-            return False
-        
-        # Check if fal_client is available
-        import fal_client  # noqa: F401 — SDK presence check
-        return True
-        
-    except ImportError:
+        if _has_fal_backend() or _has_xai_image_backend():
+            return True
+        return False
+
+    except Exception:
         return False
 
 
@@ -646,7 +967,7 @@ from tools.registry import registry, tool_error
 
 IMAGE_GENERATE_SCHEMA = {
     "name": "image_generate",
-    "description": "Generate high-quality images from text prompts using FLUX 2 Pro model with automatic 2x upscaling. Creates detailed, artistic images that are automatically upscaled for hi-rez results. Returns a single upscaled image URL. Display it using markdown: ![description](URL)",
+    "description": "Generate or edit images. FAL supports text-to-image generation; xAI grok-imagine-image supports generation, single-image edits, multi-image edits, source/reference images, extra aspect ratios, 1k/2k resolution, and optional base64 output. Returns a primary image URL plus an images list.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -654,11 +975,55 @@ IMAGE_GENERATE_SCHEMA = {
                 "type": "string",
                 "description": "The text prompt describing the desired image. Be detailed and descriptive."
             },
+            "operation": {
+                "type": "string",
+                "enum": sorted(VALID_XAI_OPERATIONS),
+                "description": "Use 'generate' for a new image or 'edit' to transform one or more source images. If source_image_url/source_image_urls are provided, xAI edit mode is used automatically.",
+                "default": DEFAULT_OPERATION
+            },
+            "provider": {
+                "type": "string",
+                "enum": ["auto", "fal", "xai"],
+                "description": "Image backend to use. 'auto' prefers xAI when you request xAI-only features such as edit, source images, extra aspect ratios, 1k/2k resolution, or b64_json output; otherwise it prefers FAL when available.",
+                "default": "auto"
+            },
             "aspect_ratio": {
                 "type": "string",
-                "enum": ["landscape", "square", "portrait"],
-                "description": "The aspect ratio of the generated image. 'landscape' is 16:9 wide, 'portrait' is 16:9 tall, 'square' is 1:1.",
+                "enum": ["landscape", "square", "portrait", "auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20"],
+                "description": "Aspect ratio. FAL supports landscape/square/portrait. xAI also supports direct ratios like 3:2, 4:3, 2:1, 20:9, and auto.",
                 "default": "landscape"
+            },
+            "num_images": {
+                "type": "integer",
+                "description": "Number of images to generate. Best used with xAI generate mode.",
+                "default": DEFAULT_NUM_IMAGES,
+                "minimum": 1,
+                "maximum": 4
+            },
+            "resolution": {
+                "type": "string",
+                "enum": ["1k", "2k"],
+                "description": "xAI-only image resolution."
+            },
+            "response_format": {
+                "type": "string",
+                "enum": sorted(VALID_XAI_RESPONSE_FORMATS),
+                "description": "xAI-only response format. Use b64_json to force inline base64 output.",
+                "default": "url"
+            },
+            "source_image_url": {
+                "type": "string",
+                "description": "Optional source image URL or data URI for xAI image editing."
+            },
+            "source_image_urls": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional list of source image URLs or data URIs for xAI multi-image editing. Up to 5."
+            },
+            "reference_image_urls": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional xAI reference images. For generate mode they guide style/content; for edit mode they are combined with source images. Up to 5 combined images total."
             }
         },
         "required": ["prompt"]
@@ -672,10 +1037,17 @@ def _handle_image_generate(args, **kw):
         return tool_error("prompt is required for image generation")
     return image_generate_tool(
         prompt=prompt,
+        operation=args.get("operation", DEFAULT_OPERATION),
+        provider=args.get("provider", "auto"),
         aspect_ratio=args.get("aspect_ratio", "landscape"),
+        resolution=args.get("resolution"),
+        response_format=args.get("response_format", "url"),
+        source_image_url=args.get("source_image_url"),
+        source_image_urls=args.get("source_image_urls"),
+        reference_image_urls=args.get("reference_image_urls"),
         num_inference_steps=50,
         guidance_scale=4.5,
-        num_images=1,
+        num_images=args.get("num_images", 1),
         output_format="png",
         seed=None,
     )
