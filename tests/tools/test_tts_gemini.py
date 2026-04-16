@@ -1,6 +1,7 @@
 """Tests for the Gemini TTS provider in tools/tts_tool.py."""
 
 import base64
+import os
 import struct
 from unittest.mock import MagicMock, patch
 
@@ -219,3 +220,111 @@ class TestCheckTtsRequirementsGemini:
             "tools.tts_tool._import_mistral_client", side_effect=ImportError
         ), patch("tools.tts_tool._check_neutts_available", return_value=False):
             assert check_tts_requirements() is False
+
+
+class TestGeminiTtsEdgeCases:
+    """Tests for edge cases and conversion paths added during salvage review."""
+
+    def test_empty_pcm_raises_runtime_error(self, tmp_path, monkeypatch):
+        from tools.tts_tool import _generate_gemini_tts
+
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        with patch(
+            "tools.tts_tool.urllib.request.urlopen",
+            return_value=_mock_urlopen(_gemini_response(b"")),
+        ):
+            with pytest.raises(RuntimeError, match="empty audio data"):
+                _generate_gemini_tts("hi", str(tmp_path / "out.wav"), {})
+
+    def test_text_part_before_audio_is_handled(self, tmp_path, monkeypatch):
+        """If the response has a text part before the audio part, still extract audio."""
+        from tools.tts_tool import _generate_gemini_tts
+
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        pcm = b"\x01\x00\x02\x00"
+        mixed_response = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"text": "Here is your audio"},
+                            {"inlineData": {"data": base64.b64encode(pcm).decode()}},
+                        ]
+                    }
+                }
+            ]
+        }
+        with patch(
+            "tools.tts_tool.urllib.request.urlopen",
+            return_value=_mock_urlopen(mixed_response),
+        ):
+            result = _generate_gemini_tts("hi", str(tmp_path / "out.wav"), {})
+        assert result == str(tmp_path / "out.wav")
+
+    def test_base_url_config_override(self, tmp_path, monkeypatch):
+        import json as _json
+
+        from tools.tts_tool import _generate_gemini_tts
+
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            return _mock_urlopen(_gemini_response(b"\x00\x00"))
+
+        with patch("tools.tts_tool.urllib.request.urlopen", side_effect=fake_urlopen):
+            config = {"gemini": {"base_url": "https://custom.api.example.com/v1"}}
+            _generate_gemini_tts("hi", str(tmp_path / "out.wav"), config)
+
+        assert "custom.api.example.com" in captured["url"]
+
+    def test_wav_to_mp3_conversion_with_ffmpeg(self, tmp_path, monkeypatch):
+        from tools.tts_tool import _generate_gemini_tts
+
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        pcm = b"\x01\x00\x02\x00\x03\x00"
+        mp3_path = str(tmp_path / "out.mp3")
+
+        with patch(
+            "tools.tts_tool.urllib.request.urlopen",
+            return_value=_mock_urlopen(_gemini_response(pcm)),
+        ), patch("shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+            "subprocess.run"
+        ) as mock_run:
+            result = _generate_gemini_tts("hi", mp3_path, {})
+
+        # ffmpeg should be called to convert .wav -> .mp3
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "/usr/bin/ffmpeg"
+        assert mp3_path in cmd
+
+    def test_wav_to_ogg_no_ffmpeg_renames(self, tmp_path, monkeypatch):
+        from tools.tts_tool import _generate_gemini_tts
+
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        pcm = b"\x01\x00\x02\x00"
+        ogg_path = str(tmp_path / "out.ogg")
+
+        with patch(
+            "tools.tts_tool.urllib.request.urlopen",
+            return_value=_mock_urlopen(_gemini_response(pcm)),
+        ), patch("shutil.which", return_value=None):
+            result = _generate_gemini_tts("hi", ogg_path, {})
+
+        # Without ffmpeg, the WAV content gets renamed to .ogg path
+        assert result == ogg_path
+        assert os.path.exists(ogg_path)
+
+    def test_url_error_surfaced_as_runtime_error(self, tmp_path, monkeypatch):
+        import urllib.error
+
+        from tools.tts_tool import _generate_gemini_tts
+
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        err = urllib.error.URLError("Name or service not known")
+
+        with patch("tools.tts_tool.urllib.request.urlopen", side_effect=err):
+            with pytest.raises(RuntimeError, match="connection failed"):
+                _generate_gemini_tts("hi", str(tmp_path / "out.wav"), {})

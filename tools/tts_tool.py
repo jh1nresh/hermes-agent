@@ -651,9 +651,20 @@ def _generate_gemini_tts(text: str, output_path: str, tts_config: Dict[str, Any]
     except urllib.error.HTTPError as exc:
         err_body = exc.read().decode("utf-8", errors="ignore")[:500]
         raise RuntimeError(f"Gemini TTS HTTP {exc.code}: {err_body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Gemini TTS connection failed: {exc.reason}") from exc
 
     try:
-        audio_part = response_data["candidates"][0]["content"]["parts"][0]
+        parts = response_data["candidates"][0]["content"]["parts"]
+        audio_part = None
+        for part in parts:
+            if "inlineData" in part:
+                audio_part = part
+                break
+        if audio_part is None:
+            raise RuntimeError(
+                f"Gemini TTS response missing audio payload: {str(response_data)[:300]}"
+            )
         audio_b64 = audio_part["inlineData"]["data"]
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(
@@ -661,6 +672,8 @@ def _generate_gemini_tts(text: str, output_path: str, tts_config: Dict[str, Any]
         ) from exc
 
     pcm_bytes = base64.b64decode(audio_b64)
+    if not pcm_bytes:
+        raise RuntimeError("Gemini TTS returned empty audio data")
 
     # Write PCM as WAV natively — ffmpeg is only needed if the caller
     # asked for a non-WAV extension (mp3/ogg).
