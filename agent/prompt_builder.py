@@ -185,6 +185,21 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "without acting are not acceptable."
 )
 
+# Strategic re-evaluation guidance — prevents agents from getting stuck in
+# fix-loops by forcing a step back after repeated failures.
+# Ported from google-gemini/gemini-cli#25062.
+STRATEGIC_REEVALUATION_GUIDANCE = (
+    "# Strategic re-evaluation\n"
+    "If you have attempted to fix a failing implementation more than 3 times "
+    "without success, you must:\n"
+    "1. Stop and re-read the original task description carefully.\n"
+    "2. List your current assumptions and identify which ones might be wrong.\n"
+    "3. Propose a fundamentally different approach rather than continuing to "
+    "patch the current one.\n"
+    "Do not keep applying small variations of the same fix. Step back, "
+    "reconsider the problem from scratch, and try a different strategy."
+)
+
 # Model name substrings that trigger tool-use enforcement guidance.
 # Add new patterns here when a model family needs explicit steering.
 TOOL_USE_ENFORCEMENT_MODELS = ("gpt", "codex", "gemini", "gemma", "grok")

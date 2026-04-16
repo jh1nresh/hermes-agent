@@ -24,6 +24,7 @@ from agent.prompt_builder import (
     TOOL_USE_ENFORCEMENT_GUIDANCE,
     TOOL_USE_ENFORCEMENT_MODELS,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
+    STRATEGIC_REEVALUATION_GUIDANCE,
     MEMORY_GUIDANCE,
     SESSION_SEARCH_GUIDANCE,
     PLATFORM_HINTS,
@@ -1027,6 +1028,40 @@ class TestOpenAIModelExecutionGuidance:
     def test_guidance_is_string(self):
         assert isinstance(OPENAI_MODEL_EXECUTION_GUIDANCE, str)
         assert len(OPENAI_MODEL_EXECUTION_GUIDANCE) > 100
+
+
+# =========================================================================
+# Strategic re-evaluation guidance
+# (ported from google-gemini/gemini-cli#25062)
+# =========================================================================
+
+
+class TestStrategicReevaluationGuidance:
+    """Tests for the strategic re-evaluation guidance constant."""
+
+    def test_guidance_is_string(self):
+        assert isinstance(STRATEGIC_REEVALUATION_GUIDANCE, str)
+        assert len(STRATEGIC_REEVALUATION_GUIDANCE) > 50
+
+    def test_guidance_mentions_3_attempts(self):
+        """Should trigger after 3 failed attempts."""
+        assert "3 times" in STRATEGIC_REEVALUATION_GUIDANCE
+
+    def test_guidance_requires_reread_task(self):
+        """Step 1: re-read the original task."""
+        assert "original task" in STRATEGIC_REEVALUATION_GUIDANCE.lower()
+
+    def test_guidance_requires_questioning_assumptions(self):
+        """Step 2: question current assumptions."""
+        assert "assumptions" in STRATEGIC_REEVALUATION_GUIDANCE.lower()
+
+    def test_guidance_requires_different_approach(self):
+        """Step 3: propose a fundamentally different approach."""
+        assert "different approach" in STRATEGIC_REEVALUATION_GUIDANCE.lower()
+
+    def test_guidance_discourages_small_variations(self):
+        """Should tell the agent not to keep doing the same thing."""
+        assert "small variations" in STRATEGIC_REEVALUATION_GUIDANCE.lower()
 
 
 # =========================================================================

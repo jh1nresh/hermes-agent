@@ -705,6 +705,14 @@ class TestBuildSystemPrompt:
         assert mock_skills.call_args.kwargs["available_tools"] == set(toolset_map)
         assert mock_skills.call_args.kwargs["available_toolsets"] == {"web", "skills"}
 
+    def test_strategic_reevaluation_guidance_present_when_tools_loaded(self, agent):
+        """Strategic re-evaluation guidance should appear for any agent with tools."""
+        from agent.prompt_builder import STRATEGIC_REEVALUATION_GUIDANCE
+
+        prompt = agent._build_system_prompt()
+        assert "Strategic re-evaluation" in prompt
+        assert "3 times" in prompt
+
 
 class TestToolUseEnforcementConfig:
     """Tests for the agent.tool_use_enforcement config option."""
