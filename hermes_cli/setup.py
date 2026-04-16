@@ -1592,6 +1592,29 @@ def setup_agent_settings(config: dict):
 # =============================================================================
 
 
+def _setup_telegram_auto() -> str | None:
+    """Attempt automatic Telegram bot creation via Managed Bots (Bot API 9.6).
+
+    Returns the bot token on success, None on failure/skip.
+    """
+    try:
+        from hermes_cli.telegram_managed_bot import auto_setup_telegram_bot
+    except ImportError:
+        return None
+
+    # Determine profile name for username generation
+    profile_name = None
+    try:
+        hermes_home = get_hermes_home()
+        profiles_dir = hermes_home.rstrip("/").rsplit("/", 1)[0] if "/profiles/" in hermes_home else ""
+        if profiles_dir:
+            profile_name = hermes_home.rstrip("/").rsplit("/", 1)[-1]
+    except Exception:
+        pass
+
+    return auto_setup_telegram_bot(profile_name=profile_name)
+
+
 def _setup_telegram():
     """Configure Telegram bot credentials and allowlist."""
     print_header("Telegram")
@@ -1610,8 +1633,31 @@ def _setup_telegram():
                         print_success("Telegram allowlist configured")
             return
 
-    print_info("Create a bot via @BotFather on Telegram")
-    token = prompt("Telegram bot token", password=True)
+    # Offer automatic setup via Telegram Managed Bots (Bot API 9.6)
+    print_info("How would you like to create your Telegram bot?")
+    print()
+    print_info("  [1] Automatic (recommended)")
+    print_info("      Scan a QR code → confirm in Telegram → done.")
+    print_info("      No token copy-paste needed.")
+    print()
+    print_info("  [2] Manual")
+    print_info("      Create a bot via @BotFather yourself and paste the token.")
+    print()
+
+    choice = prompt("Choice [1/2]", default="1")
+    token = None
+
+    if choice.strip() == "1":
+        token = _setup_telegram_auto()
+        if not token:
+            print()
+            print_info("Falling back to manual setup...")
+            print()
+
+    if not token:
+        print_info("Create a bot via @BotFather on Telegram")
+        token = prompt("Telegram bot token", password=True)
+
     if not token:
         return
     save_env_value("TELEGRAM_BOT_TOKEN", token)
