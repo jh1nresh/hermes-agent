@@ -128,6 +128,7 @@ The largest optional category — covers the full ML pipeline from data curation
 | **bioinformatics** | Gateway to 400+ bioinformatics skills from bioSkills and ClawBio. Covers genomics, transcriptomics, single-cell, variant calling, pharmacogenomics, metagenomics, and structural biology. |
 | **domain-intel** | Passive domain reconnaissance using Python stdlib. Subdomain discovery, SSL certificate inspection, WHOIS lookups, DNS records, and bulk multi-domain analysis. No API keys required. |
 | **duckduckgo-search** | Free web search via DuckDuckGo — text, news, images, videos. No API key needed. |
+| **searxng-search** | Free meta-search via SearXNG — aggregates results from 70+ search engines. Self-hosted or use a public instance. No API key needed. |
 | **gitnexus-explorer** | Index a codebase with GitNexus and serve an interactive knowledge graph via web UI and Cloudflare tunnel. |
 | **parallel-cli** | Vendor skill for Parallel CLI — agent-native web search, extraction, deep research, enrichment, and monitoring. |
 | **qmd** | Search personal knowledge bases, notes, docs, and meeting transcripts locally using qmd — a hybrid retrieval engine with BM25, vector search, and LLM reranking. |
