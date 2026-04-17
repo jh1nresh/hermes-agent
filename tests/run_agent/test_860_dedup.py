@@ -29,6 +29,7 @@ class TestFlushDeduplication:
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
             from run_agent import AIAgent
             agent = AIAgent(
+                api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 model="test/model",
                 quiet_mode=True,
@@ -272,6 +273,7 @@ class TestFlushIdxInit:
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
             from run_agent import AIAgent
             agent = AIAgent(
+                api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 model="test/model",
                 quiet_mode=True,
@@ -285,6 +287,7 @@ class TestFlushIdxInit:
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
             from run_agent import AIAgent
             agent = AIAgent(
+                api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 model="test/model",
                 quiet_mode=True,
