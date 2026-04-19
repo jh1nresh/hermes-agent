@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
-Raw Chrome DevTools Protocol (CDP) passthrough tool.
+Chrome DevTools Protocol (CDP) tools.
 
-Exposes a single tool, ``browser_cdp``, that sends arbitrary CDP commands to
-the browser's DevTools WebSocket endpoint.  Works when a CDP URL is
-configured — either via ``/browser connect`` (sets ``BROWSER_CDP_URL``) or
-``browser.cdp_url`` in ``config.yaml`` — or when a CDP-backed cloud provider
-session is active.
+Exposes two tools that share the same CDP endpoint and availability gate:
 
-This is the escape hatch for browser operations not covered by the main
-browser tool surface (``browser_navigate``, ``browser_click``,
-``browser_console``, etc.) — handling native dialogs, iframe-scoped
-evaluation, cookie/network control, low-level tab management, etc.
+* ``browser_cdp`` — raw CDP passthrough for arbitrary commands.  Escape
+  hatch for anything not covered by the wrapped browser tools.
+* ``browser_dialog`` — ergonomic wrapper over ``Page.handleJavaScriptDialog``
+  that accepts/dismisses a native JS dialog (alert/confirm/prompt/
+  beforeunload) blocking the page.  Auto-resolves ``target_id`` when
+  exactly one page tab is open.
 
-Method reference: https://chromedevtools.github.io/devtools-protocol/
+Both tools are only registered when a CDP endpoint is actually reachable
+from Python at session start — meaning ``/browser connect`` is active or
+``browser.cdp_url`` is set in ``config.yaml``.  Backends that don't
+currently expose CDP (Camofox, default local agent-browser, cloud
+providers whose per-session ``cdp_url`` isn't surfaced) don't see these
+tools at all.
+
+CDP method reference: https://chromedevtools.github.io/devtools-protocol/
 """
 from __future__ import annotations
 
@@ -413,4 +418,240 @@ registry.register(
     ),
     check_fn=_browser_cdp_check,
     emoji="🧪",
+)
+
+
+# ---------------------------------------------------------------------------
+# browser_dialog — ergonomic wrapper over Page.handleJavaScriptDialog
+# ---------------------------------------------------------------------------
+
+
+def browser_dialog(
+    action: str,
+    prompt_text: Optional[str] = None,
+    target_id: Optional[str] = None,
+    timeout: float = 30.0,
+    task_id: Optional[str] = None,
+) -> str:
+    """Accept or dismiss a native JS dialog blocking the page.
+
+    Thin wrapper over the CDP ``Page.handleJavaScriptDialog`` verb that
+    also auto-resolves ``target_id`` when exactly one page tab is open.
+    Same CDP endpoint and availability gate as :func:`browser_cdp`.
+
+    Args:
+        action: ``"accept"`` or ``"dismiss"``.
+        prompt_text: Text to enter when handling a ``prompt()`` dialog;
+            ignored for alert/confirm/beforeunload.
+        target_id: Target/tab ID from ``Target.getTargets``.  Optional
+            when exactly one page tab is open; required otherwise.
+        timeout: Seconds to wait for the CDP round-trip (default 30).
+        task_id: Unused — accepted for uniformity with other browser tools.
+
+    Returns:
+        JSON string ``{"success": True, "action": ..., "target_id": ...}``
+        on success, or ``{"error": "..."}`` on failure.  CDP's
+        ``"No dialog is showing"`` error is passed through verbatim so
+        callers can use this as a probe for dialog presence.
+    """
+    del task_id
+
+    # --- input validation ------------------------------------------------
+    if action not in ("accept", "dismiss"):
+        return tool_error(
+            f"'action' must be 'accept' or 'dismiss', got {action!r}"
+        )
+
+    # --- shared gate checks (match browser_cdp) --------------------------
+    if not _WS_AVAILABLE:
+        return tool_error(
+            "The 'websockets' Python package is required but not installed. "
+            "Install it with: pip install websockets"
+        )
+
+    endpoint = _resolve_cdp_endpoint()
+    if not endpoint:
+        return tool_error(
+            "No CDP endpoint is available. Run '/browser connect' to attach "
+            "to a running Chrome, or set 'browser.cdp_url' in config.yaml.",
+            cdp_docs=CDP_DOCS_URL,
+        )
+
+    if not endpoint.startswith(("ws://", "wss://")):
+        return tool_error(
+            f"CDP endpoint is not a WebSocket URL: {endpoint!r}. "
+            "Check that Chrome is actually listening on the debug port."
+        )
+
+    try:
+        safe_timeout = float(timeout) if timeout else 30.0
+    except (TypeError, ValueError):
+        safe_timeout = 30.0
+    safe_timeout = max(1.0, min(safe_timeout, 300.0))
+
+    # --- auto-resolve target_id when not explicitly given ---------------
+    resolved_target_id = target_id
+    if not resolved_target_id:
+        try:
+            targets_result = _run_async(
+                _cdp_call(
+                    endpoint, "Target.getTargets", {}, None, safe_timeout
+                )
+            )
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            return tool_error(
+                f"Timed out listing tabs while resolving target: {exc}"
+            )
+        except RuntimeError as exc:
+            return tool_error(
+                f"Failed to list tabs while resolving target: {exc}"
+            )
+        except WebSocketException as exc:
+            return tool_error(
+                f"WebSocket error while resolving target at {endpoint}: {exc}"
+            )
+
+        page_targets = [
+            t
+            for t in targets_result.get("targetInfos", [])
+            if t.get("type") == "page"
+        ]
+        if len(page_targets) == 0:
+            return tool_error(
+                "No page tabs found — nothing to handle a dialog on."
+            )
+        if len(page_targets) > 1:
+            return tool_error(
+                "Multiple page tabs are open — pass target_id explicitly. "
+                "Use browser_cdp(method='Target.getTargets') to list them.",
+                page_count=len(page_targets),
+                tabs=[
+                    {
+                        "targetId": t.get("targetId"),
+                        "title": t.get("title", ""),
+                        "url": t.get("url", ""),
+                    }
+                    for t in page_targets
+                ],
+            )
+        resolved_target_id = page_targets[0].get("targetId")
+        if not resolved_target_id:
+            return tool_error(
+                "Target.getTargets returned a page target without a targetId"
+            )
+
+    # --- dispatch the dialog handler -------------------------------------
+    cdp_params = {
+        "accept": action == "accept",
+        "promptText": prompt_text or "",
+    }
+    try:
+        result = _run_async(
+            _cdp_call(
+                endpoint,
+                "Page.handleJavaScriptDialog",
+                cdp_params,
+                resolved_target_id,
+                safe_timeout,
+            )
+        )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        return tool_error(
+            f"CDP call timed out after {safe_timeout}s: {exc}",
+            action=action,
+            target_id=resolved_target_id,
+        )
+    except RuntimeError as exc:
+        # CDP returns a clear "No dialog is showing" error when there's
+        # nothing to handle — pass it through so callers can probe.
+        return tool_error(
+            str(exc), action=action, target_id=resolved_target_id
+        )
+    except WebSocketException as exc:
+        return tool_error(
+            f"WebSocket error talking to CDP at {endpoint}: {exc}. The "
+            "browser may have disconnected — try '/browser connect' again.",
+            action=action,
+        )
+    except Exception as exc:  # pragma: no cover — unexpected
+        logger.exception("browser_dialog unexpected error")
+        return tool_error(
+            f"Unexpected error: {type(exc).__name__}: {exc}",
+            action=action,
+        )
+
+    return json.dumps(
+        {
+            "success": True,
+            "action": action,
+            "target_id": resolved_target_id,
+            "result": result,
+        },
+        ensure_ascii=False,
+    )
+
+
+BROWSER_DIALOG_SCHEMA: Dict[str, Any] = {
+    "name": "browser_dialog",
+    "description": (
+        "Accept or dismiss a native JS dialog (alert/confirm/prompt/"
+        "beforeunload) that's blocking a page.\n\n"
+        "**When to use:** native dialogs freeze the page's JS thread, so "
+        "browser_snapshot, browser_console, browser_click and similar tools "
+        "will hang or error until the dialog is handled. Use this tool to "
+        "unstick the page. Also safe as a probe — CDP returns a clean 'No "
+        "dialog is showing' error when there isn't one, so you can call "
+        "this to check whether a suspected dialog exists.\n\n"
+        "**Requires the same CDP endpoint as browser_cdp.** If this tool "
+        "is in your toolset, the endpoint is already reachable.\n\n"
+        "**target_id auto-resolution:** when exactly one page tab is "
+        "open, target_id can be omitted. With multiple page tabs, an "
+        "explicit target_id is required — the error response lists the "
+        "tabs so you can pick one."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["accept", "dismiss"],
+                "description": (
+                    "'accept' confirms OK/Yes/Submit; 'dismiss' cancels. "
+                    "For beforeunload dialogs, 'accept' leaves the page "
+                    "and 'dismiss' stays on it."
+                ),
+            },
+            "prompt_text": {
+                "type": "string",
+                "description": (
+                    "Text to enter when handling a prompt() dialog. "
+                    "Ignored for alert, confirm, and beforeunload dialogs."
+                ),
+            },
+            "target_id": {
+                "type": "string",
+                "description": (
+                    "Target/tab ID from Target.getTargets. Optional when "
+                    "exactly one page tab is open; required otherwise."
+                ),
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
+registry.register(
+    name="browser_dialog",
+    toolset="browser",
+    schema=BROWSER_DIALOG_SCHEMA,
+    handler=lambda args, **kw: browser_dialog(
+        action=args.get("action", ""),
+        prompt_text=args.get("prompt_text"),
+        target_id=args.get("target_id"),
+        timeout=args.get("timeout", 30.0),
+        task_id=kw.get("task_id"),
+    ),
+    check_fn=_browser_cdp_check,
+    emoji="💬",
 )

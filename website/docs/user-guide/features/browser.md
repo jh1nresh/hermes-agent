@@ -357,6 +357,32 @@ browser_cdp(method="Network.getAllCookies")
 
 Browser-level methods (`Target.*`, `Browser.*`, `Storage.*`) omit `target_id`. Page-level methods (`Page.*`, `Runtime.*`, `DOM.*`, `Emulation.*`) require a `target_id` from `Target.getTargets`. Each call is independent — sessions do not persist between calls.
 
+### `browser_dialog`
+
+Accept or dismiss a native JS dialog (`alert`, `confirm`, `prompt`, `beforeunload`) that's blocking a page. Native dialogs freeze the page's JS thread, so `browser_snapshot`, `browser_console`, `browser_click` and related tools will hang or error until the dialog is handled.
+
+**Same CDP gate as `browser_cdp`** — appears in the toolset when `/browser connect` is active or `browser.cdp_url` is set, and disappears otherwise.
+
+```
+# Accept (click OK / Yes / Submit)
+browser_dialog(action="accept")
+
+# Dismiss (click Cancel / No)
+browser_dialog(action="dismiss")
+
+# Fill a prompt() dialog
+browser_dialog(action="accept", prompt_text="my answer")
+
+# With multiple tabs open, specify which one
+browser_dialog(action="accept", target_id="<tabId>")
+```
+
+`target_id` is auto-resolved when exactly one page tab is open. With multiple page tabs, the tool returns an error listing them so the agent can pick one explicitly.
+
+Safe as a probe: CDP cleanly returns `"No dialog is showing"` when nothing's pending, so calling `browser_dialog(action="dismiss")` is a zero-risk way to check for a stuck dialog. If subsequent `browser_snapshot` / `browser_click` calls start hanging on a page that was working before, this is the first thing to try.
+
+**Note on dialog detection:** Hermes does not currently auto-detect that a dialog is open — the agent infers from symptoms (calls hanging/erroring) and uses `browser_dialog` to unstick the page. Persistent dialog-event subscription is a larger architectural change (persistent CDP connections per session) and is a follow-up.
+
 ## Practical Examples
 
 ### Filling Out a Web Form

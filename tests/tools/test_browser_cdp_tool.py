@@ -406,3 +406,184 @@ def test_check_fn_false_when_browser_requirements_fail(monkeypatch):
         bt, "_get_cdp_override", lambda: "ws://localhost:9222/devtools/browser/x"
     )
     assert browser_cdp_tool._browser_cdp_check() is False
+
+
+# ---------------------------------------------------------------------------
+# browser_dialog
+# ---------------------------------------------------------------------------
+
+
+def test_dialog_invalid_action_returns_error():
+    result = json.loads(browser_cdp_tool.browser_dialog(action="yes"))
+    assert "error" in result
+    assert "accept" in result["error"] and "dismiss" in result["error"]
+
+
+def test_dialog_no_endpoint_returns_error(monkeypatch):
+    monkeypatch.setattr(browser_cdp_tool, "_resolve_cdp_endpoint", lambda: "")
+    result = json.loads(browser_cdp_tool.browser_dialog(action="accept"))
+    assert "error" in result
+    assert "/browser connect" in result["error"]
+
+
+def test_dialog_websockets_missing_returns_error(monkeypatch):
+    monkeypatch.setattr(browser_cdp_tool, "_WS_AVAILABLE", False)
+    result = json.loads(browser_cdp_tool.browser_dialog(action="accept"))
+    assert "error" in result
+    assert "websockets" in result["error"].lower()
+
+
+def test_dialog_explicit_target_accept_flow(cdp_server):
+    """With explicit target_id, we skip Target.getTargets and attach+handle."""
+    cdp_server.on(
+        "Target.attachToTarget",
+        lambda params, sid: {"sessionId": f"sess-{params['targetId']}"},
+    )
+    cdp_server.on("Page.handleJavaScriptDialog", lambda params, sid: {})
+
+    result = json.loads(
+        browser_cdp_tool.browser_dialog(
+            action="accept", target_id="tab-A", prompt_text="hello"
+        )
+    )
+    assert result["success"] is True
+    assert result["action"] == "accept"
+    assert result["target_id"] == "tab-A"
+
+    calls = cdp_server.received()
+    # No Target.getTargets — we went straight to attach + handle
+    methods = [c["method"] for c in calls]
+    assert "Target.getTargets" not in methods
+    assert methods == ["Target.attachToTarget", "Page.handleJavaScriptDialog"]
+    handle = calls[1]
+    assert handle["params"] == {"accept": True, "promptText": "hello"}
+    assert handle["sessionId"] == "sess-tab-A"
+
+
+def test_dialog_explicit_target_dismiss_flow(cdp_server):
+    cdp_server.on(
+        "Target.attachToTarget",
+        lambda params, sid: {"sessionId": f"sess-{params['targetId']}"},
+    )
+    cdp_server.on("Page.handleJavaScriptDialog", lambda params, sid: {})
+
+    result = json.loads(
+        browser_cdp_tool.browser_dialog(action="dismiss", target_id="tab-B")
+    )
+    assert result["success"] is True
+    assert result["action"] == "dismiss"
+    handle = cdp_server.received()[1]
+    assert handle["params"] == {"accept": False, "promptText": ""}
+
+
+def test_dialog_auto_resolve_single_page(cdp_server):
+    cdp_server.on(
+        "Target.getTargets",
+        lambda params, sid: {
+            "targetInfos": [
+                {"targetId": "only-page", "type": "page", "title": "One", "url": "a"},
+                {"targetId": "bg", "type": "background_page", "title": "Bg", "url": "b"},
+                {"targetId": "sw", "type": "service_worker", "title": "SW", "url": "c"},
+            ]
+        },
+    )
+    cdp_server.on(
+        "Target.attachToTarget",
+        lambda params, sid: {"sessionId": f"sess-{params['targetId']}"},
+    )
+    cdp_server.on("Page.handleJavaScriptDialog", lambda params, sid: {})
+
+    result = json.loads(browser_cdp_tool.browser_dialog(action="accept"))
+    assert result["success"] is True
+    assert result["target_id"] == "only-page"
+
+    calls = cdp_server.received()
+    # Expect: Target.getTargets (browser-level), then attach, then handle
+    assert calls[0]["method"] == "Target.getTargets"
+    assert calls[1]["method"] == "Target.attachToTarget"
+    assert calls[1]["params"]["targetId"] == "only-page"
+    assert calls[2]["method"] == "Page.handleJavaScriptDialog"
+
+
+def test_dialog_auto_resolve_no_pages(cdp_server):
+    cdp_server.on(
+        "Target.getTargets",
+        lambda params, sid: {
+            "targetInfos": [
+                {"targetId": "bg", "type": "background_page", "title": "Bg", "url": "x"},
+            ]
+        },
+    )
+    result = json.loads(browser_cdp_tool.browser_dialog(action="accept"))
+    assert "error" in result
+    assert "No page tabs" in result["error"]
+
+
+def test_dialog_auto_resolve_multiple_pages_lists_tabs(cdp_server):
+    cdp_server.on(
+        "Target.getTargets",
+        lambda params, sid: {
+            "targetInfos": [
+                {"targetId": "A", "type": "page", "title": "First", "url": "https://a.test"},
+                {"targetId": "B", "type": "page", "title": "Second", "url": "https://b.test"},
+            ]
+        },
+    )
+    result = json.loads(browser_cdp_tool.browser_dialog(action="accept"))
+    assert "error" in result
+    assert "target_id" in result["error"]
+    assert result.get("page_count") == 2
+    tab_ids = {t["targetId"] for t in result.get("tabs", [])}
+    assert tab_ids == {"A", "B"}
+
+
+def test_dialog_passes_through_no_dialog_showing(cdp_server):
+    """CDP's 'No dialog is showing' error should surface as a tool_error."""
+    cdp_server.on(
+        "Target.attachToTarget",
+        lambda params, sid: {"sessionId": "sess"},
+    )
+    # No handler for Page.handleJavaScriptDialog -> mock returns CDP error
+    result = json.loads(
+        browser_cdp_tool.browser_dialog(action="dismiss", target_id="tab-X")
+    )
+    assert "error" in result
+    assert result.get("action") == "dismiss"
+    assert result.get("target_id") == "tab-X"
+
+
+def test_dialog_registered_in_browser_toolset_with_same_gate():
+    """browser_dialog must use the same check_fn as browser_cdp so they
+    appear/disappear together."""
+    from tools.registry import registry
+
+    cdp_entry = registry.get_entry("browser_cdp")
+    dialog_entry = registry.get_entry("browser_dialog")
+
+    assert dialog_entry is not None
+    assert dialog_entry.toolset == "browser"
+    assert dialog_entry.schema["name"] == "browser_dialog"
+    assert dialog_entry.schema["parameters"]["required"] == ["action"]
+    assert set(dialog_entry.schema["parameters"]["properties"]["action"]["enum"]) == {
+        "accept",
+        "dismiss",
+    }
+    # Shared gate
+    assert dialog_entry.check_fn is cdp_entry.check_fn
+
+
+def test_dialog_dispatch_through_registry(cdp_server):
+    from tools.registry import registry
+
+    cdp_server.on(
+        "Target.attachToTarget", lambda p, s: {"sessionId": "sess"}
+    )
+    cdp_server.on("Page.handleJavaScriptDialog", lambda p, s: {})
+    raw = registry.dispatch(
+        "browser_dialog",
+        {"action": "accept", "target_id": "tab-Z"},
+        task_id="t1",
+    )
+    result = json.loads(raw)
+    assert result["success"] is True
+    assert result["action"] == "accept"
