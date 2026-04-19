@@ -39,14 +39,18 @@ class FileParser(ABC):
 class MarkitdownParser(FileParser):
     name = "markitdown"
 
+    def __init__(self) -> None:
+        self._md: object | None = None
+
     def supported_suffixes(self) -> frozenset[str]:
         return frozenset({".pdf", ".docx", ".pptx"})
 
     def _convert(self, path: Path) -> str:
-        from markitdown import MarkItDown
+        if self._md is None:
+            from markitdown import MarkItDown
 
-        md = MarkItDown()
-        result = md.convert(str(path))
+            self._md = MarkItDown()
+        result = self._md.convert(str(path))  # type: ignore[union-attr]
         return result.markdown
 
 
@@ -81,7 +85,7 @@ class CompositeParser:
         return parser.parse(path)
 
     def can_parse(self, suffix: str) -> bool:
-        return suffix in self._routing
+        return suffix.lower() in self._routing
 
 
 _PARSER_CLASSES: list[type[FileParser]] = [MarkitdownParser, PandocParser]
@@ -97,7 +101,10 @@ def build_parser(config: ParsingConfig) -> CompositeParser:
     for suffix in PARSEABLE_SUFFIXES:
         backend_name = config.overrides.get(suffix, config.default)
         parser = available.get(backend_name)
-        if parser is not None and suffix in parser.supported_suffixes():
+        if parser is None:
+            log.warning("Unknown parser backend %r for %s — skipping", backend_name, suffix)
+            continue
+        if suffix in parser.supported_suffixes():
             routing[suffix] = parser
 
     return CompositeParser(routing)
