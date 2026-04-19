@@ -543,8 +543,7 @@ Hermes runs on Linux, macOS, and Windows. When writing code that touches the OS:
 3. **Process management.** `os.setsid()`, `os.killpg()`, and signal handling differ on Windows. Use platform checks:
    ```python
    import platform
-   if platform.system() != "Windows":
-       kwargs["preexec_fn"] = os.setsid
+   kwargs["start_new_session"] = platform.system() != "Windows"
    ```
 
 4. **Path separators.** Use `pathlib.Path` instead of string concatenation with `/`.

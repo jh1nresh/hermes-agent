@@ -269,7 +269,7 @@ class LocalEnvironment(BaseEnvironment):
             stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
             start_new_session=not _IS_WINDOWS,
         )
-                      
+
         if stdin_data is not None:
             _pipe_stdin(proc, stdin_data)
 

@@ -395,7 +395,7 @@ class ProcessRegistry:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE,
-            preexec_fn=None if _IS_WINDOWS else os.setsid,
+            start_new_session=not _IS_WINDOWS,
         )
 
         session.process = proc

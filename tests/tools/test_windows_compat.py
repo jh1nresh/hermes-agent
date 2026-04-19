@@ -19,13 +19,13 @@ GUARDED_FILES = [
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-def _get_preexec_fn_values(filepath: Path) -> list:
-    """Find all preexec_fn= keyword arguments in Popen calls."""
+def _get_kwarg_values(filepath: Path, kwarg_name: str) -> list:
+    """Find all ``kwarg_name=...`` keyword arguments in function calls."""
     source = filepath.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(filepath))
     values = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.keyword) and node.arg == "preexec_fn":
+        if isinstance(node, ast.keyword) and node.arg == kwarg_name:
             values.append(ast.dump(node.value))
     return values
 
@@ -38,11 +38,31 @@ class TestNoUnconditionalSetsid:
         filepath = PROJECT_ROOT / relpath
         if not filepath.exists():
             pytest.skip(f"{relpath} not found")
-        values = _get_preexec_fn_values(filepath)
+        values = _get_kwarg_values(filepath, "preexec_fn")
         for val in values:
             # A bare os.setsid would be: Attribute(value=Name(id='os'), attr='setsid')
             assert "attr='setsid'" not in val or "IfExp" in val or "None" in val, (
                 f"{relpath} has unconditional preexec_fn=os.setsid"
+            )
+
+    @pytest.mark.parametrize("relpath", GUARDED_FILES)
+    def test_start_new_session_is_guarded(self, relpath):
+        """start_new_session must not be an unconditional True.
+
+        The modern thread-safe replacement for ``preexec_fn=os.setsid`` is
+        ``start_new_session=<bool>``, but Windows' subprocess backend doesn't
+        support it — so it must always be gated on a platform check (typically
+        ``not _IS_WINDOWS``), never a bare ``True``.
+        """
+        filepath = PROJECT_ROOT / relpath
+        if not filepath.exists():
+            pytest.skip(f"{relpath} not found")
+        values = _get_kwarg_values(filepath, "start_new_session")
+        for val in values:
+            # A bare True literal would be: Constant(value=True)
+            assert val != "Constant(value=True)", (
+                f"{relpath} has unconditional start_new_session=True "
+                f"(must be guarded, e.g. `not _IS_WINDOWS`)"
             )
 
 

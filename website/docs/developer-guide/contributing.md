@@ -129,8 +129,7 @@ except UnicodeDecodeError:
 
 ```python
 import platform
-if platform.system() != "Windows":
-    kwargs["preexec_fn"] = os.setsid
+kwargs["start_new_session"] = platform.system() != "Windows"
 ```
 
 ### 4. Path separators

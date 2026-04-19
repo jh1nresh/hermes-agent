@@ -1065,7 +1065,7 @@ def execute_code(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            preexec_fn=None if _IS_WINDOWS else os.setsid,
+            start_new_session=not _IS_WINDOWS,
         )
 
         # --- Poll loop: watch for exit, timeout, and interrupt ---
