@@ -64,7 +64,11 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": BACKEND,
+      // REST endpoints + the /api/ws WebSocket (ws: true enables upgrade forwarding).
+      "/api": {
+        target: BACKEND,
+        ws: true,
+      },
     },
   },
 });
