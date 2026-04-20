@@ -905,3 +905,102 @@ class TestTruncateToolCallArgsJson:
         parsed = _json.loads(shrunk)
         assert parsed["path"] == "~/.hermes/skills/shopping/browser-setup-notes.md"
         assert parsed["content"].endswith("...[truncated]")
+
+
+class TestSerializationRedaction:
+    """Regression tests for the openclaw/openclaw#67801 port.
+
+    The summarizer is instructed to preserve specific values, so credential-like
+    strings surfaced through tool output (e.g. echo env vars, curl -v, reading
+    a .env file) must be scrubbed before they reach the summary prompt —
+    otherwise they get copied verbatim into the persistent summary and
+    re-injected on every subsequent compaction.
+    """
+
+    def test_api_key_prefix_redacted_from_tool_result(self, compressor):
+        secret = "sk-proj-abc123DEADBEEFdef456GHIJKL789mnop0123QRSTUVwxYZ"
+        turns = [
+            {"role": "user", "content": "show me the openai key"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "terminal",
+                              "arguments": '{"command": "echo $OPENAI_API_KEY"}'}},
+            ]},
+            {"role": "tool", "tool_call_id": "c1", "content": secret},
+            {"role": "user", "content": "thanks"},
+        ]
+        serialized = compressor._serialize_for_summary(turns)
+        assert secret not in serialized
+        # At least one form of masked output should remain; redact never
+        # removes everything — it replaces with a masked form.
+        assert len(serialized) > 0
+
+    def test_env_assignment_redacted(self, compressor):
+        secret = "sk-verysecretvalue123456789abcdef"
+        turns = [
+            {"role": "tool", "tool_call_id": "c1",
+             "content": f"OPENAI_API_KEY={secret}\nOTHER_VAR=harmless"},
+        ]
+        serialized = compressor._serialize_for_summary(turns)
+        assert secret not in serialized
+        assert "OPENAI_API_KEY=" in serialized
+
+    def test_authorization_header_redacted(self, compressor):
+        secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+        turns = [
+            {"role": "tool", "tool_call_id": "c1",
+             "content": f"curl -H 'Authorization: Bearer {secret}' https://api.github.com"},
+        ]
+        serialized = compressor._serialize_for_summary(turns)
+        assert secret not in serialized
+
+    def test_json_api_key_field_redacted(self, compressor):
+        secret = "xoxb-11111-22222-deadbeefcafebabefeed"
+        turns = [
+            {"role": "tool", "tool_call_id": "c1",
+             "content": '{"apiKey": "' + secret + '"}'},
+        ]
+        serialized = compressor._serialize_for_summary(turns)
+        assert secret not in serialized
+
+    def test_non_secret_content_preserved(self, compressor):
+        """Redaction must not damage legitimate content — file paths, UUIDs,
+        port numbers, error messages should all survive."""
+        turns = [
+            {"role": "user", "content": "fix the bug at /home/user/repo/src/main.py:42"},
+            {"role": "assistant", "content":
+                "Fixed. The UUID 550e8400-e29b-41d4-a716-446655440000 is now "
+                "correctly handled. Server listens on 127.0.0.1:8080."},
+            {"role": "tool", "tool_call_id": "c1",
+             "content": "ImportError: No module named 'foo'"},
+        ]
+        serialized = compressor._serialize_for_summary(turns)
+        assert "/home/user/repo/src/main.py:42" in serialized
+        assert "550e8400-e29b-41d4-a716-446655440000" in serialized
+        assert "127.0.0.1:8080" in serialized
+        assert "ImportError: No module named 'foo'" in serialized
+
+    def test_stored_summary_is_redacted(self, compressor):
+        """If the summarizer echoes a secret back, the stored summary must be
+        scrubbed before being retained in _previous_summary."""
+        secret = "sk-leakedfromsummarizer9876543210"
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock()
+        mock_response.choices[0].message.content = (
+            f"The user set OPENAI_API_KEY={secret} and ran the script."
+        )
+        mock_response.usage = None
+
+        fake_client = MagicMock()
+        fake_client.chat.completions.create.return_value = mock_response
+        compressor.client = fake_client
+
+        turns = [
+            {"role": "user", "content": "set up the key"},
+            {"role": "assistant", "content": "done"},
+        ]
+        summary = compressor._generate_summary(turns)
+        assert summary is not None
+        assert secret not in summary
+        assert secret not in (compressor._previous_summary or "")

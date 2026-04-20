@@ -31,6 +31,7 @@ from agent.model_metadata import (
     get_model_context_length,
     estimate_messages_tokens_rough,
 )
+from agent.redact import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
 
@@ -593,7 +594,13 @@ class ContextCompressor(ContextEngine):
                 content = content[:self._CONTENT_HEAD] + "\n...[truncated]...\n" + content[-self._CONTENT_TAIL:]
             parts.append(f"[{role.upper()}]: {content}")
 
-        return "\n\n".join(parts)
+        # Scrub credential-like values before sending to the summarizer.
+        # The summarizer is instructed to preserve "specific values" so raw
+        # API keys, bearer tokens, or env-var assignments that leak in via
+        # tool output (terminal, file_read, curl -v) would otherwise be
+        # copied verbatim into the persistent summary and re-injected on
+        # every subsequent compaction. Ported from openclaw/openclaw#67801.
+        return redact_sensitive_text("\n\n".join(parts))
 
     def _generate_summary(self, turns_to_summarize: List[Dict[str, Any]], focus_topic: str = None) -> Optional[str]:
         """Generate a structured summary of conversation turns.
@@ -699,13 +706,17 @@ Target ~{summary_budget} tokens. Be CONCRETE — include file paths, command out
 Write only the summary body. Do not include any preamble or prefix."""
 
         if self._previous_summary:
-            # Iterative update: preserve existing info, add new progress
+            # Iterative update: preserve existing info, add new progress.
+            # Re-scrub the previous summary in case it was produced before
+            # output-side redaction was added or restored from older session
+            # state. (Idempotent on already-clean text.)
+            previous_summary_clean = redact_sensitive_text(self._previous_summary)
             prompt = f"""{_summarizer_preamble}
 
 You are updating a context compaction summary. A previous compaction produced the summary below. New conversation turns have occurred since then and need to be incorporated.
 
 PREVIOUS SUMMARY:
-{self._previous_summary}
+{previous_summary_clean}
 
 NEW TURNS TO INCORPORATE:
 {content_to_summarize}
@@ -756,6 +767,12 @@ The user has requested that this compaction PRIORITISE preserving all informatio
             if not isinstance(content, str):
                 content = str(content) if content else ""
             summary = content.strip()
+            # Defense-in-depth: scrub any credential-like values that the
+            # summarizer may have echoed back from the input. Input is already
+            # scrubbed in _serialize_for_summary, but a poorly-behaved
+            # summarizer model could paraphrase a secret ("the API key was
+            # sk-..."). Ported from openclaw/openclaw#67801.
+            summary = redact_sensitive_text(summary)
             # Store for iterative updates on next compaction
             self._previous_summary = summary
             self._summary_failure_cooldown_until = 0.0
