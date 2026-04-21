@@ -37,3 +37,11 @@ def _discover_transports() -> None:
         import agent.transports.anthropic  # noqa: F401
     except ImportError:
         pass
+    try:
+        import agent.transports.codex  # noqa: F401
+    except ImportError:
+        pass
+    try:
+        import agent.transports.chat_completions  # noqa: F401
+    except ImportError:
+        pass
