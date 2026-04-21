@@ -1951,12 +1951,15 @@ def _(rid, params: dict) -> dict:
         _write_config_key("display.details_mode", "expanded" if nv == "full" else "collapsed")
         return _ok(rid, {"key": key, "value": nv})
 
-    if key in ("compact", "statusbar"):
+    if key in ("compact", "statusbar", "mouse"):
+        # compact defaults off, statusbar + mouse default on.
+        defaults = {"tui_compact": False, "tui_statusbar": True, "tui_mouse": True}
+        def_keys = {"compact": "tui_compact", "statusbar": "tui_statusbar", "mouse": "tui_mouse"}
+        def_key = def_keys[key]
         raw = str(value or "").strip().lower()
         cfg0 = _load_cfg()
         d0 = cfg0.get("display") if isinstance(cfg0.get("display"), dict) else {}
-        def_key = "tui_compact" if key == "compact" else "tui_statusbar"
-        cur_b = bool(d0.get(def_key, False if key == "compact" else True))
+        cur_b = bool(d0.get(def_key, defaults[def_key]))
         if raw in ("", "toggle"):
             nv_b = not cur_b
         elif raw == "on":
@@ -2053,6 +2056,9 @@ def _(rid, params: dict) -> dict:
     if key == "statusbar":
         on = bool(_load_cfg().get("display", {}).get("tui_statusbar", True))
         return _ok(rid, {"value": "on" if on else "off"})
+    if key == "mouse":
+        on = bool(_load_cfg().get("display", {}).get("tui_mouse", True))
+        return _ok(rid, {"value": "on" if on else "off"})
     if key == "mtime":
         cfg_path = _hermes_home / "config.yaml"
         try:
@@ -2106,6 +2112,7 @@ _TUI_HIDDEN: frozenset[str] = frozenset({
 _TUI_EXTRA: list[tuple[str, str, str]] = [
     ("/compact", "Toggle compact display mode", "TUI"),
     ("/logs", "Show recent gateway log lines", "TUI"),
+    ("/mouse", "Toggle SGR mouse tracking (turn off if your terminal prints escape codes on mouse move)", "TUI"),
 ]
 
 # Commands that queue messages onto _pending_input in the CLI.

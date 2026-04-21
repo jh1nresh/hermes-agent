@@ -77,6 +77,8 @@ declare module '@hermes/ink' {
 
   export function render(node: React.ReactNode, options?: NodeJS.WriteStream | RenderOptions): Instance
 
+  export function setAltScreenMouseTracking(enabled: boolean, stdout?: NodeJS.WriteStream): void
+
   export function useApp(): { readonly exit: (error?: Error) => void }
   export type RunExternalProcess = () => Promise<void>
   export function useExternalProcess(): (run: RunExternalProcess) => Promise<void>

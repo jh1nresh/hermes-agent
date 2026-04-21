@@ -118,6 +118,53 @@ def test_config_set_yolo_toggles_session_scope():
         server._sessions.clear()
 
 
+def test_config_set_mouse_writes_tui_mouse(monkeypatch):
+    writes: list[tuple[str, object]] = []
+    cfg = {"display": {}}
+
+    monkeypatch.setattr(server, "_load_cfg", lambda: cfg)
+    monkeypatch.setattr(server, "_write_config_key", lambda path, value: writes.append((path, value)))
+
+    resp_off = server.handle_request({"id": "1", "method": "config.set", "params": {"key": "mouse", "value": "off"}})
+    assert resp_off["result"] == {"key": "mouse", "value": "off"}
+    assert writes[-1] == ("display.tui_mouse", False)
+
+    resp_on = server.handle_request({"id": "2", "method": "config.set", "params": {"key": "mouse", "value": "on"}})
+    assert resp_on["result"] == {"key": "mouse", "value": "on"}
+    assert writes[-1] == ("display.tui_mouse", True)
+
+
+def test_config_set_mouse_toggle_inverts_persisted_value(monkeypatch):
+    # Persisted off → toggle flips on.
+    writes: list[tuple[str, object]] = []
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"display": {"tui_mouse": False}})
+    monkeypatch.setattr(server, "_write_config_key", lambda path, value: writes.append((path, value)))
+
+    resp = server.handle_request({"id": "1", "method": "config.set", "params": {"key": "mouse", "value": "toggle"}})
+    assert resp["result"] == {"key": "mouse", "value": "on"}
+    assert writes[-1] == ("display.tui_mouse", True)
+
+
+def test_config_set_mouse_rejects_unknown_value(monkeypatch):
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"display": {}})
+    monkeypatch.setattr(server, "_write_config_key", lambda path, value: None)
+
+    resp = server.handle_request({"id": "1", "method": "config.set", "params": {"key": "mouse", "value": "sure"}})
+    assert "error" in resp
+    assert "unknown mouse value" in resp["error"]["message"]
+
+
+def test_config_get_mouse_defaults_on(monkeypatch):
+    monkeypatch.setattr(server, "_load_cfg", lambda: {})
+
+    resp = server.handle_request({"id": "1", "method": "config.get", "params": {"key": "mouse"}})
+    assert resp["result"] == {"value": "on"}
+
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"display": {"tui_mouse": False}})
+    resp_off = server.handle_request({"id": "2", "method": "config.get", "params": {"key": "mouse"}})
+    assert resp_off["result"] == {"value": "off"}
+
+
 def test_enable_gateway_prompts_sets_gateway_env(monkeypatch):
     monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
     monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)

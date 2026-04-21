@@ -180,6 +180,7 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
         if (isCtrl(key, ch, 'c')) {
           cancelOverlayFromCtrlC()
         }
+
         return
       }
 

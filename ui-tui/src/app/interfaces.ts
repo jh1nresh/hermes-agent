@@ -83,6 +83,7 @@ export interface UiState {
   detailsMode: DetailsMode
   info: null | SessionInfo
   inlineDiffs: boolean
+  mouseTracking: boolean
   showCost: boolean
   showReasoning: boolean
   sid: null | string
@@ -321,7 +322,6 @@ export interface AppLayoutTranscriptProps {
 export interface AppLayoutProps {
   actions: AppLayoutActions
   composer: AppLayoutComposerProps
-  mouseTracking: boolean
   progress: AppLayoutProgressProps
   status: AppLayoutStatusProps
   transcript: AppLayoutTranscriptProps

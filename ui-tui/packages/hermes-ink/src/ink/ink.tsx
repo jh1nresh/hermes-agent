@@ -1095,6 +1095,30 @@ export default class Ink {
   }
 
   /**
+   * Toggle SGR mouse tracking (DEC 1000/1002/1003/1006) at runtime without
+   * re-entering the alt screen. Updates the internal flag so resize/resume/
+   * reenterAltScreen respect the new state, and writes ENABLE/DISABLE bytes
+   * if we're currently in alt-screen + TTY + not paused.
+   *
+   * Idempotent. Intended for live `/mouse on|off` toggling — the
+   * <AlternateScreen> prop controls setup/teardown at mount/unmount, this
+   * controls in-session switches without a screen flicker.
+   */
+  setAltScreenMouseTracking(enabled: boolean): void {
+    if (this.altScreenMouseTracking === enabled) {
+      return
+    }
+
+    this.altScreenMouseTracking = enabled
+
+    if (!this.altScreenActive || this.isPaused || !this.options.stdout.isTTY) {
+      return
+    }
+
+    this.options.stdout.write(enabled ? ENABLE_MOUSE_TRACKING : DISABLE_MOUSE_TRACKING)
+  }
+
+  /**
    * Re-assert terminal modes after a gap (>5s stdin silence or event-loop
    * stall). Catches tmux detach→attach, ssh reconnect, and laptop
    * sleep/wake — none of which send SIGCONT. The terminal may reset DEC

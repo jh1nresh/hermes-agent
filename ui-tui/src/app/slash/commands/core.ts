@@ -294,6 +294,23 @@ export const coreCommands: SlashCommand[] = [
   },
 
   {
+    help: 'toggle SGR mouse tracking (wheel + click/drag). Turn off if your terminal prints escape codes on mouse move.',
+    name: 'mouse',
+    run: (arg, ctx) => {
+      const next = flagFromArg(arg, ctx.ui.mouseTracking)
+
+      if (next === null) {
+        return ctx.transcript.sys('usage: /mouse [on|off|toggle]')
+      }
+
+      patchUiState({ mouseTracking: next })
+      ctx.gateway.rpc<ConfigSetResponse>('config.set', { key: 'mouse', value: next ? 'on' : 'off' }).catch(() => {})
+
+      queueMicrotask(() => ctx.transcript.sys(`mouse ${next ? 'on' : 'off'}`))
+    }
+  },
+
+  {
     help: 'inspect or enqueue a message',
     name: 'queue',
     run: (arg, ctx) => {

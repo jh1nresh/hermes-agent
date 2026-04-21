@@ -22,6 +22,7 @@ describe('applyDisplay', () => {
             show_reasoning: true,
             streaming: false,
             tui_compact: true,
+            tui_mouse: false,
             tui_statusbar: false
           }
         }
@@ -34,6 +35,7 @@ describe('applyDisplay', () => {
     expect(s.compact).toBe(true)
     expect(s.detailsMode).toBe('expanded')
     expect(s.inlineDiffs).toBe(false)
+    expect(s.mouseTracking).toBe(false)
     expect(s.showCost).toBe(true)
     expect(s.showReasoning).toBe(true)
     expect(s.statusBar).toBe(false)
@@ -48,6 +50,7 @@ describe('applyDisplay', () => {
     const s = $uiState.get()
     expect(setBell).toHaveBeenCalledWith(false)
     expect(s.inlineDiffs).toBe(true)
+    expect(s.mouseTracking).toBe(true)
     expect(s.showCost).toBe(false)
     expect(s.showReasoning).toBe(false)
     expect(s.statusBar).toBe(true)

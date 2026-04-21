@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 
+import { MOUSE_TRACKING } from '../config/env.js'
 import { resolveDetailsMode } from '../domain/details.js'
 import type { GatewayClient } from '../gatewayClient.js'
 import type {
@@ -35,6 +36,9 @@ export const applyDisplay = (cfg: ConfigFullResponse | null, setBell: (v: boolea
     compact: !!d.tui_compact,
     detailsMode: resolveDetailsMode(d),
     inlineDiffs: d.inline_diffs !== false,
+    // HERMES_TUI_DISABLE_MOUSE=1 wins — env-var opt-out must outrank config
+    // since the user set it specifically because their terminal is broken.
+    mouseTracking: MOUSE_TRACKING && d.tui_mouse !== false,
     showCost: !!d.show_cost,
     showReasoning: !!d.show_reasoning,
     statusBar: d.tui_statusbar !== false,

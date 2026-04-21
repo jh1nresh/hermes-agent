@@ -1,10 +1,11 @@
-import { AlternateScreen, Box, NoSelect, ScrollBox, Text } from '@hermes/ink'
+import { AlternateScreen, Box, NoSelect, ScrollBox, setAltScreenMouseTracking, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
-import { memo } from 'react'
+import { memo, useEffect, useRef } from 'react'
 
 import type { AppLayoutProgressProps, AppLayoutProps } from '../app/interfaces.js'
 import { $isBlocked } from '../app/overlayStore.js'
 import { $uiState } from '../app/uiStore.js'
+import { MOUSE_TRACKING } from '../config/env.js'
 import { PLACEHOLDER } from '../content/placeholders.js'
 import type { Theme } from '../theme.js'
 import type { DetailsMode } from '../types.js'
@@ -256,16 +257,24 @@ const ComposerPane = memo(function ComposerPane({
   )
 })
 
-export const AppLayout = memo(function AppLayout({
-  actions,
-  composer,
-  mouseTracking,
-  progress,
-  status,
-  transcript
-}: AppLayoutProps) {
+export const AppLayout = memo(function AppLayout({ actions, composer, progress, status, transcript }: AppLayoutProps) {
+  const { mouseTracking } = useStore($uiState)
+  // Freeze <AlternateScreen>'s mouseTracking prop at initial value — runtime
+  // toggles go through setAltScreenMouseTracking below. Re-running the
+  // AlternateScreen insertion effect on prop change would re-enter the
+  // alt-screen (EXIT + ENTER + erase) and flash the frame. Teardown at
+  // unmount/exit still runs correctly because signal-exit + the final
+  // useEffect cleanup both emit DISABLE_MOUSE_TRACKING regardless.
+  const initialMouseTracking = useRef(MOUSE_TRACKING).current
+
+  useEffect(() => {
+    setAltScreenMouseTracking(mouseTracking)
+
+    return () => setAltScreenMouseTracking(false)
+  }, [mouseTracking])
+
   return (
-    <AlternateScreen mouseTracking={mouseTracking}>
+    <AlternateScreen mouseTracking={initialMouseTracking}>
       <Box flexDirection="column" flexGrow={1}>
         <Box flexDirection="row" flexGrow={1}>
           <TranscriptPane actions={actions} composer={composer} progress={progress} transcript={transcript} />

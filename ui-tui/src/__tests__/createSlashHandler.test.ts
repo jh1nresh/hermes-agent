@@ -88,6 +88,31 @@ describe('createSlashHandler', () => {
     expect(ctx.transcript.sys).toHaveBeenCalledWith('details: expanded')
   })
 
+  it('toggles mouse tracking and persists it', async () => {
+    const ctx = buildCtx()
+
+    expect(getUiState().mouseTracking).toBe(true)
+    expect(createSlashHandler(ctx)('/mouse off')).toBe(true)
+    expect(getUiState().mouseTracking).toBe(false)
+    expect(ctx.gateway.rpc).toHaveBeenCalledWith('config.set', { key: 'mouse', value: 'off' })
+
+    await Promise.resolve()
+    expect(ctx.transcript.sys).toHaveBeenCalledWith('mouse off')
+
+    expect(createSlashHandler(ctx)('/mouse')).toBe(true)
+    expect(getUiState().mouseTracking).toBe(true)
+    expect(ctx.gateway.rpc).toHaveBeenCalledWith('config.set', { key: 'mouse', value: 'on' })
+  })
+
+  it('rejects unknown /mouse args', () => {
+    const ctx = buildCtx()
+
+    createSlashHandler(ctx)('/mouse wat')
+    expect(getUiState().mouseTracking).toBe(true)
+    expect(ctx.transcript.sys).toHaveBeenCalledWith('usage: /mouse [on|off|toggle]')
+    expect(ctx.gateway.rpc).not.toHaveBeenCalled()
+  })
+
   it('shows tool enable usage when names are missing', () => {
     const ctx = buildCtx()
 
