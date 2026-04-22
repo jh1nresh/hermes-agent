@@ -47,7 +47,6 @@ from openai import OpenAI
 
 from agent.credential_pool import load_pool
 from hermes_cli.config import get_hermes_home
-from hermes_cli.provider_contracts import PROVIDER_AUX_MODELS
 from hermes_constants import OPENROUTER_BASE_URL
 from utils import base_url_host_matches, base_url_hostname, normalize_proxy_env_vars
 
@@ -149,8 +148,6 @@ _API_KEY_PROVIDER_AUX_MODELS: Dict[str, str] = {
     "opencode-go": "glm-5",
     "kilocode": "google/gemini-3-flash-preview",
     "ollama-cloud": "nemotron-3-nano:30b",
-    "volcengine": PROVIDER_AUX_MODELS["volcengine"],
-    "byteplus": PROVIDER_AUX_MODELS["byteplus"],
 }
 
 # Vision-specific model overrides for direct providers.

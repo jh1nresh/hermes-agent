@@ -805,11 +805,12 @@ class TestModelDefaultElimination:
             assert isinstance(model, str) and model.strip(), \
                 f"{provider_id} should have a non-empty model string"
 
-    def test_contract_providers_have_aux_models(self):
+    def test_volcengine_byteplus_use_main_model_first(self):
+        """Volcengine/BytePlus use main-model-first — no entry in _API_KEY_PROVIDER_AUX_MODELS."""
         from agent.auxiliary_client import _API_KEY_PROVIDER_AUX_MODELS
 
-        assert _API_KEY_PROVIDER_AUX_MODELS["volcengine"] == "volcengine/doubao-seed-2-0-lite-260215"
-        assert _API_KEY_PROVIDER_AUX_MODELS["byteplus"] == "byteplus/seed-2-0-lite-260228"
+        assert "volcengine" not in _API_KEY_PROVIDER_AUX_MODELS
+        assert "byteplus" not in _API_KEY_PROVIDER_AUX_MODELS
 
 
 class TestContractProviderAliases:

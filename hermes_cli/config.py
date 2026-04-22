@@ -1281,6 +1281,20 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
         "advanced": True,
     },
+    "VOLCENGINE_API_KEY": {
+        "description": "Volcengine API key for Doubao / Seed models (standard + Coding Plan catalogs)",
+        "prompt": "Volcengine API Key",
+        "url": "https://www.volcengine.com/product/ark",
+        "password": True,
+        "category": "provider",
+    },
+    "BYTEPLUS_API_KEY": {
+        "description": "BytePlus API key for Seed / Dola models (standard + Coding Plan catalogs)",
+        "prompt": "BytePlus API Key",
+        "url": "https://www.byteplus.com/en/product/modelark",
+        "password": True,
+        "category": "provider",
+    },
     "AWS_REGION": {
         "description": "AWS region for Bedrock API calls (e.g. us-east-1, eu-central-1)",
         "prompt": "AWS Region",

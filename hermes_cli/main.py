@@ -2945,7 +2945,7 @@ def _model_flow_named_custom(config, provider_info):
 
 # Curated model lists for direct API-key providers — single source in models.py
 from hermes_cli.models import _PROVIDER_MODELS
-from hermes_cli.provider_contracts import (
+from hermes_cli.volcengine_byteplus import (
     base_url_for_provider_model,
     provider_models,
 )

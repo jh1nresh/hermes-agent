@@ -44,6 +44,8 @@ All variables go in `~/.hermes/.env`. You can also set them with `hermes config 
 | `KILOCODE_BASE_URL` | Override Kilo Code base URL (default: `https://api.kilo.ai/api/gateway`) |
 | `XIAOMI_API_KEY` | Xiaomi MiMo API key ([platform.xiaomimimo.com](https://platform.xiaomimimo.com)) |
 | `XIAOMI_BASE_URL` | Override Xiaomi MiMo base URL (default: `https://api.xiaomimimo.com/v1`) |
+| `VOLCENGINE_API_KEY` | Volcengine API key for Doubao / Seed models ([volcengine.com/product/ark](https://www.volcengine.com/product/ark)) |
+| `BYTEPLUS_API_KEY` | BytePlus API key for Seed / Dola models ([byteplus.com/en/product/modelark](https://www.byteplus.com/en/product/modelark)) |
 | `HF_TOKEN` | Hugging Face token for Inference Providers ([huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)) |
 | `HF_BASE_URL` | Override Hugging Face base URL (default: `https://router.huggingface.co/v1`) |
 | `GOOGLE_API_KEY` | Google AI Studio API key ([aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)) |

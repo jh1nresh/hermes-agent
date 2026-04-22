@@ -39,7 +39,7 @@ import httpx
 import yaml
 
 from hermes_cli.config import get_hermes_home, get_config_path, read_raw_config
-from hermes_cli.provider_contracts import (
+from hermes_cli.volcengine_byteplus import (
     VOLCENGINE_PROVIDER,
     BYTEPLUS_PROVIDER,
     VOLCENGINE_STANDARD_BASE_URL,

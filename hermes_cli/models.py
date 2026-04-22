@@ -22,7 +22,7 @@ from hermes_cli import __version__ as _HERMES_VERSION
 # Check (error 1010) don't reject the default ``Python-urllib/*`` signature.
 _HERMES_USER_AGENT = f"hermes-cli/{_HERMES_VERSION}"
 
-from hermes_cli.provider_contracts import (
+from hermes_cli.volcengine_byteplus import (
     BYTEPLUS_PROVIDER,
     VOLCENGINE_PROVIDER,
     provider_models,
@@ -1337,36 +1337,21 @@ def _get_custom_base_url() -> str:
 
 
 def provider_for_base_url(base_url: str) -> Optional[str]:
-    """Return a known built-in provider for a configured base URL, if any."""
+    """Return a known built-in provider for a configured base URL, if any.
+
+    Uses the canonical _URL_TO_PROVIDER mapping from model_metadata plus
+    additional entries for providers not in that dict.
+    """
     normalized = str(base_url or "").strip().rstrip("/")
     if not normalized or "openrouter.ai" in normalized.lower():
         return None
 
     url_lower = normalized.lower()
-    host_to_provider = {
-        "ark.cn-beijing.volces.com": VOLCENGINE_PROVIDER,
-        "ark.ap-southeast.bytepluses.com": BYTEPLUS_PROVIDER,
-        "api.z.ai": "zai",
-        "api.moonshot.ai": "kimi-coding",
-        "api.kimi.com": "kimi-coding",
-        "api.minimax.io": "minimax",
-        "api.minimaxi.com": "minimax-cn",
-        "dashscope.aliyuncs.com": "alibaba",
-        "dashscope-intl.aliyuncs.com": "alibaba",
-        "portal.qwen.ai": "qwen-oauth",
-        "router.huggingface.co": "huggingface",
-        "generativelanguage.googleapis.com": "gemini",
-        "api.deepseek.com": "deepseek",
-        "api.githubcopilot.com": "copilot",
-        "models.github.ai": "copilot",
-        "opencode.ai": "opencode-go",
-        "api.x.ai": "xai",
-        "api.xiaomimimo.com": "xiaomi",
-        "xiaomimimo.com": "xiaomi",
-        "api.anthropic.com": "anthropic",
-        "inference-api.nousresearch.com": "nous",
-    }
-    for host, provider_id in host_to_provider.items():
+
+    # Primary source — shared with context-length resolution
+    from agent.model_metadata import _URL_TO_PROVIDER
+
+    for host, provider_id in _URL_TO_PROVIDER.items():
         if host in url_lower:
             canonical = normalize_provider(provider_id)
             if canonical in _PROVIDER_LABELS and canonical != "custom":

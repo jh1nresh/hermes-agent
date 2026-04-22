@@ -58,6 +58,8 @@ Both `provider` and `model` are **required**. If either is missing, the fallback
 | OpenCode Go | `opencode-go` | `OPENCODE_GO_API_KEY` |
 | Kilo Code | `kilocode` | `KILOCODE_API_KEY` |
 | Xiaomi MiMo | `xiaomi` | `XIAOMI_API_KEY` |
+| Volcengine | `volcengine` | `VOLCENGINE_API_KEY` |
+| BytePlus | `byteplus` | `BYTEPLUS_API_KEY` |
 | Arcee AI | `arcee` | `ARCEEAI_API_KEY` |
 | Alibaba / DashScope | `alibaba` | `DASHSCOPE_API_KEY` |
 | Hugging Face | `huggingface` | `HF_TOKEN` |

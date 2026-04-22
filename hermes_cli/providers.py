@@ -23,7 +23,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from hermes_cli.provider_contracts import (
+from hermes_cli.volcengine_byteplus import (
     BYTEPLUS_PROVIDER,
     BYTEPLUS_STANDARD_BASE_URL,
     VOLCENGINE_PROVIDER,

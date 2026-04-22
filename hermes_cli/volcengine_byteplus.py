@@ -68,11 +68,6 @@ PROVIDER_MODEL_CATALOGS: Dict[str, Tuple[str, ...]] = {
     BYTEPLUS_PROVIDER: BYTEPLUS_STANDARD_MODEL_REFS + BYTEPLUS_CODING_PLAN_MODEL_REFS,
 }
 
-PROVIDER_AUX_MODELS: Dict[str, str] = {
-    VOLCENGINE_PROVIDER: "volcengine/doubao-seed-2-0-lite-260215",
-    BYTEPLUS_PROVIDER: "byteplus/seed-2-0-lite-260228",
-}
-
 MODEL_CONTEXT_WINDOWS: Dict[str, int] = {
     "doubao-seed-2-0-pro-260215": 256000,
     "doubao-seed-2-0-lite-260215": 256000,

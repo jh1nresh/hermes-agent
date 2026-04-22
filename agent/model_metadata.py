@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import requests
 import yaml
 
-from hermes_cli.provider_contracts import model_context_window
+from hermes_cli.volcengine_byteplus import model_context_window
 from utils import base_url_host_matches, base_url_hostname
 from hermes_constants import OPENROUTER_MODELS_URL
 
