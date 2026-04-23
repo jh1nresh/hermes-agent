@@ -387,6 +387,8 @@ def _wayland_save(dest: Path) -> bool:
 
     except FileNotFoundError:
         logger.debug("wl-paste not installed — Wayland clipboard unavailable")
+    except ImportError:
+        raise
     except Exception as e:
         logger.debug("wl-paste clipboard extraction failed: %s", e)
         dest.unlink(missing_ok=True)
