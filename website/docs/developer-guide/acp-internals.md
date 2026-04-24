@@ -10,20 +10,20 @@ The ACP adapter wraps Hermes' synchronous `AIAgent` in an async JSON-RPC stdio s
 
 Key implementation files:
 
-- `acp_adapter/entry.py`
-- `acp_adapter/server.py`
-- `acp_adapter/session.py`
-- `acp_adapter/events.py`
-- `acp_adapter/permissions.py`
-- `acp_adapter/tools.py`
-- `acp_adapter/auth.py`
+- `hermes_agent/acp/entry.py`
+- `hermes_agent/acp/server.py`
+- `hermes_agent/acp/session.py`
+- `hermes_agent/acp/events.py`
+- `hermes_agent/acp/permissions.py`
+- `hermes_agent/acp/tools.py`
+- `hermes_agent/acp/auth.py`
 - `acp_registry/agent.json`
 
 ## Boot flow
 
 ```text
-hermes acp / hermes-acp / python -m acp_adapter
-  -> acp_adapter.entry.main()
+hermes acp / hermes-acp / python -m hermes_agent.acp
+  -> hermes_agent.acp.entry.main()
   -> load ~/.hermes/.env
   -> configure stderr logging
   -> construct HermesACPAgent
@@ -36,7 +36,7 @@ Stdout is reserved for ACP JSON-RPC transport. Human-readable logs go to stderr.
 
 ### `HermesACPAgent`
 
-`acp_adapter/server.py` implements the ACP agent protocol.
+`hermes_agent/acp/server.py` implements the ACP agent protocol.
 
 Responsibilities:
 
@@ -48,7 +48,7 @@ Responsibilities:
 
 ### `SessionManager`
 
-`acp_adapter/session.py` tracks live ACP sessions.
+`hermes_agent/acp/session.py` tracks live ACP sessions.
 
 Each session stores:
 
@@ -71,7 +71,7 @@ The manager is thread-safe and supports:
 
 ### Event bridge
 
-`acp_adapter/events.py` converts AIAgent callbacks into ACP `session_update` events.
+`hermes_agent/acp/events.py` converts AIAgent callbacks into ACP `session_update` events.
 
 Bridged callbacks:
 
@@ -88,7 +88,7 @@ asyncio.run_coroutine_threadsafe(...)
 
 ### Permission bridge
 
-`acp_adapter/permissions.py` adapts dangerous terminal approval prompts into ACP permission requests.
+`hermes_agent/acp/permissions.py` adapts dangerous terminal approval prompts into ACP permission requests.
 
 Mapping:
 
@@ -100,7 +100,7 @@ Timeouts and bridge failures deny by default.
 
 ### Tool rendering helpers
 
-`acp_adapter/tools.py` maps Hermes tools to ACP tool kinds and builds editor-facing content.
+`hermes_agent/acp/tools.py` maps Hermes tools to ACP tool kinds and builds editor-facing content.
 
 Examples:
 
@@ -144,7 +144,7 @@ ACP does not implement its own auth store.
 
 Instead it reuses Hermes' runtime resolver:
 
-- `acp_adapter/auth.py`
+- `hermes_agent/acp/auth.py`
 - `hermes_cli/runtime_provider.py`
 
 So ACP advertises and uses the currently configured Hermes provider/credentials.

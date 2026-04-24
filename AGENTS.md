@@ -69,7 +69,7 @@ hermes-agent/
 │   ├── server.py            # RPC handlers and session logic
 │   ├── render.py            # Optional rich/ANSI bridge
 │   └── slash_worker.py      # Persistent HermesCLI subprocess for slash commands
-├── acp_adapter/          # ACP server (VS Code / Zed / JetBrains integration)
+├── hermes_agent/acp/     # ACP server (VS Code / Zed / JetBrains integration)
 ├── cron/                 # Scheduler (jobs.py, scheduler.py)
 ├── environments/         # RL training environments (Atropos)
 ├── tests/                # Pytest suite (~3000 tests)

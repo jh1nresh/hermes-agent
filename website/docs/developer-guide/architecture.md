@@ -14,7 +14,7 @@ This page is the top-level map of Hermes Agent internals. Use it to orient yours
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        Entry Points                                  │
 │                                                                      │
-│  CLI (cli.py)    Gateway (gateway/run.py)    ACP (acp_adapter/)     │
+│  CLI (cli.py)    Gateway (gateway/run.py)    ACP (hermes_agent/acp/)│
 │  Batch Runner    API Server                  Python Library          │
 └──────────┬──────────────┬───────────────────────┬───────────────────┘
            │              │                       │
@@ -122,7 +122,7 @@ hermes-agent/
 │                             #   dingtalk, feishu, wecom, wecom_callback, weixin,
 │                             #   bluebubbles, qqbot, homeassistant, webhook, api_server
 │
-├── acp_adapter/              # ACP server (VS Code / Zed / JetBrains)
+├── hermes_agent/acp/         # ACP server (VS Code / Zed / JetBrains)
 ├── cron/                     # Scheduler (jobs.py, scheduler.py)
 ├── plugins/memory/           # Memory provider plugins
 ├── plugins/context_engine/   # Context engine plugins

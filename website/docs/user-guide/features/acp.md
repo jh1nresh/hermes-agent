@@ -43,7 +43,7 @@ This installs the `agent-client-protocol` dependency and enables:
 
 - `hermes acp`
 - `hermes-acp`
-- `python -m acp_adapter`
+- `python -m hermes_agent.acp`
 
 ## Launching the ACP server
 
@@ -58,7 +58,7 @@ hermes-acp
 ```
 
 ```bash
-python -m acp_adapter
+python -m hermes_agent.acp
 ```
 
 Hermes logs to stderr so stdout remains reserved for ACP JSON-RPC traffic.
