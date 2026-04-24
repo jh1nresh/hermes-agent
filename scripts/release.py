@@ -78,6 +78,7 @@ AUTHOR_MAP = {
     "omni@comelse.com": "omnissiah-comelse",
     "oussama.redcode@gmail.com": "mavrickdeveloper",
     "126368201+vilkasdev@users.noreply.github.com": "vilkasdev",
+    "adam.manning@pro-serveinc.com": "amanning3390",
     "137614867+cutepawss@users.noreply.github.com": "cutepawss",
     "96793918+memosr@users.noreply.github.com": "memosr",
     "milkoor@users.noreply.github.com": "milkoor",
