@@ -1,0 +1,626 @@
+{
+  "name": "debug-session-feishu-id-model",
+  "description": "~60-turn debug/triage PR-review session: a third-party bug report says the gateway's Feishu adapter misuses the open_id / union_id / user_id identity model (open_id is app-scoped, not the bot's canonical ID). An open community PR (#8388) tries to fix it. Agent reviews the PR against current main, fetches upstream Feishu/Lark identity docs, and produces a decision. Exercises long tool-heavy context with PR diffs, upstream docs, and a clear decision at the end — the classic 'can the summary still name the PR number, the root cause, and the decision?' scenario.",
+  "model": "anthropic/claude-sonnet-4.6",
+  "context_length": 200000,
+  "source": "~/.hermes/sessions/20260412_233741_3f2119a8.jsonl",
+  "truncated_to": 58,
+  "scrubbed_at": "2026-04-25T06:17:30Z",
+  "scrubbing_passes": [
+    "redact_sensitive_text (agent.redact)",
+    "username paths replaced with /home/user",
+    "personal handles (all case variants of the maintainer name) replaced with 'user'",
+    "email addresses replaced with contributor@example.com",
+    "git 'Author: Name <addr>' header lines normalised",
+    "reasoning scratchpad blocks stripped from assistant content",
+    "think tag blocks stripped from assistant content",
+    "messaging-platform user mentions replaced with <@user>",
+    "first user message paraphrased to remove personal voice",
+    "subsequent user messages kept verbatim (after above redactions)",
+    "system prompt replaced with generic public-safe placeholder",
+    "orphan empty-assistant messages and trailing tool messages dropped",
+    "tool outputs preserved verbatim (truncation disabled so the compressor sees real load)"
+  ],
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful AI coding assistant with access to tools (terminal, file editing, search, web, etc.). You operate in a conversational loop: the user gives you a task, you call tools to accomplish it, and you report back concisely."
+    },
+    {
+      "role": "user",
+      "content": "A community user reports the Feishu/Lark adapter gets the identity model wrong — open_id is app-scoped, not the bot's canonical ID. There's an open PR #8388 trying to fix it. Use the hermes-agent-dev skill and the pr-triage-salvage skill to review it."
+    },
+    {
+      "role": "assistant",
+      "content": "\n\nInteresting. Let me pull up that PR and take a look at what they're proposing.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01DhZUXFbRmZecEXrKGbG3p1",
+          "type": "function",
+          "function": {
+            "name": "skill_view",
+            "arguments": "{\"name\": \"pr-triage-salvage\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01NxU3C2z6gbGvXHiG3umKmQ",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd ~/repos/hermes-agent && git fetch origin pull/8388/head:pr-8388 2>&1 | tail -5\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"success\": true, \"name\": \"pr-triage-salvage\", \"description\": \"Triage external PRs — review, cherry-pick/salvage valid fixes onto main, close broken/redundant ones. Handles stale PRs, mixed-quality changes, and contributor attribution.\", \"tags\": [\"github\", \"pr\", \"triage\", \"salvage\", \"cherry-pick\", \"code-review\"], \"related_skills\": [], \"content\": \"---\\nname: pr-triage-salvage\\ndescription: Triage external PRs — review, cherry-pick/salvage valid fixes onto main, close broken/redundant ones. Handles stale PRs, mixed-quality changes, and contributor attribution.\\ntags: [github, pr, triage, salvage, cherry-pick, code-review]\\ntriggers:\\n  - triaging PRs\\n  - salvaging a PR\\n  - reviewing community contributions\\n  - cherry-picking external fixes\\n  - mega-PR with many bundled features\\n  - large community PR review\\n---\\n\\n# PR Triage & Salvage Workflow\\n\\nSystematic process for reviewing external PRs, salvaging valid fixes, closing broken/redundant ones.\\n\\n## Workflow\\n\\n### 1. Assess the PR\\n\\n```bash\\ngh pr view <NUMBER>\\ngh pr diff <NUMBER>\\n# Check staleness\\ngit fetch origin pull/<NUMBER>/head:pr-<NUMBER>\\ngit rev-list --count $(git merge-base origin/main pr-<NUMBER>)..origin/main\\n```\\n\\n**Batch triage (30+ PRs):** Bucket by similarity, flag dupes. Pick most complete.\\n\\n**Mega-PR decomp:** Cherry-pick if commits grouped, reimplement if interleaved.\\n\\n**Conflicting PRs:** Build combined fix from scratch on main; credit all. **Partial fix on main:** Before salvaging, check\n\n[Truncated: tool response was 102,838 chars. Full output could not be saved to sandbox.]",
+      "tool_call_id": "toolu_bdrk_01DhZUXFbRmZecEXrKGbG3p1"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"/usr/bin/bash: line 3: cd: /home/user/repos/hermes-agent: No such file or directory\", \"exit_code\": 1, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01NxU3C2z6gbGvXHiG3umKmQ"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01W6fYofRYbMWf294dDumDt5",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"find /home -maxdepth 4 -name \\\"hermes-agent\\\" -type d 2>/dev/null; find / -maxdepth 4 -name \\\"hermes-agent\\\" -type d 2>/dev/null | head -5\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"/home/user/.hermes/hermes-agent\\n/home/user/.hermes/hermes-agent\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01W6fYofRYbMWf294dDumDt5"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01FYdZ4867K7kL78kcQfgez3",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git fetch origin pull/8388/head:pr-8388 2>&1 | tail -5\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"From github.com:NousResearch/hermes-agent\\n * [new ref]           refs/pull/8388/head -> pr-8388\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01FYdZ4867K7kL78kcQfgez3"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01K3yrYegnpxP8nDf8gvsSzP",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && gh pr view 8388 2>&1\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"title:\\tfix(feishu): correct Feishu identity model and enable multi-account routing\\nstate:\\tOPEN\\nauthor:\\thchen13\\nlabels:\\t\\nassignees:\\t\\nreviewers:\\t\\nprojects:\\t\\nmilestone:\\t\\nnumber:\\t8388\\nurl:\\thttps://github.com/NousResearch/hermes-agent/pull/8388\\nadditions:\\t4647\\ndeletions:\\t239\\nauto-merge:\\tdisabled\\n--\\n## What this PR fixes\\n\\nThis PR corrects Hermes' Feishu identity model.\\n\\nThe core bug is that Hermes previously treated Feishu IDs with the wrong mental model, especially around bot identity versus human identity. In practice this caused Hermes to behave as if Feishu were effectively a single-bot platform and led to incorrect routing assumptions in group mentions, home-channel delivery, and cross-account usage.\\n\\nThe most important correction is this:\\n\\n- `open_id` is **not** the canonical identity of a Feishu bot.\\n- A Feishu bot/app is identified by its configured `app_id`.\\n- For human users, `user_id` is the stable tenant-scoped identifier.\\n- `open_id` is an app-scoped alias for a human user, so the same person can have different `open_id` values under different bot namespaces.\\n\\nThat identity-model mismatch is the root bug. This PR fixes that model first, then builds the routing and tooling changes on top of it.\\n\\n## What follows from that fix\\n\\nOnce Hermes uses the correct Feishu identity model, a few capabilities naturally become possible or necessary:\\n\\n- multi-account Feishu support under one Hermes agent\\n- account-aware session routing\\n- account-aware outbound delivery\\n- correct group-mention handling against the receiving bot account\\n- agent-side Feishu identity/chat inspection via `feishu_id`\\n\\nSo multi-account and ID-aware delivery are not the primary story by themselves; they are the downstream capability expansion that becomes possible after fixing the identity bug.\\n\\n## Main implementation changes\\n\\n- Add account-scoped Feishu bindings under `platforms.feishu.accounts.<account_id>`.\\n- Make Feishu adapter lookup, session routing, and outbound delivery account-aware.\\n- Treat bot display name only as legacy compatibility metadata, not as canonical identity.\\n- Prefer configured/runtime bot IDs and official Feishu identity fields for mention routing.\\n- Add `feishu_id` so agents can inspect Feishu users, chats, members, and session routes.\\n- Make Feishu's canonical default outbound target a single platform-level home channel:\\n  - `platforms.feishu.home_channel.account_id`\\n  - `platforms.feishu.home_channel.chat_id`\\n  - `platforms.feishu.home_channel.name`\\n- Keep legacy single-account env-based setup compatible.\\n- Keep legacy account-scoped Feishu `home_channel` readable as a compatibility fallback, while making the platform-level home channel canonical.\\n\\n## Why the home-channel change is part of the fix\\n\\nIn a multi-bot Feishu deployment, `platform=feishu` is not enough to identify which bot should send an outbound message. Hermes needs both:\\n\\n- the destination chat\\n- the sending bot account\\n\\nThat is why the canonical Feishu home channel is now a platform-level target that stores both `account_id` and `chat_id`. This preserves Hermes' original bare-platform UX while making the sending identity explicit and correct.\\n\\n## Tests\\n\\nRan locally:\\n\\n```bash\\n/Users/claire/.hermes/hermes-agent/venv/bin/python -m pytest -q -n0 \\\\\\n  tests/gateway/test_config.py \\\\\\n  tests/gateway/test_sethome_multi_account.py \\\\\\n  tests/gateway/test_feishu.py \\\\\\n  tests/gateway/test_feishu_ws_runtime.py \\\\\\n  tests/gateway/test_webhook_adapter.py \\\\\\n  tests/gateway/test_command_bypass_active_session.py \\\\\\n  tests/gateway/test_unknown_command.py \\\\\\n  tests/tools/test_send_message_tool.py \\\\\\n  tests/tools/test_feishu_id_tool.py \\\\\\n  tests/cron/test_scheduler.py \\\\\\n  tests/e2e/test_platform_commands.py\\n```\\n\\nResult: `371 passed`\\n\\n## Notes\\n\\n- This PR is best understood as a Feishu identity-model bug fix first.\\n- Multi-account support and ID-aware delivery are the capability extensions that follow from that correction.\\n- Legacy single-bot users can continue using the env-based setup unchanged.\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01K3yrYegnpxP8nDf8gvsSzP"
+    },
+    {
+      "role": "assistant",
+      "content": "4647 additions for a \"bug fix\" - that's a feature PR wearing a bugfix hat. Let me dig into the actual diff.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01C9hZc9tuYcb8juESP7WkU2",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 --stat 2>&1\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"cron/scheduler.py                                  |  140 +-\\n gateway/config.py                                  |  276 +++-\\n gateway/delivery.py                                |   31 +-\\n gateway/platforms/base.py                          |    4 +-\\n gateway/platforms/feishu.py                        |  275 +++-\\n gateway/platforms/webhook.py                       |   37 +-\\n gateway/run.py                                     |  619 +++++++--\\n gateway/session.py                                 |   16 +-\\n gateway/session_context.py                         |   10 +\\n model_tools.py                                     |    1 +\\n tests/cron/test_scheduler.py                       |  158 +++\\n .../gateway/test_command_bypass_active_session.py  |   12 +\\n tests/gateway/test_config.py                       |  125 +-\\n tests/gateway/test_feishu.py                       |  241 +++-\\n tests/gateway/test_feishu_ws_runtime.py            |   86 ++\\n tests/gateway/test_runner_fatal_adapter.py         |   32 +-\\n tests/gateway/test_session.py                      |   12 +\\n tests/gateway/test_session_env.py                  |   43 +-\\n tests/gateway/test_sethome_multi_account.py        |  268 ++++\\n tests/gateway/test_shared_thread_sender_prefix.py  |   92 ++\\n tests/gateway/test_unauthorized_dm_behavior.py     |  137 +-\\n tests/tools/test_feishu_id_tool.py                 |  606 +++++++++\\n tests/tools/test_send_message_tool.py              |  113 ++\\n tools/cronjob_tools.py                             |    4 +\\n tools/feishu_id_tool.py                            | 1340 ++++++++++++++++++++\\n tools/send_message_tool.py                         |   73 +-\\n toolsets.py                                        |    2 +\\n website/docs/user-guide/messaging/feishu.md        |  133 +-\\n 28 files changed, 4647 insertions(+), 239 deletions(-)\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01C9hZc9tuYcb8juESP7WkU2"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_013LzgRSQhAqppkoTuFj3LoC",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/platforms/feishu.py 2>&1 | head -200\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01LgEXZxn6fvcRVnCLNmT1kP",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/run.py 2>&1 | head -300\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_012AJZhndXjKnzGL55KMHTe1",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"Feishu Lark open_id vs user_id app-scoped identity model API documentation\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/gateway/platforms/feishu.py b/gateway/platforms/feishu.py\\nindex 7fce74de..8789cd68 100644\\n--- a/gateway/platforms/feishu.py\\n+++ b/gateway/platforms/feishu.py\\n@@ -71,7 +71,9 @@ try:\\n         UpdateMessageRequest,\\n         UpdateMessageRequestBody,\\n     )\\n+    from lark_oapi.core import AccessTokenType, HttpMethod\\n     from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN\\n+    from lark_oapi.core.model.base_request import BaseRequest\\n     from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse\\n     from lark_oapi.event.dispatcher_handler import EventDispatcherHandler\\n     from lark_oapi.ws import Client as FeishuWSClient\\n@@ -85,6 +87,9 @@ except ImportError:\\n     FeishuWSClient = None  # type: ignore[assignment]\\n     FEISHU_DOMAIN = None  # type: ignore[assignment]\\n     LARK_DOMAIN = None  # type: ignore[assignment]\\n+    AccessTokenType = None  # type: ignore[assignment]\\n+    HttpMethod = None  # type: ignore[assignment]\\n+    BaseRequest = None  # type: ignore[assignment]\\n \\n FEISHU_WEBSOCKET_AVAILABLE = websockets is not None\\n FEISHU_WEBHOOK_AVAILABLE = aiohttp is not None\\n@@ -274,6 +279,7 @@ class FeishuAdapterSettings:\\n     encrypt_key: str\\n     verification_token: str\\n     group_policy: str\\n+    require_mention: bool\\n     allowed_group_users: frozenset[str]\\n     bot_open_id: str\\n     bot_user_id: str\\n@@ -301,6 +307,7 @@ class FeishuGroupRule:\\n     \\\"\\\"\\\"Per-group policy rule for controlling which users may interact with the bot.\\\"\\\"\\\"\\n \\n     policy: str  # \\\"open\\\" | \\\"allowlist\\\" | \\\"blacklist\\\" | \\\"admin_only\\\" | \\\"disabled\\\"\\n+    require_mention: Optional[bool] = None\\n     allowlist: set[str] = field(default_factory=set)\\n     blacklist: set[str] = field(default_factory=set)\\n \\n@@ -325,6 +332,15 @@ def _to_boolean(value: Any) -> bool:\\n     return value is True or value == 1 or value == \\\"true\\\"\\n \\n \\n+def _resolve_env_reference(value: Any) -> str:\\n+    text = str(value or \\\"\\\").strip()\\n+    if not text:\\n+        return \\\"\\\"\\n+    if not text.startswith(\\\"env:\\\"):\\n+        return text\\n+    return os.getenv(text[4:].strip(), \\\"\\\").strip()\\n+\\n+\\n def _is_style_enabled(style: Dict[str, Any] | None, key: str) -> bool:\\n     if not style:\\n         return False\\n@@ -407,6 +423,23 @@ def _coerce_required_int(value: Any, default: int, min_value: int = 0) -> int:\\n     return default if parsed is None else parsed\\n \\n \\n+def _coerce_optional_bool(value: Any) -> Optional[bool]:\\n+    if value is None:\\n+        return None\\n+    if isinstance(value, bool):\\n+        return value\\n+    if isinstance(value, str):\\n+        normalized = value.strip().lower()\\n+        if normalized in {\\\"true\\\", \\\"1\\\", \\\"yes\\\", \\\"on\\\"}:\\n+            return True\\n+        if normalized in {\\\"false\\\", \\\"0\\\", \\\"no\\\", \\\"off\\\"}:\\n+            return False\\n+        return None\\n+    if isinstance(value, (int, float)):\\n+        return bool(value)\\n+    return None\\n+\\n+\\n # ---------------------------------------------------------------------------\\n # Post payload builders and parsers\\n # ---------------------------------------------------------------------------\\n@@ -962,16 +995,78 @@ def _unique_lines(lines: List[str]) -> List[str]:\\n     return unique\\n \\n \\n+_FEISHU_WS_THREAD_STATE = threading.local()\\n+\\n+\\n+def _current_feishu_ws_loop() -> asyncio.AbstractEventLoop:\\n+    \\\"\\\"\\\"Resolve the active loop for the current Feishu websocket thread.\\\"\\\"\\\"\\n+    try:\\n+        return asyncio.get_running_loop()\\n+    except RuntimeError:\\n+        pass\\n+    loop = getattr(_FEISHU_WS_THREAD_STATE, \\\"loop\\\", None)\\n+    if loop is None or bool(getattr(loop, \\\"is_closed\\\", lambda: False)()):\\n+        raise RuntimeError(\\\"Feishu websocket loop is not initialized for this thread\\\")\\n+    return loop\\n+\\n+\\n+class _FeishuWSLoopProxy:\\n+    \\\"\\\"\\\"Route the SDK's module-global loop calls to the current thread-local loop.\\\"\\\"\\\"\\n+\\n+    def run_until_complete(self, awaitable: Any) -> Any:\\n+        loop = getattr(_FEISHU_WS_THREAD_STATE, \\\"loop\\\", None)\\n+        if loop is None or bool(getattr(loop, \\\"is_closed\\\", lambda: False)()):\\n+            raise RuntimeError(\\\"Feishu websocket thread loop is not available\\\")\\n+        return loop.run_until_complete(awaitable)\\n+\\n+    def create_task(self, coro: Any) -> asyncio.Task[Any]:\\n+        return _current_feishu_ws_loop().create_task(coro)\\n+\\n+    def __getattr__(self, name: str) -> Any:\\n+        return getattr(_current_feishu_ws_loop(), name)\\n+\\n+\\n+async def _feishu_ws_connect_proxy(*args: Any, **kwargs: Any) -> Any:\\n+    \\\"\\\"\\\"Apply thread-local websocket connect overrides without global races.\\\"\\\"\\\"\\n+    connect_impl = getattr(_FEISHU_WS_THREAD_STATE, \\\"original_connect\\\", None)\\n+    if connect_impl is None:\\n+        raise RuntimeError(\\\"Feishu websocket connect proxy is not initialized\\\")\\n+    ping_interval = getattr(_FEISHU_WS_THREAD_STATE, \\\"ping_interval\\\", None)\\n+    ping_timeout = getattr(_FEISHU_WS_THREAD_STATE, \\\"ping_timeout\\\", None)\\n+    if ping_interval is not None and \\\"ping_interval\\\" not in kwargs:\\n+        kwargs[\\\"ping_interval\\\"] = ping_interval\\n+    if ping_timeout is not None and \\\"ping_timeout\\\" not in kwargs:\\n+        kwargs[\\\"ping_timeout\\\"] = ping_timeout\\n+    return await connect_impl(*args, **kwargs)\\n+\\n+\\n+def _install_feishu_ws_runtime_proxies(ws_client_module: Any) -> None:\\n+    \\\"\\\"\\\"Install process-wide SDK proxies that dispatch via thread-local state.\\\"\\\"\\\"\\n+    if not getattr(ws_client_module, \\\"_hermes_ws_proxy_installed\\\", False):\\n+        original_connect = ws_client_module.websockets.connect\\n+        setattr(ws_client_module, \\\"_hermes_ws_original_connect\\\", original_connect)\\n+        ws_client_module.websockets.connect = _feishu_ws_connect_proxy\\n+        ws_client_module.loop = _FeishuWSLoopProxy()\\n+        setattr(ws_client_module, \\\"_hermes_ws_proxy_installed\\\", True)\\n+\\n+\\n def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:\\n     \\\"\\\"\\\"Run the official Lark WS client in its own thread-local event loop.\\\"\\\"\\\"\\n     import lark_oapi.ws.client as ws_client_module\\n \\n     loop = asyncio.new_event_loop()\\n     asyncio.set_event_loop(loop)\\n-    ws_client_module.loop = loop\\n+    _install_feishu_ws_runtime_proxies(ws_client_module)\\n+    _FEISHU_WS_THREAD_STATE.loop = loop\\n+    _FEISHU_WS_THREAD_STATE.original_connect = getattr(\\n+        ws_client_module,\\n+        \\\"_hermes_ws_original_connect\\\",\\n+        ws_client_module.websockets.connect,\\n+    )\\n+    _FEISHU_WS_THREAD_STATE.ping_interval = adapter._ws_ping_interval\\n+    _FEISHU_WS_THREAD_STATE.ping_timeout = adapter._ws_ping_timeout\\n     adapter._ws_thread_loop = loop\\n \\n-    original_connect = ws_client_module.websockets.connect\\n     original_configure = getattr(ws_client, \\\"_configure\\\", None)\\n \\n     def _apply_runtime_ws_overrides() -> None:\\n@@ -983,13 +1078,6 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:\\n         except Exception:\\n             logger.debug(\\\"[Feishu] Failed to apply websocket runtime overrides\\\", exc_info=True)\\n \\n-    async def _connect_with_overrides(*args: Any, **kwargs: Any) -> Any:\\n-        if adapter._ws_ping_interval is not None and \\\"ping_interval\\\" not in kwargs:\\n-            kwargs[\\\"ping_interval\\\"] = adapter._ws_ping_interval\\n-        if adapter._ws_ping_timeout is not None and \\\"ping_timeout\\\" not in kwargs:\\n-            kwargs[\\\"ping_timeout\\\"] = adapter._ws_ping_timeout\\n-        return await original_connect(*args, **kwargs)\\n-\\n     def _configure_with_overrides(conf: Any) -> Any:\\n         if original_configure is None:\\n             raise RuntimeError(\\\"Feishu _configure_with_overrides called but original_configure is None\\\")\\n@@ -997,7 +1085,6 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:\\n         _apply_runtime_ws_overrides()\\n         return result\\n \\n-    ws_client_module.websockets.connect = _connect_with_overrides\\n     if original_configure is not None:\\n         setattr(ws_client, \\\"_configure\\\", _configure_with_overrides)\\n     _apply_runtime_ws_overrides()\\n@@ -1006,7 +1093,6 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:\\n     except Exception:\\n         pass\\n     finally:\\n-        ws_client_module.websockets.connect = original_connect\\n         if original_configure is not None:\\n             setattr(ws_client, \\\"_configure\\\", original_configure)\\n         pending = [t for t in asyncio.all_tasks(loop) if not t.done()]\\n@@ -1023,6 +1109,9 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:\\n         except Exception:\\n             pass\\n         adapter._ws_thread_loop = None\\n+        for attr in (\\\"loop\\\", \\\"original_connect\\\", \\\"ping_interval\\\", \\\"ping_timeout\\\"):\\n+            if hasattr(_FEISHU_WS_THREAD_STATE, attr):\\n+                delattr(_FEISHU_WS_THREAD_STATE, attr)\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_013LzgRSQhAqppkoTuFj3LoC"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/gateway/run.py b/gateway/run.py\\nindex 31fe724f..74bc1a1e 100644\\n--- a/gateway/run.py\\n+++ b/gateway/run.py\\n@@ -241,6 +241,7 @@ if not _configured_cwd or _configured_cwd in (\\\".\\\", \\\"auto\\\", \\\"cwd\\\"):\\n from gateway.config import (\\n     Platform,\\n     GatewayConfig,\\n+    HomeChannel,\\n     load_gateway_config,\\n )\\n from gateway.session import (\\n@@ -534,6 +535,7 @@ class GatewayRunner:\\n     def __init__(self, config: Optional[GatewayConfig] = None):\\n         self.config = config or load_gateway_config()\\n         self.adapters: Dict[Platform, BasePlatformAdapter] = {}\\n+        self._adapters_by_binding: Dict[Any, BasePlatformAdapter] = {}\\n \\n         # Load ephemeral config from config.yaml / env vars.\\n         # Both are injected at API-call time only and never persisted.\\n@@ -591,8 +593,8 @@ class GatewayRunner:\\n         self._pending_approvals: Dict[str, Dict[str, Any]] = {}\\n \\n         # Track platforms that failed to connect for background reconnection.\\n-        # Key: Platform enum, Value: {\\\"config\\\": platform_config, \\\"attempts\\\": int, \\\"next_retry\\\": float}\\n-        self._failed_platforms: Dict[Platform, Dict[str, Any]] = {}\\n+        # Key: (platform, account_id), Value: {\\\"config\\\": platform_config, \\\"attempts\\\": int, \\\"next_retry\\\": float}\\n+        self._failed_platforms: Dict[Any, Dict[str, Any]] = {}\\n \\n         # Track pending /update prompt responses per session.\\n         # Key: session_key, Value: True when a prompt is waiting for user input.\\n@@ -633,6 +635,142 @@ class GatewayRunner:\\n         # Track background tasks to prevent garbage collection mid-execution\\n         self._background_tasks: set = set()\\n \\n+    def _adapter_binding_key(\\n+        self,\\n+        platform: Platform,\\n+        account_id: Optional[str] = None,\\n+    ) -> Any:\\n+        normalized_account = str(account_id or \\\"\\\").strip() or None\\n+        if normalized_account is None:\\n+            return platform\\n+        return (platform, normalized_account)\\n+\\n+    def _binding_label(self, platform: Platform, account_id: Optional[str] = None) -> str:\\n+        if account_id:\\n+            return f\\\"{platform.value}[{account_id}]\\\"\\n+        return platform.value\\n+\\n+    def _normalize_binding_key(\\n+        self,\\n+        binding_key: Any,\\n+    ) -> tuple[Platform, Optional[str]]:\\n+        if isinstance(binding_key, tuple):\\n+            platform = binding_key[0]\\n+            account_id = binding_key[1] if len(binding_key) > 1 else None\\n+            return (platform, str(account_id or \\\"\\\").strip() or None)\\n+        return (binding_key, None)\\n+\\n+    def _account_id_for_adapter(self, adapter: BasePlatformAdapter) -> Optional[str]:\\n+        return str(getattr(adapter, \\\"account_id\\\", \\\"\\\") or \\\"\\\").strip() or None\\n+\\n+    def _ensure_adapter_registry(self) -> None:\\n+        if not hasattr(self, \\\"_adapters_by_binding\\\") or self._adapters_by_binding is None:\\n+            self._adapters_by_binding = {}\\n+        if not hasattr(self, \\\"adapters\\\") or self.adapters is None:\\n+            self.adapters = {}\\n+        for platform, adapter in list(self.adapters.items()):\\n+            binding_key = self._adapter_binding_key(\\n+                platform,\\n+                str(getattr(adapter, \\\"account_id\\\", \\\"\\\") or \\\"\\\").strip() or None,\\n+            )\\n+            self._adapters_by_binding.setdefault(binding_key, adapter)\\n+        if not hasattr(self, \\\"delivery_router\\\") or self.delivery_router is None:\\n+            return\\n+        if not hasattr(self.delivery_router, \\\"account_adapters\\\") or self.delivery_router.account_adapters is None:\\n+            self.delivery_router.account_adapters = {}\\n+        self.delivery_router.account_adapters = self._adapters_by_binding\\n+\\n+    def _register_adapter(self, platform: Platform, adapter: BasePlatformAdapter) -> None:\\n+        self._ensure_adapter_registry()\\n+        account_id = self._account_id_for_adapter(adapter)\\n+        binding_key = self._adapter_binding_key(platform, account_id)\\n+        self._adapters_by_binding[binding_key] = adapter\\n+        default_account_id = self.config.get_default_account_id(platform)\\n+        if (\\n+            platform not in self.adapters\\n+            or account_id is None\\n+            or (default_account_id and account_id == default_account_id)\\n+        ):\\n+            self.adapters[platform] = adapter\\n+\\n+        self.delivery_router.adapters = self.adapters\\n+        self.delivery_router.account_adapters = self._adapters_by_binding\\n+\\n+    def _unregister_adapter(self, adapter: BasePlatformAdapter) -> None:\\n+        self._ensure_adapter_registry()\\n+        platform = adapter.platform\\n+        account_id = self._account_id_for_adapter(adapter)\\n+        binding_key = self._adapter_binding_key(platform, account_id)\\n+        self._adapters_by_binding.pop(binding_key, None)\\n+\\n+        if self.adapters.get(platform) is adapter:\\n+            replacement = None\\n+            default_account_id = self.config.get_default_account_id(platform)\\n+            if default_account_id:\\n+                replacement = self._adapters_by_binding.get(\\n+                    self._adapter_binding_key(platform, default_account_id)\\n+                )\\n+            if replacement is None:\\n+                for raw_candidate_key, candidate in self._adapters_by_binding.items():\\n+                    candidate_platform, _candidate_account_id = self._normalize_binding_key(raw_candidate_key)\\n+                    if candidate_platform == platform:\\n+                        replacement = candidate\\n+                        break\\n+            if replacement is None:\\n+                self.adapters.pop(platform, None)\\n+            else:\\n+                self.adapters[platform] = replacement\\n+\\n+        self.delivery_router.adapters = self.adapters\\n+        self.delivery_router.account_adapters = self._adapters_by_binding\\n+\\n+    def _get_adapter(\\n+        self,\\n+        platform: Platform,\\n+        account_id: Optional[str] = None,\\n+    ) -> Optional[BasePlatformAdapter]:\\n+        self._ensure_adapter_registry()\\n+        if account_id:\\n+            adapter = self._adapters_by_binding.get(\\n+                self._adapter_binding_key(platform, account_id)\\n+            )\\n+            if adapter is not None:\\n+                return adapter\\n+            logger.warning(\\n+                \\\"No adapter binding found for %s[%s]\\\",\\n+                platform.value,\\n+                account_id,\\n+            )\\n+            return None\\n+        return self.adapters.get(platform)\\n+\\n+    def _get_adapter_for_source(self, source: Optional[SessionSource]) -> Optional[BasePlatformAdapter]:\\n+        if source is None:\\n+            return None\\n+        return self._get_adapter(source.platform, getattr(source, \\\"account_id\\\", None))\\n+\\n+    def _has_home_channel_for_source(self, source: Optional[SessionSource]) -> bool:\\n+        if source is None or source.platform is None:\\n+            return False\\n+        if getattr(self, \\\"config\\\", None):\\n+            home_channel = self.config.get_home_channel(\\n+                source.platform,\\n+                account_id=getattr(source, \\\"account_id\\\", None),\\n+            )\\n+            if home_channel and getattr(home_channel, \\\"chat_id\\\", None):\\n+                return True\\n+        if source.platform == Platform.FEISHU and getattr(source, \\\"account_id\\\", None):\\n+            return False\\n+        env_key = f\\\"{source.platform.value.upper()}_HOME_CHANNEL\\\"\\n+        return bool(os.getenv(env_key))\\n+\\n+    def _all_adapter_instances(self) -> List[tuple[Any, BasePlatformAdapter]]:\\n+        self._ensure_adapter_registry()\\n+        return list(self._adapters_by_binding.items())\\n+\\n+    def _iter_enabled_bindings(self) -> List[tuple[Platform, Optional[str], Any]]:\\n+        return self.config.iter_enabled_platform_bindings()\\n+\\n \\n \\n \\n@@ -955,9 +1093,10 @@ class GatewayRunner:\\n         If the error is retryable (e.g. network blip, DNS failure), queue the\\n         platform for background reconnection instead of giving up permanently.\\n         \\\"\\\"\\\"\\n+        self._ensure_adapter_registry()\\n         logger.error(\\n             \\\"Fatal %s adapter error (%s): %s\\\",\\n-            adapter.platform.value,\\n+            self._binding_label(adapter.platform, self._account_id_for_adapter(adapter)),\\n             adapter.fatal_error_code or \\\"unknown\\\",\\n             adapter.fatal_error_message or \\\"unknown error\\\",\\n         )\\n@@ -968,29 +1107,31 @@ class GatewayRunner:\\n             error_message=adapter.fatal_error_message,\\n         )\\n \\n-        existing = self.adapters.get(adapter.platform)\\n+        binding_key = self._adapter_binding_key(\\n+            adapter.platform,\\n+            self._account_id_for_adapter(adapter),\\n+        )\\n+        existing = self._adapters_by_binding.get(binding_key)\\n         if existing is adapter:\\n             try:\\n                 await adapter.disconnect()\\n             finally:\\n-                self.adapters.pop(adapter.platform, None)\\n-                self.delivery_router.adapters = self.adapters\\n+                self._unregister_adapter(adapter)\\n \\n         # Queue retryable failures for background reconnection\\n         if adapter.fatal_error_retryable:\\n-            platform_config = self.config.platforms.get(adapter.platform)\\n-            if platform_config and adapter.platform not in self._failed_platforms:\\n-                self._failed_platforms[adapter.platform] = {\\n-                    \\\"config\\\": platform_config,\\n+            if binding_key not in self._failed_platforms:\\n+                self._failed_platforms[binding_key] = {\\n+                    \\\"config\\\": adapter.config,\\n                     \\\"attempts\\\": 0,\\n                     \\\"next_retry\\\": time.monotonic() + 30,\\n                 }\\n                 logger.info(\\n                     \\\"%s queued for background reconnection\\\",\\n-                    adapter.platform.value,\\n+                    self._binding_label(*self._normalize_binding_key(binding_key)),\\n                 )\\n \\n-        if not self.adapters and not self._failed_platforms:\\n+        if not self._adapters_by_binding and not self._failed_platforms:\\n             self._exit_reason = adapter.fatal_error_message or \\\"All messaging adapters disconnected\\\"\\n             if adapter.fatal_error_retryable:\\n                 self._exit_with_failure = True\\n@@ -998,7 +1139,7 @@ class GatewayRunner:\\n             else:\\n                 logger.error(\\\"No connected messaging platforms remain. Shutting down gateway cleanly.\\\")\\n             await self.stop()\\n-        elif not self.adapters and self._failed_platforms:\\n+        elif not self._adapters_by_binding and self._failed_platforms:\\n             # All platforms are down and queued for background reconnection.\\n             # If the error is retryable, exit with failure so systemd Restart=on-failure\\n             # can restart the process. Otherwise stay alive and keep retrying in background.\\n@@ -1323,7 +1464,7 @@ class GatewayRunner:\\n         }\\n \\n     def _queue_or_replace_pending_event(self, session_key: str, event: MessageEvent) -> None:\\n-        adapter = self.adapters.get(event.source.platform)\\n+        adapter = self._get_adapter_for_source(event.source)\\n         if not adapter:\\n             return\\n         merge_pending_message_event(adapter._pending_messages, session_key, event)\\n@@ -1332,7 +1473,7 @@ class GatewayRunner:\\n         if not self._draining:\\n             return False\\n \\n-        adapter = self.adapters.get(event.source.platform)\\n+        adapter = self._get_adapter_for_source(event.source)\\n         if not adapter:\\n             return True\\n \\n@@ -1563,14 +1704,15 @@ class GatewayRunner:\\n         startup_retryable_errors: list[str] = []\\n         \\n         # Initialize and connect each configured platform\\n-        for platform, platform_config in self.config.platforms.items():\\n+        for platform, account_id, platform_config in self._iter_enabled_bindings():\\n             if not platform_config.enabled:\\n                 continue\\n             enabled_platform_count += 1\\n+            binding_label = self._binding_label(platform, account_id)\\n             \\n             adapter = self._create_adapter(platform, platform_config)\\n             if not adapter:\\n-                logger.warning(\\\"No adapter available for %s\\\", platform.value)\\n+                logger.warning(\\\"No adapter available for %s\\\", binding_label)\\n                 continue\\n             \\n             # Set up message + fatal error handlers\\n@@ -1580,7 +1722,7 @@ class GatewayRunner:\\n             adapter.set_busy_session_handler(self._handle_active_session_busy_message)\\n             \\n             # Try to connect\\n-            logger.info(\\\"Connecting to %s...\\\", platform.value)\\n+            logger.info(\\\"Connecting to %s...\\\", binding_label)\\n             self._update_platform_runtime_status(\\n                 platform.value,\\n                 platform_state=\\\"connecting\\\",\\n@@ -1590,18 +1732,18 @@ class GatewayRunner:\\n             try:\\n                 success = await adapter.connect()\\n                 if success:\\n-                    self.adapters[platform] = adapter\\n+                    self._register_adapter(platform, adapter)\\n                     self._sync_voice_mode_state_to_adapter(adapter)\\n                     connected_count += 1\\n+                    logger.info(\\\"✓ %s connected\\\", binding_label)\\n                     self._update_platform_runtime_status(\\n                         platform.value,\\n                         platform_state=\\\"connected\\\",\\n                         error_code=None,\\n                         error_message=None,\\n                     )\\n-                    logger.info(\\\"✓ %s connected\\\", platform.value)\\n                 else:\\n-                    logger.warning(\\\"✗ %s failed to connect\\\", platform.value)\\n+                    logger.warning(\\\"✗ %s failed to connect\\\", binding_label)\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01LgEXZxn6fvcRVnCLNmT1kP"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://open.feishu.cn/document/home/user-identity-introduction/introduction\",\n        \"title\": \"User identification concepts - Developer Guides - Documentation\",\n        \"description\": \"User identity within a tenant. The user_id of the same Feishu user in tenant A and tenant B is different. user_id is also known as employee_id, ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://open.feishu.cn/document/server-docs/contact-v3/user/batch_get_id\",\n        \"title\": \"Obtain user ID via email or mobile number - Documentation\",\n        \"description\": \"Optional values are: open_id ：Identifies a user to an app. The same user has different Open IDs in different apps. How to get Open ID.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://open.larkoffice.com/document/server-docs/contact-v3/department/search\",\n        \"title\": \"Search for departments - Documentation - Feishu Open Platform\",\n        \"description\": \"User ID is usually used to communicate user data between different apps. How to get User ID. Default value: open_id. When the value is user_id , ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/contact-v3/user/create\",\n        \"title\": \"Create a user - 服务端 API - Documentation - Feishu Open Platform\",\n        \"description\": \"User ID is usually used to communicate user data between different apps. How to get User ID. Default value: open_id. When the value is user_id , ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/contact-v3/department/children\",\n        \"title\": \"Obtain the list of sub-departments - Server API - Documentation\",\n        \"description\": \"User ID is usually used to communicate user data between different apps. How to get User ID. Default value: open_id. When the value is user_id , ...\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_012AJZhndXjKnzGL55KMHTe1"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01HcmboQ91UbC3TgT6nwk6ek",
+          "type": "function",
+          "function": {
+            "name": "web_extract",
+            "arguments": "{\"urls\": [\"https://open.feishu.cn/document/home/user-identity-introduction/introduction\"]}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01QUVxXbPkFjDSN8tLe45JDE",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- tools/feishu_id_tool.py 2>&1 | head -100\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01KVSbFkSywrEDjRjT8bMz7p",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/config.py 2>&1 | head -200\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"results\": [\n    {\n      \"url\": \"https://open.feishu.cn/document/home/user-identity-introduction/introduction\",\n      \"title\": \"Feishu Open Platform\",\n      \"content\": \"Feedback\\n\\nOnCall\\n\\nCollapse\\n\\nExpand\",\n      \"error\": null\n    }\n  ]\n}",
+      "tool_call_id": "toolu_bdrk_01HcmboQ91UbC3TgT6nwk6ek"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/tools/feishu_id_tool.py b/tools/feishu_id_tool.py\\nnew file mode 100644\\nindex 00000000..a73dcbe7\\n--- /dev/null\\n+++ b/tools/feishu_id_tool.py\\n@@ -0,0 +1,1340 @@\\n+\\\"\\\"\\\"Feishu identity/chat lookup tool with official API first, local fallback.\\n+\\n+Primary resolution uses the official Feishu APIs for:\\n+- user identity lookup by open_id/user_id/union_id\\n+- chat lookup by chat_id\\n+- chat search by name/query\\n+- chat member enumeration\\n+\\n+When official API credentials are unavailable, or an authoritative lookup does\\n+not succeed, the tool falls back to Hermes' locally observed session metadata\\n+from ``~/.hermes/sessions/sessions.json``.\\n+\\\"\\\"\\\"\\n+\\n+from __future__ import annotations\\n+\\n+import json\\n+import logging\\n+import os\\n+import re\\n+from pathlib import Path\\n+from typing import Any, Dict, List, Optional, Tuple\\n+\\n+from hermes_constants import get_hermes_home\\n+\\n+logger = logging.getLogger(__name__)\\n+\\n+_SESSION_KEY_ACCOUNT_RE = re.compile(r\\\":feishu\\\\[([^\\\\]]+)\\\\]:\\\")\\n+\\n+_ID_PREFIX_MAP = {\\n+    \\\"ou_\\\": \\\"open_id\\\",\\n+    \\\"on_\\\": \\\"union_id\\\",\\n+    \\\"u_\\\": \\\"user_id\\\",\\n+}\\n+\\n+FEISHU_ID_SCHEMA = {\\n+    \\\"name\\\": \\\"feishu_id\\\",\\n+    \\\"description\\\": (\\n+        \\\"Inspect Feishu identities, chats, and session routes for Hermes. \\\"\\n+        \\\"Uses official Feishu APIs when credentials are configured, and falls back \\\"\\n+        \\\"to Hermes' local observed session metadata when needed. Supports chat_id/name \\\"\\n+        \\\"lookup, open_id/user_id/union_id lookup, group member lookup, and session-key resolution.\\\"\\n+    ),\\n+    \\\"parameters\\\": {\\n+        \\\"type\\\": \\\"object\\\",\\n+        \\\"properties\\\": {\\n+            \\\"action\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"enum\\\": [\\n+                    \\\"resolve_user\\\",\\n+                    \\\"whois_user\\\",\\n+                    \\\"search_chats\\\",\\n+                    \\\"whois_chat\\\",\\n+                    \\\"members\\\",\\n+                    \\\"session_lookup\\\",\\n+                    \\\"my_chats\\\",\\n+                ],\\n+                \\\"description\\\": \\\"Lookup action to perform.\\\",\\n+            },\\n+            \\\"query\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Free-text query for name-based lookup (user or chat).\\\",\\n+            },\\n+            \\\"chat_id\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Feishu chat ID such as oc_xxx.\\\",\\n+            },\\n+            \\\"session_key\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Hermes gateway session key to resolve.\\\",\\n+            },\\n+            \\\"session_id\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Hermes runtime session_id to resolve.\\\",\\n+            },\\n+            \\\"open_id\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Feishu open_id (ou_xxx).\\\",\\n+            },\\n+            \\\"user_id\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Feishu tenant-scoped user_id (u_xxx).\\\",\\n+            },\\n+            \\\"union_id\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Feishu union_id (on_xxx).\\\",\\n+            },\\n+            \\\"account_id\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Preferred account scope for the query. Defaults to the current Feishu account when applicable.\\\",\\n+            },\\n+            \\\"as_account_id\\\": {\\n+                \\\"type\\\": \\\"string\\\",\\n+                \\\"description\\\": \\\"Explicit target account for cross-account lookup. From Feishu sessions this is allowed only for configured admins.\\\",\\n+            },\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01QUVxXbPkFjDSN8tLe45JDE"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/gateway/config.py b/gateway/config.py\\nindex 7d616592..a263ce01 100644\\n--- a/gateway/config.py\\n+++ b/gateway/config.py\\n@@ -79,13 +79,17 @@ class HomeChannel:\\n     platform: Platform\\n     chat_id: str\\n     name: str  # Human-readable name for display\\n+    account_id: Optional[str] = None\\n     \\n     def to_dict(self) -> Dict[str, Any]:\\n-        return {\\n+        payload = {\\n             \\\"platform\\\": self.platform.value,\\n             \\\"chat_id\\\": self.chat_id,\\n             \\\"name\\\": self.name,\\n         }\\n+        if self.account_id:\\n+            payload[\\\"account_id\\\"] = self.account_id\\n+        return payload\\n     \\n     @classmethod\\n     def from_dict(cls, data: Dict[str, Any]) -> \\\"HomeChannel\\\":\\n@@ -93,6 +97,7 @@ class HomeChannel:\\n             platform=Platform(data[\\\"platform\\\"]),\\n             chat_id=str(data[\\\"chat_id\\\"]),\\n             name=data.get(\\\"name\\\", \\\"Home\\\"),\\n+            account_id=str(data[\\\"account_id\\\"]).strip() if data.get(\\\"account_id\\\") else None,\\n         )\\n \\n \\n@@ -175,6 +180,16 @@ class PlatformConfig:\\n         home_channel = None\\n         if \\\"home_channel\\\" in data:\\n             home_channel = HomeChannel.from_dict(data[\\\"home_channel\\\"])\\n+        extra = data.get(\\\"extra\\\", {})\\n+        if not isinstance(extra, dict):\\n+            extra = {}\\n+        # Preserve unknown top-level keys inside ``extra`` so platform-specific\\n+        # schemas can evolve without forcing a core dataclass change first.\\n+        extra = dict(extra)\\n+        for key, value in data.items():\\n+            if key in {\\\"enabled\\\", \\\"token\\\", \\\"api_key\\\", \\\"home_channel\\\", \\\"reply_to_mode\\\", \\\"extra\\\"}:\\n+                continue\\n+            extra[key] = value\\n         \\n         return cls(\\n             enabled=data.get(\\\"enabled\\\", False),\\n@@ -182,7 +197,7 @@ class PlatformConfig:\\n             api_key=data.get(\\\"api_key\\\"),\\n             home_channel=home_channel,\\n             reply_to_mode=data.get(\\\"reply_to_mode\\\", \\\"first\\\"),\\n-            extra=data.get(\\\"extra\\\", {}),\\n+            extra=extra,\\n         )\\n \\n \\n@@ -261,7 +276,13 @@ class GatewayConfig:\\n         \\\"\\\"\\\"Return list of platforms that are enabled and configured.\\\"\\\"\\\"\\n         connected = []\\n         for platform, config in self.platforms.items():\\n-            if not config.enabled:\\n+            has_feishu_accounts = (\\n+                platform == Platform.FEISHU\\n+                and isinstance(config.extra, dict)\\n+                and isinstance(config.extra.get(\\\"accounts\\\", {}), dict)\\n+                and bool(config.extra.get(\\\"accounts\\\"))\\n+            )\\n+            if not config.enabled and not has_feishu_accounts:\\n                 continue\\n             # Weixin requires both a token and an account_id\\n             if platform == Platform.WEIXIN:\\n@@ -290,7 +311,13 @@ class GatewayConfig:\\n             elif platform == Platform.WEBHOOK:\\n                 connected.append(platform)\\n             # Feishu uses extra dict for app credentials\\n-            elif platform == Platform.FEISHU and config.extra.get(\\\"app_id\\\"):\\n+            elif platform == Platform.FEISHU and (\\n+                config.extra.get(\\\"app_id\\\")\\n+                or any(\\n+                    isinstance(account_cfg, dict) and account_cfg.get(\\\"app_id\\\")\\n+                    for account_cfg in (config.extra.get(\\\"accounts\\\", {}) or {}).values()\\n+                )\\n+            ):\\n                 connected.append(platform)\\n             # WeCom bot mode uses extra dict for bot credentials\\n             elif platform == Platform.WECOM and config.extra.get(\\\"bot_id\\\"):\\n@@ -305,11 +332,129 @@ class GatewayConfig:\\n                 connected.append(platform)\\n         return connected\\n     \\n-    def get_home_channel(self, platform: Platform) -> Optional[HomeChannel]:\\n+    def get_default_account_id(self, platform: Platform) -> Optional[str]:\\n+        \\\"\\\"\\\"Return the configured default account ID for a multi-account platform.\\\"\\\"\\\"\\n+        config = self.platforms.get(platform)\\n+        if not config:\\n+            return None\\n+        if config.home_channel and getattr(config.home_channel, \\\"account_id\\\", None):\\n+            return str(config.home_channel.account_id).strip() or None\\n+        if not isinstance(config.extra, dict):\\n+            return None\\n+        value = str(config.extra.get(\\\"default_account\\\") or \\\"\\\").strip()\\n+        return value or None\\n+\\n+    def get_platform_config(\\n+        self,\\n+        platform: Platform,\\n+        account_id: Optional[str] = None,\\n+    ) -> Optional[PlatformConfig]:\\n+        \\\"\\\"\\\"Return the effective platform config for a platform/account pair.\\\"\\\"\\\"\\n+        config = self.platforms.get(platform)\\n+        if not config:\\n+            return None\\n+        if platform != Platform.FEISHU:\\n+            return config\\n+\\n+        accounts = self.iter_platform_account_configs(platform)\\n+        if not accounts:\\n+            return config\\n+\\n+        resolved_account_id = (account_id or self.get_default_account_id(platform) or \\\"\\\").strip()\\n+        if resolved_account_id and resolved_account_id in accounts:\\n+            return accounts[resolved_account_id]\\n+\\n+        if config.home_channel or config.extra.get(\\\"app_id\\\"):\\n+            return config\\n+\\n+        return next(iter(accounts.values()), config)\\n+\\n+    def iter_platform_account_configs(self, platform: Platform) -> Dict[str, PlatformConfig]:\\n+        \\\"\\\"\\\"Return per-account platform configs for multi-account platforms.\\\"\\\"\\\"\\n+        config = self.platforms.get(platform)\\n+        if not config or platform != Platform.FEISHU:\\n+            return {}\\n+\\n+        raw_accounts = config.extra.get(\\\"accounts\\\", {})\\n+        if not isinstance(raw_accounts, dict) or not raw_accounts:\\n+            return {}\\n+\\n+        accounts: Dict[str, PlatformConfig] = {}\\n+        for account_id, account_block in raw_accounts.items():\\n+            normalized_id = str(account_id or \\\"\\\").strip()\\n+            if not normalized_id or not isinstance(account_block, dict):\\n+                continue\\n+            accounts[normalized_id] = _merge_account_platform_config(\\n+                platform=platform,\\n+                base_config=config,\\n+                account_id=normalized_id,\\n+                account_block=account_block,\\n+            )\\n+        return accounts\\n+\\n+    def iter_enabled_platform_bindings(self) -> List[tuple[Platform, Optional[str], PlatformConfig]]:\\n+        \\\"\\\"\\\"Expand configured platforms into concrete adapter bindings.\\\"\\\"\\\"\\n+        bindings: List[tuple[Platform, Optional[str], PlatformConfig]] = []\\n+        for platform, config in self.platforms.items():\\n+            account_configs = self.iter_platform_account_configs(platform)\\n+            if not config.enabled and not account_configs:\\n+                continue\\n+            if account_configs:\\n+                for account_id, account_config in account_configs.items():\\n+                    if account_config.enabled:\\n+                        bindings.append((platform, account_id, account_config))\\n+                continue\\n+            bindings.append((platform, None, config))\\n+        return bindings\\n+\\n+    def get_home_channel(self, platform: Platform, account_id: Optional[str] = None) -> Optional[HomeChannel]:\\n         \\\"\\\"\\\"Get the home channel for a platform.\\\"\\\"\\\"\\n         config = self.platforms.get(platform)\\n-        if config:\\n+        if not config:\\n+            return None\\n+        if platform != Platform.FEISHU:\\n             return config.home_channel\\n+\\n+        if config.home_channel:\\n+            home = config.home_channel\\n+            if home.account_id:\\n+                return home\\n+            resolved_account_id = account_id or self.get_default_account_id(platform)\\n+            if not resolved_account_id:\\n+                account_configs = self.iter_platform_account_configs(platform)\\n+                if len(account_configs) == 1:\\n+                    resolved_account_id = next(iter(account_configs.keys()))\\n+            if resolved_account_id:\\n+                return HomeChannel(\\n+                    platform=home.platform,\\n+                    chat_id=home.chat_id,\\n+                    name=home.name,\\n+                    account_id=resolved_account_id,\\n+                )\\n+            return home\\n+\\n+        account_configs = self.iter_platform_account_configs(platform)\\n+        if account_id:\\n+            account_config = account_configs.get(str(account_id).strip())\\n+            if account_config and account_config.home_channel:\\n+                return account_config.home_channel\\n+\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01KVSbFkSywrEDjRjT8bMz7p"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_013pi1eiBL8aos8si1TesgJQ",
+          "type": "function",
+          "function": {
+            "name": "web_extract",
+            "arguments": "{\"urls\": [\"https://open.larkoffice.com/document/home/user-identity-introduction/introduction\"]}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01YRkjL2FzF8kkd8mCFKhvLp",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && grep -n \\\"open_id\\\\|bot_open_id\\\\|bot_user_id\\\" gateway/platforms/feishu.py | head -40\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"results\": [\n    {\n      \"url\": \"https://open.larkoffice.com/document/home/user-identity-introduction/introduction\",\n      \"title\": \"Feishu Open Platform\",\n      \"content\": \"Feedback\\n\\nOnCall\\n\\nCollapse\\n\\nExpand\",\n      \"error\": null\n    }\n  ]\n}",
+      "tool_call_id": "toolu_bdrk_013pi1eiBL8aos8si1TesgJQ"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"230:    \\\"open_id\\\",\\n278:    bot_open_id: str\\n279:    bot_user_id: str\\n539:            str(element.get(\\\"open_id\\\", \\\"\\\")).strip()\\n1122:            bot_open_id=os.getenv(\\\"FEISHU_BOT_OPEN_ID\\\", \\\"\\\").strip(),\\n1123:            bot_user_id=os.getenv(\\\"FEISHU_BOT_USER_ID\\\", \\\"\\\").strip(),\\n1177:        self._bot_open_id = settings.bot_open_id\\n1178:        self._bot_user_id = settings.bot_user_id\\n1952:        open_id = str(getattr(operator, \\\"open_id\\\", \\\"\\\") or \\\"\\\")\\n1953:        if not chat_id or not open_id:\\n1954:            logger.debug(\\\"[Feishu] Card action missing chat_id or operator open_id, dropping\\\")\\n1987:            sender_id = SimpleNamespace(open_id=open_id, user_id=None, union_id=None)\\n1989:            user_name = sender_profile.get(\\\"user_name\\\") or open_id\\n2013:        sender_id = SimpleNamespace(open_id=open_id, user_id=None, union_id=None)\\n2033:        logger.info(\\\"[Feishu] Routing card action %r from %s in %s as synthetic command\\\", action_tag, open_id, chat_id)\\n2903:        open_id = getattr(sender_id, \\\"open_id\\\", None) or None\\n2906:        primary_id = open_id or user_id\\n2917:        ID-type detection mirrors openclaw: ou_ → open_id, on_ → union_id, else user_id.\\n2934:                id_type = \\\"open_id\\\"\\n3011:        sender_open_id = getattr(sender_id, \\\"open_id\\\", None)\\n3013:        sender_ids = {sender_open_id, sender_user_id} - {None}\\n3064:            mention_open_id = getattr(mention_id, \\\"open_id\\\", None)\\n3068:            if self._bot_open_id and mention_open_id == self._bot_open_id:\\n3070:            if self._bot_user_id and mention_user_id == self._bot_user_id:\\n3080:        if self._bot_open_id and self._bot_open_id in mentioned_ids:\\n3082:        if self._bot_user_id and self._bot_user_id in mentioned_ids:\\n3090:        if any((self._bot_open_id, self._bot_user_id, self._bot_name)):\\n3704:        \\\"request_user_info\\\": \\\"open_id\\\",\\n3732:    Returns dict with app_id, app_secret, domain, open_id on success.\\n3774:                \\\"open_id\\\": user_info.get(\\\"open_id\\\"),\\n3818:    Returns {\\\"bot_name\\\": ..., \\\"bot_open_id\\\": ...} on success, None on failure.\\n3839:    \\\"\\\"\\\"Extract bot_name and bot_open_id from a /bot/v3/info response.\\\"\\\"\\\"\\n3845:        \\\"bot_open_id\\\": bot.get(\\\"open_id\\\"),\\n3911:            \\\"open_id\\\": str | None,\\n3913:            \\\"bot_open_id\\\": str | None,\\n3959:        result[\\\"bot_open_id\\\"] = bot_info.get(\\\"bot_open_id\\\")\\n3962:        result[\\\"bot_open_id\\\"] = None\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01YRkjL2FzF8kkd8mCFKhvLp"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01XPRM4pSLsPSJ6TrC9FjfjA",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 --stat -- tools/feishu_id_tool.py gateway/run.py gateway/config.py cron/scheduler.py tools/send_message_tool.py tools/cronjob_tools.py toolsets.py model_tools.py 2>&1\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"cron/scheduler.py          |  140 ++++-\\n gateway/config.py          |  276 ++++++++-\\n gateway/run.py             |  619 ++++++++++++++++----\\n model_tools.py             |    1 +\\n tools/cronjob_tools.py     |    4 +\\n tools/feishu_id_tool.py    | 1340 ++++++++++++++++++++++++++++++++++++++++++++\\n tools/send_message_tool.py |   73 ++-\\n toolsets.py                |    2 +\\n 8 files changed, 2314 insertions(+), 141 deletions(-)\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01XPRM4pSLsPSJ6TrC9FjfjA"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01CW7jkdTW628KrHJQG9j9Dz",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- cron/scheduler.py 2>&1 | head -150\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01XkuWrYyTcNSvCpYAQ1aLxu",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- tools/send_message_tool.py 2>&1 | head -150\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/cron/scheduler.py b/cron/scheduler.py\\nindex e6db77c0..7f9b9e66 100644\\n--- a/cron/scheduler.py\\n+++ b/cron/scheduler.py\\n@@ -84,26 +84,25 @@ def _resolve_delivery_target(job: dict) -> Optional[dict]:\\n \\n     if deliver == \\\"origin\\\":\\n         if origin:\\n-            return {\\n+            target = {\\n                 \\\"platform\\\": origin[\\\"platform\\\"],\\n                 \\\"chat_id\\\": str(origin[\\\"chat_id\\\"]),\\n                 \\\"thread_id\\\": origin.get(\\\"thread_id\\\"),\\n             }\\n+            if origin.get(\\\"account_id\\\"):\\n+                target[\\\"account_id\\\"] = origin.get(\\\"account_id\\\")\\n+            return target\\n         # Origin missing (e.g. job created via API/script) — try each\\n         # platform's home channel as a fallback instead of silently dropping.\\n-        for platform_name in (\\\"matrix\\\", \\\"telegram\\\", \\\"discord\\\", \\\"slack\\\", \\\"bluebubbles\\\"):\\n-            chat_id = os.getenv(f\\\"{platform_name.upper()}_HOME_CHANNEL\\\", \\\"\\\")\\n-            if chat_id:\\n+        for platform_name in (\\\"matrix\\\", \\\"telegram\\\", \\\"discord\\\", \\\"slack\\\", \\\"bluebubbles\\\", \\\"feishu\\\"):\\n+            target = _resolve_home_delivery_target(platform_name, origin=None)\\n+            if target:\\n                 logger.info(\\n                     \\\"Job '%s' has deliver=origin but no origin; falling back to %s home channel\\\",\\n                     job.get(\\\"name\\\", job.get(\\\"id\\\", \\\"?\\\")),\\n                     platform_name,\\n                 )\\n-                return {\\n-                    \\\"platform\\\": platform_name,\\n-                    \\\"chat_id\\\": chat_id,\\n-                    \\\"thread_id\\\": None,\\n-                }\\n+                return target\\n         return None\\n \\n     if \\\":\\\" in deliver:\\n@@ -131,31 +130,113 @@ def _resolve_delivery_target(job: dict) -> Optional[dict]:\\n         except Exception:\\n             pass\\n \\n-        return {\\n+        target = {\\n             \\\"platform\\\": platform_name,\\n             \\\"chat_id\\\": chat_id,\\n             \\\"thread_id\\\": thread_id,\\n         }\\n+        if origin and origin.get(\\\"platform\\\") == platform_name and origin.get(\\\"account_id\\\"):\\n+            target[\\\"account_id\\\"] = origin.get(\\\"account_id\\\")\\n+        return target\\n \\n     platform_name = deliver\\n     if origin and origin.get(\\\"platform\\\") == platform_name:\\n-        return {\\n+        target = {\\n             \\\"platform\\\": platform_name,\\n             \\\"chat_id\\\": str(origin[\\\"chat_id\\\"]),\\n             \\\"thread_id\\\": origin.get(\\\"thread_id\\\"),\\n         }\\n+        if origin.get(\\\"account_id\\\"):\\n+            target[\\\"account_id\\\"] = origin.get(\\\"account_id\\\")\\n+        return target\\n \\n     if platform_name.lower() not in _KNOWN_DELIVERY_PLATFORMS:\\n         return None\\n+    return _resolve_home_delivery_target(platform_name, origin=origin)\\n+\\n+\\n+def _resolve_home_delivery_target(platform_name: str, origin: dict | None) -> Optional[dict]:\\n     chat_id = os.getenv(f\\\"{platform_name.upper()}_HOME_CHANNEL\\\", \\\"\\\")\\n-    if not chat_id:\\n-        return None\\n+    if chat_id:\\n+        return {\\n+            \\\"platform\\\": platform_name,\\n+            \\\"chat_id\\\": chat_id,\\n+            \\\"thread_id\\\": None,\\n+        }\\n \\n-    return {\\n-        \\\"platform\\\": platform_name,\\n-        \\\"chat_id\\\": chat_id,\\n-        \\\"thread_id\\\": None,\\n-    }\\n+    try:\\n+        from gateway.config import Platform, load_gateway_config\\n+\\n+        config = load_gateway_config()\\n+        platform_enum = Platform(platform_name.lower())\\n+        account_id = None\\n+        if origin and origin.get(\\\"platform\\\") == platform_name and origin.get(\\\"account_id\\\"):\\n+            account_id = origin.get(\\\"account_id\\\")\\n+        home = _resolve_home_channel(config, platform_enum, account_id=account_id)\\n+        if home and getattr(home, \\\"chat_id\\\", None):\\n+            target = {\\n+                \\\"platform\\\": platform_name,\\n+                \\\"chat_id\\\": str(home.chat_id),\\n+                \\\"thread_id\\\": None,\\n+            }\\n+            resolved_account_id = getattr(home, \\\"account_id\\\", None) or account_id\\n+            if resolved_account_id:\\n+                target[\\\"account_id\\\"] = resolved_account_id\\n+            return target\\n+    except Exception:\\n+        logger.debug(\\\"Failed to resolve config-backed home channel for deliver=%s\\\", platform_name, exc_info=True)\\n+\\n+    return None\\n+\\n+\\n+def _get_config_callable(config, name):\\n+    \\\"\\\"\\\"Return a real config helper method, ignoring MagicMock auto-attributes.\\\"\\\"\\\"\\n+    try:\\n+        instance_attr = vars(config).get(name)\\n+    except Exception:\\n+        instance_attr = None\\n+    if callable(instance_attr):\\n+        return instance_attr\\n+\\n+    class_attr = getattr(type(config), name, None)\\n+    if callable(class_attr):\\n+        return getattr(config, name)\\n+    return None\\n+\\n+\\n+def _resolve_platform_config(config, platform, account_id=None):\\n+    \\\"\\\"\\\"Support both GatewayConfig and lightweight test doubles.\\\"\\\"\\\"\\n+    getter = _get_config_callable(config, \\\"get_platform_config\\\")\\n+    if getter:\\n+        try:\\n+            return getter(platform, account_id=account_id)\\n+        except TypeError:\\n+            return getter(platform)\\n+\\n+    platforms = getattr(config, \\\"platforms\\\", {}) or {}\\n+    return platforms.get(platform)\\n+\\n+\\n+def _resolve_home_channel(config, platform, account_id=None):\\n+    \\\"\\\"\\\"Support both GatewayConfig and lightweight test doubles.\\\"\\\"\\\"\\n+    getter = _get_config_callable(config, \\\"get_home_channel\\\")\\n+    if getter:\\n+        try:\\n+            return getter(platform, account_id=account_id)\\n+        except TypeError:\\n+            return getter(platform)\\n+    return None\\n+\\n+\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01CW7jkdTW628KrHJQG9j9Dz"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/tools/send_message_tool.py b/tools/send_message_tool.py\\nindex a2b3e984..275cd764 100644\\n--- a/tools/send_message_tool.py\\n+++ b/tools/send_message_tool.py\\n@@ -99,6 +99,45 @@ def _handle_list():\\n         return json.dumps(_error(f\\\"Failed to load channel directory: {e}\\\"))\\n \\n \\n+def _get_config_callable(config, name):\\n+    \\\"\\\"\\\"Return a real config helper method, ignoring MagicMock auto-attributes.\\\"\\\"\\\"\\n+    try:\\n+        instance_attr = vars(config).get(name)\\n+    except Exception:\\n+        instance_attr = None\\n+    if callable(instance_attr):\\n+        return instance_attr\\n+\\n+    class_attr = getattr(type(config), name, None)\\n+    if callable(class_attr):\\n+        return getattr(config, name)\\n+    return None\\n+\\n+\\n+def _resolve_platform_config(config, platform, account_id=None):\\n+    \\\"\\\"\\\"Support both GatewayConfig and lightweight test doubles.\\\"\\\"\\\"\\n+    getter = _get_config_callable(config, \\\"get_platform_config\\\")\\n+    if getter:\\n+        try:\\n+            return getter(platform, account_id=account_id)\\n+        except TypeError:\\n+            return getter(platform)\\n+\\n+    platforms = getattr(config, \\\"platforms\\\", {}) or {}\\n+    return platforms.get(platform)\\n+\\n+\\n+def _resolve_home_channel(config, platform, account_id=None):\\n+    \\\"\\\"\\\"Support both GatewayConfig and lightweight test doubles.\\\"\\\"\\\"\\n+    getter = _get_config_callable(config, \\\"get_home_channel\\\")\\n+    if getter:\\n+        try:\\n+            return getter(platform, account_id=account_id)\\n+        except TypeError:\\n+            return getter(platform)\\n+    return None\\n+\\n+\\n def _handle_send(args):\\n     \\\"\\\"\\\"Send a message to a platform target.\\\"\\\"\\\"\\n     target = args.get(\\\"target\\\", \\\"\\\")\\n@@ -168,9 +207,12 @@ def _handle_send(args):\\n         avail = \\\", \\\".join(platform_map.keys())\\n         return tool_error(f\\\"Unknown platform: {platform_name}. Available: {avail}\\\")\\n \\n-    pconfig = config.platforms.get(platform)\\n-    if not pconfig or not pconfig.enabled:\\n-        return tool_error(f\\\"Platform '{platform_name}' is not configured. Set up credentials in ~/.hermes/config.yaml or environment variables.\\\")\\n+    from gateway.session_context import get_session_env\\n+\\n+    session_platform = get_session_env(\\\"HERMES_SESSION_PLATFORM\\\", \\\"\\\")\\n+    session_account_id = get_session_env(\\\"HERMES_SESSION_ACCOUNT_ID\\\", \\\"\\\")\\n+    effective_account_id = session_account_id if session_platform == platform_name else \\\"\\\"\\n+    delivery_account_id = effective_account_id or None\\n \\n     from gateway.platforms.base import BasePlatformAdapter\\n \\n@@ -179,9 +221,10 @@ def _handle_send(args):\\n \\n     used_home_channel = False\\n     if not chat_id:\\n-        home = config.get_home_channel(platform)\\n+        home = _resolve_home_channel(config, platform, account_id=effective_account_id or None)\\n         if home:\\n             chat_id = home.chat_id\\n+            delivery_account_id = getattr(home, \\\"account_id\\\", None) or delivery_account_id\\n             used_home_channel = True\\n         else:\\n             return json.dumps({\\n@@ -190,7 +233,16 @@ def _handle_send(args):\\n                 f\\\"or set a home channel via: hermes config set {platform_name.upper()}_HOME_CHANNEL <channel_id>\\\"\\n             })\\n \\n-    duplicate_skip = _maybe_skip_cron_duplicate_send(platform_name, chat_id, thread_id)\\n+    pconfig = _resolve_platform_config(config, platform, account_id=delivery_account_id)\\n+    if not pconfig or not pconfig.enabled:\\n+        return tool_error(f\\\"Platform '{platform_name}' is not configured. Set up credentials in ~/.hermes/config.yaml or environment variables.\\\")\\n+\\n+    duplicate_skip = _maybe_skip_cron_duplicate_send(\\n+        platform_name,\\n+        chat_id,\\n+        thread_id,\\n+        account_id=delivery_account_id,\\n+    )\\n     if duplicate_skip:\\n         return json.dumps(duplicate_skip)\\n \\n@@ -213,7 +265,6 @@ def _handle_send(args):\\n         if isinstance(result, dict) and result.get(\\\"success\\\") and mirror_text:\\n             try:\\n                 from gateway.mirror import mirror_to_session\\n-                from gateway.session_context import get_session_env\\n                 source_label = get_session_env(\\\"HERMES_SESSION_PLATFORM\\\", \\\"cli\\\")\\n                 if mirror_to_session(platform_name, chat_id, mirror_text, source_label=source_label, thread_id=thread_id):\\n                     result[\\\"mirrored\\\"] = True\\n@@ -276,14 +327,21 @@ def _get_cron_auto_delivery_target():\\n     if not platform or not chat_id:\\n         return None\\n     thread_id = os.getenv(\\\"HERMES_CRON_AUTO_DELIVER_THREAD_ID\\\", \\\"\\\").strip() or None\\n+    account_id = os.getenv(\\\"HERMES_CRON_AUTO_DELIVER_ACCOUNT_ID\\\", \\\"\\\").strip() or None\\n     return {\\n         \\\"platform\\\": platform,\\n         \\\"chat_id\\\": chat_id,\\n         \\\"thread_id\\\": thread_id,\\n+        \\\"account_id\\\": account_id,\\n     }\\n \\n \\n-def _maybe_skip_cron_duplicate_send(platform_name: str, chat_id: str, thread_id: str | None):\\n+def _maybe_skip_cron_duplicate_send(\\n+    platform_name: str,\\n+    chat_id: str,\\n+    thread_id: str | None,\\n+    account_id: str | None = None,\\n+):\\n     \\\"\\\"\\\"Skip redundant cron send_message calls when the scheduler will auto-deliver there.\\\"\\\"\\\"\\n     auto_target = _get_cron_auto_delivery_target()\\n     if not auto_target:\\n@@ -293,6 +351,7 @@ def _maybe_skip_cron_duplicate_send(platform_name: str, chat_id: str, thread_id:\\n         auto_target[\\\"platform\\\"] == platform_name\\n         and str(auto_target[\\\"chat_id\\\"]) == str(chat_id)\\n         and auto_target.get(\\\"thread_id\\\") == thread_id\\n+        and (auto_target.get(\\\"account_id\\\") or None) == (account_id or None)\\n     )\\n     if not same_target:\\n         return None\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01XkuWrYyTcNSvCpYAQ1aLxu"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_015UcVYQRoZkvXo2X3WVE383",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/run.py 2>&1 | wc -l\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_019zsHzqWjkBuyBKHSdRvG7R",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/run.py 2>&1 | grep \\\"^+\\\" | grep -c \\\"account_id\\\\|binding\\\\|_ensure_adapter\\\\|_register_adapter\\\\|_unregister\\\\|_get_adapter\\\\|_all_adapter\\\\|_iter_enabled\\\\|_binding_label\\\\|_adapters_by_binding\\\"\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01HPmygaWCphhGAbJLgDgz3v",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/run.py 2>&1 | grep -c \\\"^[+-]\\\" \"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"1162\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_015UcVYQRoZkvXo2X3WVE383"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"154\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_019zsHzqWjkBuyBKHSdRvG7R"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"621\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01HPmygaWCphhGAbJLgDgz3v"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_017ie77GPPRhyGna7raJCzS4",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/run.py 2>&1 | grep \\\"^+\\\" | grep -v \\\"^+++\\\" | grep -c \\\"feishu_id\\\\|feishu\\\\|sethome.*feishu\\\\|FEISHU\\\"\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01XaiiozutypWDXfZDsuRbx5",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/run.py 2>&1 | tail -500 | head -300\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"9\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_017ie77GPPRhyGna7raJCzS4"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"-                adapter = self.adapters.get(source.platform)\\n+                adapter = self._get_adapter_for_source(source)\\n                 if adapter:\\n                     adapter._pending_messages[_quick_key] = event\\n                 return None\\n@@ -3167,7 +3397,7 @@ class GatewayRunner:\\n                     and platform_name not in policy.notify_exclude_platforms\\n                 )\\n                 if should_notify:\\n-                    adapter = self.adapters.get(source.platform)\\n+                    adapter = self._get_adapter_for_source(source)\\n                     if adapter:\\n                         if reset_reason == \\\"suspended\\\":\\n                             reason_text = \\\"previous session was stopped or interrupted\\\"\\n@@ -3491,9 +3721,8 @@ class GatewayRunner:\\n         # Skip for webhooks - they deliver directly to configured targets (github_comment, etc.)\\n         if not history and source.platform and source.platform != Platform.LOCAL and source.platform != Platform.WEBHOOK:\\n             platform_name = source.platform.value\\n-            env_key = f\\\"{platform_name.upper()}_HOME_CHANNEL\\\"\\n-            if not os.getenv(env_key):\\n-                adapter = self.adapters.get(source.platform)\\n+            if not self._has_home_channel_for_source(source):\\n+                adapter = self._get_adapter_for_source(source)\\n                 if adapter:\\n                     await adapter.send(\\n                         source.chat_id,\\n@@ -3537,6 +3766,132 @@ class GatewayRunner:\\n         if message_text is None:\\n             return\\n \\n+        if event.media_urls:\\n+            image_paths = []\\n+            for i, path in enumerate(event.media_urls):\\n+                # Check media_types if available; otherwise infer from message type\\n+                mtype = event.media_types[i] if i < len(event.media_types) else \\\"\\\"\\n+                is_image = (\\n+                    mtype.startswith(\\\"image/\\\")\\n+                    or event.message_type == MessageType.PHOTO\\n+                )\\n+                if is_image:\\n+                    image_paths.append(path)\\n+            if image_paths:\\n+                message_text = await self._enrich_message_with_vision(\\n+                    message_text, image_paths\\n+                )\\n+        \\n+        # -----------------------------------------------------------------\\n+        # Auto-transcribe voice/audio messages sent by the user\\n+        # -----------------------------------------------------------------\\n+        if event.media_urls:\\n+            audio_paths = []\\n+            for i, path in enumerate(event.media_urls):\\n+                mtype = event.media_types[i] if i < len(event.media_types) else \\\"\\\"\\n+                is_audio = (\\n+                    mtype.startswith(\\\"audio/\\\")\\n+                    or event.message_type in (MessageType.VOICE, MessageType.AUDIO)\\n+                )\\n+                if is_audio:\\n+                    audio_paths.append(path)\\n+            if audio_paths:\\n+                message_text = await self._enrich_message_with_transcription(\\n+                    message_text, audio_paths\\n+                )\\n+                # If STT failed, send a direct message to the user so they\\n+                # know voice isn't configured — don't rely on the agent to\\n+                # relay the error clearly.\\n+                _stt_fail_markers = (\\n+                    \\\"No STT provider\\\",\\n+                    \\\"STT is disabled\\\",\\n+                    \\\"can't listen\\\",\\n+                    \\\"VOICE_TOOLS_OPENAI_KEY\\\",\\n+                )\\n+                if any(m in message_text for m in _stt_fail_markers):\\n+                    _stt_adapter = self._get_adapter_for_source(source)\\n+                    _stt_meta = {\\\"thread_id\\\": source.thread_id} if source.thread_id else None\\n+                    if _stt_adapter:\\n+                        try:\\n+                            _stt_msg = (\\n+                                \\\"🎤 I received your voice message but can't transcribe it — \\\"\\n+                                \\\"no speech-to-text provider is configured.\\\\n\\\\n\\\"\\n+                                \\\"To enable voice: install faster-whisper \\\"\\n+                                \\\"(`pip install faster-whisper` in the Hermes venv) \\\"\\n+                                \\\"and set `stt.enabled: true` in config.yaml, \\\"\\n+                                \\\"then /restart the gateway.\\\"\\n+                            )\\n+                            # Point to setup skill if it's installed\\n+                            if self._has_setup_skill():\\n+                                _stt_msg += \\\"\\\\n\\\\nFor full setup instructions, type: `/skill hermes-agent-setup`\\\"\\n+                            await _stt_adapter.send(\\n+                                source.chat_id, _stt_msg,\\n+                                metadata=_stt_meta,\\n+                            )\\n+                        except Exception:\\n+                            pass\\n+\\n+        # -----------------------------------------------------------------\\n+        # Enrich document messages with context notes for the agent\\n+        # -----------------------------------------------------------------\\n+        if event.media_urls and event.message_type == MessageType.DOCUMENT:\\n+            import mimetypes as _mimetypes\\n+            _TEXT_EXTENSIONS = {\\\".txt\\\", \\\".md\\\", \\\".csv\\\", \\\".log\\\", \\\".json\\\", \\\".xml\\\", \\\".yaml\\\", \\\".yml\\\", \\\".toml\\\", \\\".ini\\\", \\\".cfg\\\"}\\n+            for i, path in enumerate(event.media_urls):\\n+                mtype = event.media_types[i] if i < len(event.media_types) else \\\"\\\"\\n+                # Fall back to extension-based detection when MIME type is unreliable.\\n+                if mtype in (\\\"\\\", \\\"application/octet-stream\\\"):\\n+                    import os as _os2\\n+                    _ext = _os2.path.splitext(path)[1].lower()\\n+                    if _ext in _TEXT_EXTENSIONS:\\n+                        mtype = \\\"text/plain\\\"\\n+                    else:\\n+                        guessed, _ = _mimetypes.guess_type(path)\\n+                        if guessed:\\n+                            mtype = guessed\\n+                if not mtype.startswith((\\\"application/\\\", \\\"text/\\\")):\\n+                    continue\\n+                # Extract display filename by stripping the doc_{uuid12}_ prefix\\n+                import os as _os\\n+                basename = _os.path.basename(path)\\n+                # Format: doc_<12hex>_<original_filename>\\n+                parts = basename.split(\\\"_\\\", 2)\\n+                display_name = parts[2] if len(parts) >= 3 else basename\\n+                # Sanitize to prevent prompt injection via filenames\\n+                import re as _re\\n+                display_name = _re.sub(r'[^\\\\w.\\\\- ]', '_', display_name)\\n+\\n+                if mtype.startswith(\\\"text/\\\"):\\n+                    context_note = (\\n+                        f\\\"[The user sent a text document: '{display_name}'. \\\"\\n+                        f\\\"Its content has been included below. \\\"\\n+                        f\\\"The file is also saved at: {path}]\\\"\\n+                    )\\n+                else:\\n+                    context_note = (\\n+                        f\\\"[The user sent a document: '{display_name}'. \\\"\\n+                        f\\\"The file is saved at: {path}. \\\"\\n+                        f\\\"Ask the user what they'd like you to do with it.]\\\"\\n+                    )\\n+                message_text = f\\\"{context_note}\\\\n\\\\n{message_text}\\\"\\n+\\n+        # -----------------------------------------------------------------\\n+        # Inject reply context when user replies to a message not in history.\\n+        # Telegram (and other platforms) let users reply to specific messages,\\n+        # but if the quoted message is from a previous session, cron delivery,\\n+        # or background task, the agent has no context about what's being\\n+        # referenced. Prepend the quoted text so the agent understands. (#1594)\\n+        # -----------------------------------------------------------------\\n+        if getattr(event, 'reply_to_text', None) and event.reply_to_message_id:\\n+            reply_snippet = event.reply_to_text[:500]\\n+            found_in_history = any(\\n+                reply_snippet[:200] in (msg.get(\\\"content\\\") or \\\"\\\")\\n+                for msg in history\\n+                if msg.get(\\\"role\\\") in (\\\"assistant\\\", \\\"user\\\", \\\"tool\\\")\\n+            )\\n+            if not found_in_history:\\n+                message_text = f'[Replying to: \\\"{reply_snippet}\\\"]\\\\n\\\\n{message_text}'\\n+\\n         try:\\n             # Emit agent:start hook\\n             hook_ctx = {\\n@@ -3547,6 +3902,29 @@ class GatewayRunner:\\n             }\\n             await self.hooks.emit(\\\"agent:start\\\", hook_ctx)\\n \\n+            # Expand @ context references (@file:, @folder:, @diff, etc.)\\n+            if \\\"@\\\" in message_text:\\n+                try:\\n+                    from agent.context_references import preprocess_context_references_async\\n+                    from agent.model_metadata import get_model_context_length\\n+                    _msg_cwd = os.environ.get(\\\"MESSAGING_CWD\\\", os.path.expanduser(\\\"~\\\"))\\n+                    _msg_ctx_len = get_model_context_length(\\n+                        self._model, base_url=self._base_url or \\\"\\\")\\n+                    _ctx_result = await preprocess_context_references_async(\\n+                        message_text, cwd=_msg_cwd,\\n+                        context_length=_msg_ctx_len, allowed_root=_msg_cwd)\\n+                    if _ctx_result.blocked:\\n+                        _adapter = self._get_adapter_for_source(source)\\n+                        if _adapter:\\n+                            await _adapter.send(\\n+                                source.chat_id,\\n+                                \\\"\\\\n\\\".join(_ctx_result.warnings) or \\\"Context injection refused.\\\",\\n+                            )\\n+                        return\\n+                    if _ctx_result.expanded:\\n+                        message_text = _ctx_result.message\\n+                except Exception as exc:\\n+                    logger.debug(\\\"@ context reference expansion failed: %s\\\", exc)\\n             # Run the agent\\n             agent_result = await self._run_agent(\\n                 message=message_text,\\n@@ -3560,7 +3938,7 @@ class GatewayRunner:\\n \\n             # Stop persistent typing indicator now that the agent is done\\n             try:\\n-                _typing_adapter = self.adapters.get(source.platform)\\n+                _typing_adapter = self._get_adapter_for_source(source)\\n                 if _typing_adapter and hasattr(_typing_adapter, \\\"stop_typing\\\"):\\n                     await _typing_adapter.stop_typing(source.chat_id)\\n             except Exception:\\n@@ -3780,7 +4158,7 @@ class GatewayRunner:\\n             # users see the agent \\\"stop responding without explanation.\\\"\\n             if agent_result.get(\\\"already_sent\\\") and not agent_result.get(\\\"failed\\\"):\\n                 if response:\\n-                    _media_adapter = self.adapters.get(source.platform)\\n+                    _media_adapter = self._get_adapter_for_source(source)\\n                     if _media_adapter:\\n                         await self._deliver_media_from_response(\\n                             response, event, _media_adapter,\\n@@ -3792,7 +4170,7 @@ class GatewayRunner:\\n         except Exception as e:\\n             # Stop typing indicator on error too\\n             try:\\n-                _err_adapter = self.adapters.get(source.platform)\\n+                _err_adapter = self._get_adapter_for_source(source)\\n                 if _err_adapter and hasattr(_err_adapter, \\\"stop_typing\\\"):\\n                     await _err_adapter.stop_typing(source.chat_id)\\n             except Exception:\\n@@ -4285,7 +4663,7 @@ class GatewayRunner:\\n         # No args: show interactive picker (Telegram/Discord) or text list\\n         if not model_input and not explicit_provider:\\n             # Try interactive picker if the platform supports it\\n-            adapter = self.adapters.get(source.platform)\\n+            adapter = self._get_adapter_for_source(source)\\n             has_picker = (\\n                 adapter is not None\\n                 and getattr(type(adapter), \\\"send_model_picker\\\", None) is not None\\n@@ -4748,9 +5126,7 @@ class GatewayRunner:\\n         platform_name = source.platform.value if source.platform else \\\"unknown\\\"\\n         chat_id = source.chat_id\\n         chat_name = source.chat_name or chat_id\\n-        \\n-        env_key = f\\\"{platform_name.upper()}_HOME_CHANNEL\\\"\\n-        \\n+\\n         # Save to config.yaml\\n         try:\\n             import yaml\\n@@ -4759,13 +5135,48 @@ class GatewayRunner:\\n             if config_path.exists():\\n                 with open(config_path, encoding=\\\"utf-8\\\") as f:\\n                     user_config = yaml.safe_load(f) or {}\\n-            user_config[env_key] = chat_id\\n+            if source.platform == Platform.FEISHU:\\n+                platforms_cfg = user_config.setdefault(\\\"platforms\\\", {})\\n+                if not isinstance(platforms_cfg, dict):\\n+                    platforms_cfg = {}\\n+                    user_config[\\\"platforms\\\"] = platforms_cfg\\n+                feishu_cfg = platforms_cfg.setdefault(\\\"feishu\\\", {})\\n+                if not isinstance(feishu_cfg, dict):\\n+                    feishu_cfg = {}\\n+                    platforms_cfg[\\\"feishu\\\"] = feishu_cfg\\n+                feishu_cfg[\\\"home_channel\\\"] = {\\n+                    \\\"account_id\\\": source.account_id,\\n+                    \\\"chat_id\\\": chat_id,\\n+                    \\\"name\\\": chat_name,\\n+                }\\n+                accounts_cfg = feishu_cfg.get(\\\"accounts\\\", {})\\n+                if isinstance(accounts_cfg, dict):\\n+                    for account_cfg in accounts_cfg.values():\\n+                        if isinstance(account_cfg, dict):\\n+                            account_cfg.pop(\\\"home_channel\\\", None)\\n+                if getattr(self, \\\"config\\\", None):\\n+                    base_platform_cfg = self.config.platforms.get(source.platform)\\n+                    if base_platform_cfg is not None:\\n+                        base_platform_cfg.home_channel = HomeChannel(\\n+                            platform=source.platform,\\n+                            chat_id=chat_id,\\n+                            name=chat_name,\\n+                            account_id=source.account_id,\\n+                        )\\n+                        raw_accounts = base_platform_cfg.extra.get(\\\"accounts\\\", {})\\n+                        if isinstance(raw_accounts, dict):\\n+                            for raw_account_cfg in raw_accounts.values():\\n+                                if isinstance(raw_account_cfg, dict):\\n+                                    raw_account_cfg.pop(\\\"home_channel\\\", None)\\n+            else:\\n+                env_key = f\\\"{platform_name.upper()}_HOME_CHANNEL\\\"\\n+                user_config[env_key] = chat_id\\n+                # Also set in the current environment so it takes effect immediately\\n+                os.environ[env_key] = str(chat_id)\\n             atomic_yaml_write(config_path, user_config)\\n-            # Also set in the current environment so it takes effect immediately\\n-            os.environ[env_key] = str(chat_id)\\n         except Exception as e:\\n             return f\\\"Failed to save home channel: {e}\\\"\\n-        \\n+\\n         return (\\n             f\\\"✅ Home channel set to **{chat_name}** (ID: {chat_id}).\\\\n\\\"\\n             f\\\"Cron jobs and cross-platform messages will be delivered here.\\\"\\n@@ -4790,7 +5201,7 @@ class GatewayRunner:\\n         args = event.get_command_args().strip().lower()\\n         chat_id = event.source.chat_id\\n \\n-        adapter = self.adapters.get(event.source.platform)\\n+        adapter = self._get_adapter_for_source(event.source)\\n \\n         if args in (\\\"on\\\", \\\"enable\\\"):\\n             self._voice_mode[chat_id] = \\\"voice_only\\\"\\n@@ -4829,7 +5240,7 @@ class GatewayRunner:\\n                 \\\"all\\\": \\\"TTS (voice reply to all messages)\\\",\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01XaiiozutypWDXfZDsuRbx5"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01THagoH9sx4am3t1y9fkQcS",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && grep -n \\\"_enrich_message_with_vision\\\\|_enrich_message_with_transcription\\\\|reply_to_text\\\\|preprocess_context_references_async\\\\|_TEXT_EXTENSIONS\\\\|MessageType.DOCUMENT\\\" gateway/run.py | head -20\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01LbDoTuApRArrf6MXfQ8eBQ",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/run.py 2>&1 | grep \\\"^+\\\" | grep -c \\\"vision\\\\|transcri\\\\|reply_to_text\\\\|context_references\\\\|DOCUMENT\\\\|_TEXT_EXTENSION\\\\|_stt_\\\\|voice message\\\"\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"2974:                message_text = await self._enrich_message_with_vision(\\n2980:                message_text = await self._enrich_message_with_transcription(\\n3013:        if event.media_urls and event.message_type == MessageType.DOCUMENT:\\n3016:            _TEXT_EXTENSIONS = {\\\".txt\\\", \\\".md\\\", \\\".csv\\\", \\\".log\\\", \\\".json\\\", \\\".xml\\\", \\\".yaml\\\", \\\".yml\\\", \\\".toml\\\", \\\".ini\\\", \\\".cfg\\\"}\\n3023:                    if _ext in _TEXT_EXTENSIONS:\\n3054:        if getattr(event, \\\"reply_to_text\\\", None) and event.reply_to_message_id:\\n3055:            reply_snippet = event.reply_to_text[:500]\\n3066:                from agent.context_references import preprocess_context_references_async\\n3074:                _ctx_result = await preprocess_context_references_async(\\n6978:    async def _enrich_message_with_vision(\\n7046:    async def _enrich_message_with_transcription(\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01THagoH9sx4am3t1y9fkQcS"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"21\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01LbDoTuApRArrf6MXfQ8eBQ"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01Wdw4Lho816SVHt3BJQkMjL",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git log --oneline origin/main -- gateway/run.py | head -5\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01BCB9orVkTcaHTtYwjcYMJW",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git show origin/main:gateway/run.py | grep -c \\\"_enrich_message_with_vision\\\\|_enrich_message_with_transcription\\\\|reply_to_text.*reply_to_message_id\\\\|preprocess_context_references_async\\\\|MessageType.DOCUMENT\\\"\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"964ef681 fix(gateway): improve /restart response with fallback instructions\\n276d20e6 fix(gateway): /restart uses service restart under systemd instead of detached subprocess\\n8a64f3e3 feat(gateway): notify /restart requester when gateway comes back online\\na0cd2c53 fix(gateway): verbose tool progress no longer truncates args when tool_preview_length is 0 (#8735)\\n3cd6cbee feat: add /debug slash command for all platforms\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01Wdw4Lho816SVHt3BJQkMjL"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"8\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01BCB9orVkTcaHTtYwjcYMJW"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01AGkGk8zcyZ8zUGxHGBGYL5",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git show origin/main:gateway/run.py | grep -n \\\"_enrich_message_with_vision\\\\|_enrich_message_with_transcription\\\\|reply_to_text.*reply_to_message_id\\\\|preprocess_context_references_async\\\\|MessageType.DOCUMENT\\\" | head -20\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"2974:                message_text = await self._enrich_message_with_vision(\\n2980:                message_text = await self._enrich_message_with_transcription(\\n3013:        if event.media_urls and event.message_type == MessageType.DOCUMENT:\\n3054:        if getattr(event, \\\"reply_to_text\\\", None) and event.reply_to_message_id:\\n3066:                from agent.context_references import preprocess_context_references_async\\n3074:                _ctx_result = await preprocess_context_references_async(\\n6978:    async def _enrich_message_with_vision(\\n7046:    async def _enrich_message_with_transcription(\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01AGkGk8zcyZ8zUGxHGBGYL5"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_012CzR8xizYCPkv2MLJpRixn",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git log --oneline origin/main..pr-8388 2>&1\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"05b87f47 fix(gateway): remove stale shared-thread sender check\\nbc62efd6 feat(feishu): support multi-account routing and id-aware delivery\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_012CzR8xizYCPkv2MLJpRixn"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_019sat1paLRz2Y4vkrrkF6vu",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/session_context.py 2>&1\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01RnHYKvDVUjGw2scWn7J7uN",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- gateway/delivery.py 2>&1\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/gateway/session_context.py b/gateway/session_context.py\\nindex b9fdcdfa..56d977c1 100644\\n--- a/gateway/session_context.py\\n+++ b/gateway/session_context.py\\n@@ -43,19 +43,23 @@ from contextvars import ContextVar\\n # ---------------------------------------------------------------------------\\n \\n _SESSION_PLATFORM: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_PLATFORM\\\", default=\\\"\\\")\\n+_SESSION_ACCOUNT_ID: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_ACCOUNT_ID\\\", default=\\\"\\\")\\n _SESSION_CHAT_ID: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_CHAT_ID\\\", default=\\\"\\\")\\n _SESSION_CHAT_NAME: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_CHAT_NAME\\\", default=\\\"\\\")\\n _SESSION_THREAD_ID: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_THREAD_ID\\\", default=\\\"\\\")\\n _SESSION_USER_ID: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_USER_ID\\\", default=\\\"\\\")\\n+_SESSION_USER_ID_ALT: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_USER_ID_ALT\\\", default=\\\"\\\")\\n _SESSION_USER_NAME: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_USER_NAME\\\", default=\\\"\\\")\\n _SESSION_KEY: ContextVar[str] = ContextVar(\\\"HERMES_SESSION_KEY\\\", default=\\\"\\\")\\n \\n _VAR_MAP = {\\n     \\\"HERMES_SESSION_PLATFORM\\\": _SESSION_PLATFORM,\\n+    \\\"HERMES_SESSION_ACCOUNT_ID\\\": _SESSION_ACCOUNT_ID,\\n     \\\"HERMES_SESSION_CHAT_ID\\\": _SESSION_CHAT_ID,\\n     \\\"HERMES_SESSION_CHAT_NAME\\\": _SESSION_CHAT_NAME,\\n     \\\"HERMES_SESSION_THREAD_ID\\\": _SESSION_THREAD_ID,\\n     \\\"HERMES_SESSION_USER_ID\\\": _SESSION_USER_ID,\\n+    \\\"HERMES_SESSION_USER_ID_ALT\\\": _SESSION_USER_ID_ALT,\\n     \\\"HERMES_SESSION_USER_NAME\\\": _SESSION_USER_NAME,\\n     \\\"HERMES_SESSION_KEY\\\": _SESSION_KEY,\\n }\\n@@ -63,10 +67,12 @@ _VAR_MAP = {\\n \\n def set_session_vars(\\n     platform: str = \\\"\\\",\\n+    account_id: str = \\\"\\\",\\n     chat_id: str = \\\"\\\",\\n     chat_name: str = \\\"\\\",\\n     thread_id: str = \\\"\\\",\\n     user_id: str = \\\"\\\",\\n+    user_id_alt: str = \\\"\\\",\\n     user_name: str = \\\"\\\",\\n     session_key: str = \\\"\\\",\\n ) -> list:\\n@@ -80,10 +86,12 @@ def set_session_vars(\\n     \\\"\\\"\\\"\\n     tokens = [\\n         _SESSION_PLATFORM.set(platform),\\n+        _SESSION_ACCOUNT_ID.set(account_id),\\n         _SESSION_CHAT_ID.set(chat_id),\\n         _SESSION_CHAT_NAME.set(chat_name),\\n         _SESSION_THREAD_ID.set(thread_id),\\n         _SESSION_USER_ID.set(user_id),\\n+        _SESSION_USER_ID_ALT.set(user_id_alt),\\n         _SESSION_USER_NAME.set(user_name),\\n         _SESSION_KEY.set(session_key),\\n     ]\\n@@ -96,10 +104,12 @@ def clear_session_vars(tokens: list) -> None:\\n         return\\n     vars_in_order = [\\n         _SESSION_PLATFORM,\\n+        _SESSION_ACCOUNT_ID,\\n         _SESSION_CHAT_ID,\\n         _SESSION_CHAT_NAME,\\n         _SESSION_THREAD_ID,\\n         _SESSION_USER_ID,\\n+        _SESSION_USER_ID_ALT,\\n         _SESSION_USER_NAME,\\n         _SESSION_KEY,\\n     ]\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_019sat1paLRz2Y4vkrrkF6vu"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/gateway/delivery.py b/gateway/delivery.py\\nindex d7fa6afd..e357b93e 100644\\n--- a/gateway/delivery.py\\n+++ b/gateway/delivery.py\\n@@ -37,6 +37,7 @@ class DeliveryTarget:\\n     - \\\"telegram:123456\\\" → specific Telegram chat\\n     \\\"\\\"\\\"\\n     platform: Platform\\n+    account_id: Optional[str] = None\\n     chat_id: Optional[str] = None  # None means use home channel\\n     thread_id: Optional[str] = None\\n     is_origin: bool = False\\n@@ -59,6 +60,7 @@ class DeliveryTarget:\\n             if origin:\\n                 return cls(\\n                     platform=origin.platform,\\n+                    account_id=origin.account_id,\\n                     chat_id=origin.chat_id,\\n                     thread_id=origin.thread_id,\\n                     is_origin=True,\\n@@ -122,6 +124,7 @@ class DeliveryRouter:\\n         \\\"\\\"\\\"\\n         self.config = config\\n         self.adapters = adapters or {}\\n+        self.account_adapters: Dict[tuple[Platform, Optional[str]], Any] = {}\\n         self.output_dir = get_hermes_home() / \\\"cron\\\" / \\\"output\\\"\\n     \\n     async def deliver(\\n@@ -228,14 +231,29 @@ class DeliveryRouter:\\n         metadata: Optional[Dict[str, Any]]\\n     ) -> Dict[str, Any]:\\n         \\\"\\\"\\\"Deliver content to a messaging platform.\\\"\\\"\\\"\\n-        adapter = self.adapters.get(target.platform)\\n-        \\n+        if not target.chat_id:\\n+            home = self.config.get_home_channel(target.platform, account_id=target.account_id)\\n+            if home:\\n+                target = DeliveryTarget(\\n+                    platform=target.platform,\\n+                    account_id=getattr(home, \\\"account_id\\\", None) or target.account_id,\\n+                    chat_id=home.chat_id,\\n+                    thread_id=target.thread_id,\\n+                    is_origin=target.is_origin,\\n+                    is_explicit=target.is_explicit,\\n+                )\\n+            else:\\n+                raise ValueError(f\\\"No chat ID for {target.platform.value} delivery\\\")\\n+\\n+        adapter = None\\n+        if target.account_id:\\n+            adapter = self.account_adapters.get((target.platform, target.account_id))\\n+        if adapter is None:\\n+            adapter = self.adapters.get(target.platform)\\n+\\n         if not adapter:\\n             raise ValueError(f\\\"No adapter configured for {target.platform.value}\\\")\\n         \\n-        if not target.chat_id:\\n-            raise ValueError(f\\\"No chat ID for {target.platform.value} delivery\\\")\\n-        \\n         # Guard: truncate oversized cron output to stay within platform limits\\n         if len(content) > MAX_PLATFORM_OUTPUT:\\n             job_id = (metadata or {}).get(\\\"job_id\\\", \\\"unknown\\\")\\n@@ -251,6 +269,3 @@ class DeliveryRouter:\\n             send_metadata[\\\"thread_id\\\"] = target.thread_id\\n         return await adapter.send(target.chat_id, content, metadata=send_metadata or None)\\n \\n-\\n-\\n-\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01RnHYKvDVUjGw2scWn7J7uN"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01MuFViB9E4hgh1Z8qRdQ3Kt",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- tests/tools/test_feishu_id_tool.py 2>&1 | head -100\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01UUFRbWLBdD2nKzLTgij43u",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && wc -l tools/feishu_id_tool.py 2>/dev/null; git show pr-8388:tools/feishu_id_tool.py 2>/dev/null | wc -l\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/tests/tools/test_feishu_id_tool.py b/tests/tools/test_feishu_id_tool.py\\nnew file mode 100644\\nindex 00000000..c1e90daf\\n--- /dev/null\\n+++ b/tests/tools/test_feishu_id_tool.py\\n@@ -0,0 +1,606 @@\\n+import json\\n+from datetime import datetime\\n+from pathlib import Path\\n+from types import SimpleNamespace\\n+from unittest.mock import patch\\n+\\n+from gateway.config import Platform\\n+from gateway.session import SessionEntry, SessionSource\\n+from tools.feishu_id_tool import feishu_id_tool\\n+\\n+\\n+class _FakeResponse:\\n+    def __init__(self, *, success: bool, data=None, code=0, msg=\\\"ok\\\"):\\n+        self._success = success\\n+        self.data = data\\n+        self.code = code\\n+        self.msg = msg\\n+\\n+    def success(self):\\n+        return self._success\\n+\\n+\\n+def _make_fake_client(\\n+    *,\\n+    user=None,\\n+    chat=None,\\n+    members=None,\\n+    batch_users=None,\\n+    search_chats=None,\\n+):\\n+    def _user_get(_request):\\n+        if user is None:\\n+            return _FakeResponse(success=False, code=404, msg=\\\"user not found\\\")\\n+        return _FakeResponse(success=True, data=SimpleNamespace(user=user))\\n+\\n+    def _user_batch(_request):\\n+        if batch_users is None:\\n+            return _FakeResponse(success=False, code=404, msg=\\\"batch not found\\\")\\n+        return _FakeResponse(success=True, data=SimpleNamespace(items=batch_users))\\n+\\n+    def _chat_get(_request):\\n+        if chat is None:\\n+            return _FakeResponse(success=False, code=404, msg=\\\"chat not found\\\")\\n+        return _FakeResponse(success=True, data=chat)\\n+\\n+    def _chat_search(_request):\\n+        if search_chats is None:\\n+            return _FakeResponse(success=False, code=404, msg=\\\"search not found\\\")\\n+        return _FakeResponse(success=True, data=SimpleNamespace(items=search_chats))\\n+\\n+    def _chat_members_get(_request):\\n+        if members is None:\\n+            return _FakeResponse(success=False, code=404, msg=\\\"members not found\\\")\\n+        return _FakeResponse(\\n+            success=True,\\n+            data=SimpleNamespace(\\n+                items=members,\\n+                page_token=None,\\n+                has_more=False,\\n+                member_total=str(len(members)),\\n+            ),\\n+        )\\n+\\n+    return SimpleNamespace(\\n+        contact=SimpleNamespace(\\n+            v3=SimpleNamespace(\\n+                user=SimpleNamespace(\\n+                    get=_user_get,\\n+                    batch=_user_batch,\\n+                )\\n+            )\\n+        ),\\n+        im=SimpleNamespace(\\n+            v1=SimpleNamespace(\\n+                chat=SimpleNamespace(\\n+                    get=_chat_get,\\n+                    search=_chat_search,\\n+                ),\\n+                chat_members=SimpleNamespace(get=_chat_members_get),\\n+            )\\n+        ),\\n+    )\\n+\\n+\\n+def _write_sessions(home: Path, payloads: list[dict]) -> None:\\n+    sessions_dir = home / \\\"sessions\\\"\\n+    sessions_dir.mkdir(parents=True, exist_ok=True)\\n+    now = datetime.now().isoformat()\\n+    data = {}\\n+    for item in payloads:\\n+        source = SessionSource(**item[\\\"source\\\"])\\n+        entry = SessionEntry(\\n+            session_key=item[\\\"session_key\\\"],\\n+            session_id=item[\\\"session_id\\\"],\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01MuFViB9E4hgh1Z8qRdQ3Kt"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"1340\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01UUFRbWLBdD2nKzLTgij43u"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01DMDwTRn33PPs873SPDLihR",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 2>&1 | grep -c \\\"_get_config_callable\\\\|_resolve_platform_config\\\\|_resolve_home_channel\\\"\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01THAT7RkuypsXBnDyFxztjZ",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 2>&1 | grep \\\"^+.*def _get_config_callable\\\\|^+.*def _resolve_platform_config\\\\|^+.*def _resolve_home_channel\\\"\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"24\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01DMDwTRn33PPs873SPDLihR"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"+def _get_config_callable(config, name):\\n+def _resolve_platform_config(config, platform, account_id=None):\\n+def _resolve_home_channel(config, platform, account_id=None):\\n+def _get_config_callable(config, name):\\n+def _resolve_platform_config(config, account_id: Optional[str] = None):\\n+def _get_config_callable(config, name):\\n+def _resolve_platform_config(config, platform, account_id=None):\\n+def _resolve_home_channel(config, platform, account_id=None):\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01THAT7RkuypsXBnDyFxztjZ"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_012p43DPonvSLugt3FaYoJNv",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git show 05b87f47 --stat 2>&1\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01VkHMceN4tHnGDcWV4tDUt9",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\": \"cd /home/user/.hermes/hermes-agent && git diff origin/main...pr-8388 -- tests/gateway/test_shared_thread_sender_prefix.py 2>&1 | head -50\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"commit 05b87f47911ae28bdad14d2281ad454b8587aa2a\\nAuthor: contributor <contributor@example.com>\\nDate:   Mon Apr 13 13:18:48 2026 +0800\\n\\n    fix(gateway): remove stale shared-thread sender check\\n\\n gateway/run.py                                    |  2 -\\n tests/gateway/test_shared_thread_sender_prefix.py | 92 +++++++++++++++++++++++\\n 2 files changed, 92 insertions(+), 2 deletions(-)\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_012p43DPonvSLugt3FaYoJNv"
+    },
+    {
+      "role": "tool",
+      "content": "{\"output\": \"diff --git a/tests/gateway/test_shared_thread_sender_prefix.py b/tests/gateway/test_shared_thread_sender_prefix.py\\nnew file mode 100644\\nindex 00000000..777db5c5\\n--- /dev/null\\n+++ b/tests/gateway/test_shared_thread_sender_prefix.py\\n@@ -0,0 +1,92 @@\\n+import importlib\\n+import sys\\n+import types\\n+from datetime import datetime\\n+from types import SimpleNamespace\\n+from unittest.mock import AsyncMock, MagicMock\\n+\\n+import pytest\\n+\\n+from gateway.config import GatewayConfig, Platform, PlatformConfig\\n+from gateway.platforms.base import MessageEvent\\n+from gateway.session import SessionEntry, SessionSource\\n+\\n+\\contributor@example.com\\n+async def test_handle_message_with_agent_shared_thread_prefixes_sender_once(monkeypatch):\\n+    fake_dotenv = types.ModuleType(\\\"dotenv\\\")\\n+    fake_dotenv.load_dotenv = lambda *args, **kwargs: None\\n+    monkeypatch.setitem(sys.modules, \\\"dotenv\\\", fake_dotenv)\\n+\\n+    gateway_run = importlib.import_module(\\\"gateway.run\\\")\\n+    GatewayRunner = gateway_run.GatewayRunner\\n+\\n+    runner = object.__new__(GatewayRunner)\\n+    runner.config = GatewayConfig(\\n+        platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token=\\\"fake-token\\\")}\\n+    )\\n+    adapter = MagicMock()\\n+    adapter.send = AsyncMock()\\n+    adapter.stop_typing = AsyncMock()\\n+    runner.adapters = {Platform.TELEGRAM: adapter}\\n+    runner._voice_mode = {}\\n+    runner.hooks = SimpleNamespace(emit=AsyncMock(), loaded_hooks=False)\\n+    runner.session_store = MagicMock()\\n+    runner.session_store.get_or_create_session.return_value = SessionEntry(\\n+        session_key=\\\"agent:main:telegram:group:-1001:17585\\\",\\n+        session_id=\\\"sess-1\\\",\\n+        created_at=datetime.now(),\\n+        updated_at=datetime.now(),\\n+        platform=Platform.TELEGRAM,\\n+        chat_type=\\\"group\\\",\\n+    )\\n+    runner.session_store.load_transcript.return_value = []\\n+    runner.session_store.has_any_sessions.return_value = False\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "toolu_bdrk_01VkHMceN4tHnGDcWV4tDUt9"
+    },
+    {
+      "role": "assistant",
+      "content": "Here's my review:\n\nThe core claim about Feishu's identity model is technically correct. Feishu's own docs confirm: \"open_id identifies a user to an app. The same user has different Open IDs in different apps.\" So yes, `open_id` is app-scoped, not a canonical identity.\n\nBut the rest of this PR is a bait-and-switch.\n\n**What it claims to be:** A Feishu identity model bugfix.\n\n**What it actually is:** A 4647-line feature PR that adds:\n\n→ Full multi-account Feishu support (account-aware routing, binding keys, adapter registry overhaul in gateway/run.py)\n→ A brand new 1340-line `feishu_id` tool (user/chat/member lookup via Feishu API)\n→ Thread-local websocket proxy refactoring for concurrent bot connections\n→ Account-aware delivery, session context, cron scheduler changes\n→ New session context variables (`HERMES_SESSION_ACCOUNT_ID`, `USER_ID_ALT`)\n→ A separate unrelated fix (\"remove stale shared-thread sender check\") bundled in\n\n**The \"bug\" doesn't actually affect anyone.** Current single-bot Feishu deployments work fine. `open_id` is technically an app-scoped alias, but when you only have one app, it's de facto unique and stable. The identity model is imprecise in naming but functionally correct for the existing use case.\n\n**Code quality concerns:**\n→ `_get_config_callable`, `_resolve_platform_config`, and `_resolve_home_channel` are copy-pasted 3 separate times across `cron/scheduler.py`, `tools/send_message_tool.py`, and `tools/feishu_id_tool.py` instead of living in a shared module\n→ `_ensure_adapter_registry()` has defensive `not hasattr` checks that suggest the multi-account plumbing was bolted on rather than designed in\n→ 619 lines of changes to gateway/run.py, most of which is adapter-binding indirection for a feature nobody requested\n\n**Recommendation:** Close it. The identity model observation is valid as documentation/knowledge, but this PR uses it to justify smuggling in a massive multi-account feature. If multi-account Feishu is ever needed, it should be a planned feature with proper design review, not a 4600-line \"bugfix.\" The actual identity correction (if wanted) would be maybe 50 lines of renaming/comments."
+    }
+  ]
+}
