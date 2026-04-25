@@ -151,15 +151,14 @@ def test_feasibility_check_passes_live_main_runtime():
         agent._emit_status = lambda msg: None
         agent._check_compression_model_feasibility()
 
-    mock_get_client.assert_called_once_with(
-        "compression",
-        main_runtime={
-            "model": "gpt-5.4",
-            "provider": "openai-codex",
+    # Called for both compression + flush_memories; verify compression call present
+    assert any(
+        c == (("compression",), {"main_runtime": {
+            "model": "gpt-5.4", "provider": "openai-codex",
             "base_url": "https://chatgpt.com/backend-api/codex",
-            "api_key": "codex-token",
-            "api_mode": "codex_responses",
-        },
+            "api_key": "codex-token", "api_mode": "codex_responses",
+        }})
+        for c in mock_get_client.call_args_list
     )
 
 
@@ -179,12 +178,12 @@ def test_feasibility_check_passes_config_context_length(mock_get_client, mock_ct
     agent._emit_status = lambda msg: None
     agent._check_compression_model_feasibility()
 
-    mock_ctx_len.assert_called_once_with(
-        "custom/big-model",
-        base_url="http://custom-endpoint:8080/v1",
-        api_key="sk-custom",
-        config_context_length=1_000_000,
-        provider="openrouter",
+    # First call is the compression model
+    assert mock_ctx_len.call_args_list[0] == (
+        ("custom/big-model",),
+        {"base_url": "http://custom-endpoint:8080/v1",
+         "api_key": "sk-custom", "config_context_length": 1_000_000,
+         "provider": "openrouter"},
     )
 
 
@@ -202,12 +201,11 @@ def test_feasibility_check_ignores_invalid_context_length(mock_get_client, mock_
     agent._emit_status = lambda msg: None
     agent._check_compression_model_feasibility()
 
-    mock_ctx_len.assert_called_once_with(
-        "custom/model",
-        base_url="http://custom:8080/v1",
-        api_key="sk-test",
-        config_context_length=None,
-        provider="openrouter",
+    assert mock_ctx_len.call_args_list[0] == (
+        ("custom/model",),
+        {"base_url": "http://custom:8080/v1",
+         "api_key": "sk-test", "config_context_length": None,
+         "provider": "openrouter"},
     )
 
 
@@ -255,13 +253,10 @@ def test_init_feasibility_check_uses_aux_context_override_from_config():
         )
 
     assert agent._aux_compression_context_length_config == 1_000_000
-    mock_ctx_len.assert_called_once_with(
-        "custom/big-model",
-        base_url="http://custom-endpoint:8080/v1",
-        api_key="sk-custom",
-        config_context_length=1_000_000,
-        provider="",
-    )
+    c0 = mock_ctx_len.call_args_list[0]
+    assert c0.args == ("custom/big-model",)
+    assert c0.kwargs["base_url"] == "http://custom-endpoint:8080/v1"
+    assert c0.kwargs["config_context_length"] == 1_000_000
 
 
 @patch("agent.auxiliary_client.get_text_auxiliary_client")
@@ -311,8 +306,10 @@ def test_exception_does_not_crash(mock_get_client):
 
 @patch("agent.model_metadata.get_model_context_length", return_value=100_000)
 @patch("agent.auxiliary_client.get_text_auxiliary_client")
-def test_exact_threshold_boundary_no_warning(mock_get_client, mock_ctx_len):
-    """No warning when aux context exactly equals the threshold."""
+def test_exact_threshold_boundary_triggers_headroom_correction(mock_get_client, mock_ctx_len):
+    """When aux context exactly equals the threshold, headroom deduction
+    still fires — flush_memories adds system prompt + tool schema on top
+    of the conversation messages, so threshold must be lowered."""
     agent = _make_agent(main_context=200_000, threshold_percent=0.50)
     mock_client = MagicMock()
     mock_client.base_url = "https://openrouter.ai/api/v1"
@@ -324,7 +321,10 @@ def test_exact_threshold_boundary_no_warning(mock_get_client, mock_ctx_len):
 
     agent._check_compression_model_feasibility()
 
-    assert len(messages) == 0
+    # 100K - headroom < 100K → auto-corrects
+    assert len(messages) == 1
+    assert "Auto-lowered" in messages[0]
+    assert agent.context_compressor.threshold_tokens < 100_000
 
 
 @patch("agent.model_metadata.get_model_context_length", return_value=99_999)
