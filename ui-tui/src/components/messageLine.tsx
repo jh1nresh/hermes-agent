@@ -5,7 +5,7 @@ import { LONG_MSG } from '../config/limits.js'
 import { sectionMode } from '../domain/details.js'
 import { userDisplay } from '../domain/messages.js'
 import { ROLE } from '../domain/roles.js'
-import { compactPreview, hasAnsi, isPasteBackedText, stripAnsi } from '../lib/text.js'
+import { boundedLiveRenderText, compactPreview, hasAnsi, isPasteBackedText, stripAnsi } from '../lib/text.js'
 import type { Theme } from '../theme.js'
 import type { DetailsMode, Msg, SectionVisibility } from '../types.js'
 
@@ -84,7 +84,11 @@ export const MessageLine = memo(function MessageLine({
     }
 
     if (msg.role === 'assistant') {
-      return isStreaming ? <Text color={body}>{msg.text}</Text> : <Md compact={compact} t={t} text={msg.text} />
+      return isStreaming ? (
+        <Text color={body}>{boundedLiveRenderText(msg.text)}</Text>
+      ) : (
+        <Md compact={compact} t={t} text={msg.text} />
+      )
     }
 
     if (msg.role === 'user' && msg.text.length > LONG_MSG && isPasteBackedText(msg.text)) {

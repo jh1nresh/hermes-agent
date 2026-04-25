@@ -14,7 +14,9 @@ const gw = new GatewayClient()
 gw.start()
 
 const dumpNotice = (snap: MemorySnapshot, dump: HeapDumpResult | null) =>
-  `hermes-tui: ${snap.level} memory (${formatBytes(snap.heapUsed)}) — auto heap dump → ${dump?.heapPath ?? '(failed)'}\n`
+  snap.source === 'heap'
+    ? `hermes-tui: ${snap.level} heap (${formatBytes(snap.heapUsed)}, rss ${formatBytes(snap.rss)}) — auto heap dump → ${dump?.heapPath ?? '(failed)'}\n`
+    : `hermes-tui: ${snap.level} rss (${formatBytes(snap.rss)}, native ${formatBytes(snap.nativeUsed)}) — auto diagnostics → ${dump?.diagPath ?? '(failed)'}\n`
 
 setupGracefulExit({
   cleanups: [() => gw.kill()],

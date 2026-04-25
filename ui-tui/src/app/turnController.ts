@@ -2,6 +2,7 @@ import { REASONING_PULSE_MS, STREAM_BATCH_MS } from '../config/timing.js'
 import type { SessionInterruptResponse, SubagentEventPayload } from '../gatewayTypes.js'
 import { hasReasoningTag, splitReasoning } from '../lib/reasoning.js'
 import {
+  boundedLiveRenderText,
   buildToolTrailLine,
   estimateTokensRough,
   isTransientTrailLine,
@@ -492,7 +493,7 @@ class TurnController {
       this.streamTimer = null
       const raw = this.bufRef.trimStart()
       const visible = hasReasoningTag(raw) ? splitReasoning(raw).text : raw
-      patchTurnState({ streaming: visible })
+      patchTurnState({ streaming: boundedLiveRenderText(visible) })
     }, STREAM_BATCH_MS)
   }
 

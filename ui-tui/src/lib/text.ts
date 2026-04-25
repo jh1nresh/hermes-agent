@@ -1,4 +1,4 @@
-import { THINKING_COT_MAX } from '../config/limits.js'
+import { LIVE_RENDER_MAX_CHARS, LIVE_RENDER_MAX_LINES, THINKING_COT_MAX } from '../config/limits.js'
 import type { ThinkingMode } from '../types.js'
 
 const ESC = String.fromCharCode(27)
@@ -74,6 +74,61 @@ export const thinkingPreview = (reasoning: string, mode: ThinkingMode, max: numb
   const raw = reasoning.trim()
 
   return !raw || mode === 'collapsed' ? '' : mode === 'full' ? raw : compactPreview(raw.replace(WS_RE, ' '), max)
+}
+
+export const boundedLiveRenderText = (
+  text: string,
+  { maxChars = LIVE_RENDER_MAX_CHARS, maxLines = LIVE_RENDER_MAX_LINES } = {}
+) => {
+  if (text.length <= maxChars && text.split('\n', maxLines + 1).length <= maxLines) {
+    return text
+  }
+
+  let start = 0
+  let idx = text.length
+
+  for (let seen = 0; seen < maxLines && idx > 0; seen++) {
+    idx = text.lastIndexOf('\n', idx - 1)
+    start = idx < 0 ? 0 : idx + 1
+
+    if (idx < 0) {
+      break
+    }
+  }
+
+  const lineStart = start
+  start = Math.max(lineStart, text.length - maxChars)
+
+  if (start > lineStart) {
+    const nextBreak = text.indexOf('\n', start)
+
+    if (nextBreak >= 0 && nextBreak < text.length - 1) {
+      start = nextBreak + 1
+    }
+  }
+
+  const tail = text.slice(start).trimStart()
+  const omittedLines = countNewlines(text, start)
+  const omittedChars = Math.max(0, text.length - tail.length)
+
+  const label =
+    omittedLines > 0
+      ? `[showing live tail; omitted ${fmtK(omittedLines)} lines / ${fmtK(omittedChars)} chars]\n`
+      : `[showing live tail; omitted ${fmtK(omittedChars)} chars]\n`
+
+  return `${label}${tail.trimStart()}`
+}
+
+const countNewlines = (text: string, end: number) => {
+  let count = 0
+
+  for (let i = 0; i < end; i++) {
+    if (text.charCodeAt(i) === 10) {
+      count++
+    }
+  }
+
+  return count
 }
 
 export const stripTrailingPasteNewlines = (text: string) => (/[^\n]/.test(text) ? text.replace(/\n+$/, '') : text)

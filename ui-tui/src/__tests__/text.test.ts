@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  boundedLiveRenderText,
   edgePreview,
   estimateRows,
   estimateTokensRough,
@@ -104,5 +105,27 @@ describe('estimateRows', () => {
     const plain = 'look at test case with underscores now'
 
     expect(estimateRows(snake, w)).toBe(estimateRows(plain, w))
+  })
+})
+
+describe('boundedLiveRenderText', () => {
+  it('keeps short text unchanged', () => {
+    expect(boundedLiveRenderText('alpha\nbeta', { maxChars: 50, maxLines: 5 })).toBe('alpha\nbeta')
+  })
+
+  it('keeps the tail of long live text', () => {
+    const text = Array.from({ length: 6 }, (_, i) => `line-${i + 1}`).join('\n')
+    const out = boundedLiveRenderText(text, { maxChars: 100, maxLines: 3 })
+
+    expect(out).toContain('omitted 3 lines')
+    expect(out.endsWith('line-4\nline-5\nline-6')).toBe(true)
+    expect(out).not.toContain('line-1')
+  })
+
+  it('bounds very long single-line text by chars', () => {
+    const out = boundedLiveRenderText('a'.repeat(60), { maxChars: 12, maxLines: 5 })
+
+    expect(out).toContain('omitted 48 chars')
+    expect(out.endsWith('a'.repeat(12))).toBe(true)
   })
 })

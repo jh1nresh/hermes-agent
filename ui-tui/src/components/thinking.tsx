@@ -16,6 +16,7 @@ import {
   widthByDepth
 } from '../lib/subagentTree.js'
 import {
+  boundedLiveRenderText,
   compactPreview,
   estimateTokensRough,
   fmtK,
@@ -633,7 +634,12 @@ export const Thinking = memo(function Thinking({
   streaming?: boolean
   t: Theme
 }) {
-  const preview = useMemo(() => thinkingPreview(reasoning, mode, THINKING_COT_MAX), [mode, reasoning])
+  const preview = useMemo(() => {
+    const raw = thinkingPreview(reasoning, mode, THINKING_COT_MAX)
+
+    return mode === 'full' ? boundedLiveRenderText(raw) : raw
+  }, [mode, reasoning])
+
   const lines = useMemo(() => preview.split('\n').map(line => line.replace(/\t/g, '  ')), [preview])
 
   if (!preview && !active) {
@@ -868,8 +874,8 @@ export const ToolTrail = memo(function ToolTrail({
   const hasTools = groups.length > 0
   const hasSubagents = subagents.length > 0
   const hasMeta = meta.length > 0
-  const hasThinking = !!cot || reasoningActive || busy
   const thinkingLive = reasoningActive || reasoningStreaming
+  const hasThinking = !!cot || thinkingLive
 
   const tokenCount =
     reasoningTokens && reasoningTokens > 0 ? reasoningTokens : reasoning ? estimateTokensRough(reasoning) : 0
@@ -1002,7 +1008,7 @@ export const ToolTrail = memo(function ToolTrail({
       open: openThinking,
       render: rails => (
         <Thinking
-          active={reasoningActive}
+          active={thinkingLive}
           branch="last"
           mode="full"
           rails={rails}

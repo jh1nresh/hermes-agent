@@ -145,11 +145,11 @@ export async function performHeapDump(trigger: MemoryTrigger = 'manual'): Promis
     // Diagnostics first — heap-snapshot serialization can crash on very large
     // heaps, and the JSON sidecar is the most actionable artifact if so.
     const diagnostics = await captureMemoryDiagnostics(trigger)
-    const dir = process.env.HERMES_HEAPDUMP_DIR?.trim() || join(homedir() || tmpdir(), '.hermes', 'heapdumps')
+    const dir = memoryDumpDir()
 
     await mkdir(dir, { recursive: true })
 
-    const base = `hermes-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-${trigger}`
+    const base = memoryDumpBase(trigger)
     const heapPath = join(dir, `${base}.heapsnapshot`)
     const diagPath = join(dir, `${base}.diagnostics.json`)
 
@@ -157,6 +157,23 @@ export async function performHeapDump(trigger: MemoryTrigger = 'manual'): Promis
     await pipeline(getHeapSnapshot(), createWriteStream(heapPath, { mode: 0o600 }))
 
     return { diagPath, heapPath, success: true }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e), success: false }
+  }
+}
+
+export async function performDiagnosticsDump(trigger: MemoryTrigger = 'manual'): Promise<HeapDumpResult> {
+  try {
+    const diagnostics = await captureMemoryDiagnostics(trigger)
+    const dir = memoryDumpDir()
+
+    await mkdir(dir, { recursive: true })
+
+    const diagPath = join(dir, `${memoryDumpBase(trigger)}.diagnostics.json`)
+
+    await writeFile(diagPath, JSON.stringify(diagnostics, null, 2), { mode: 0o600 })
+
+    return { diagPath, success: true }
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e), success: false }
   }
@@ -176,6 +193,11 @@ export function formatBytes(bytes: number): string {
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB']
 
 const STARTED_AT = { rss: process.memoryUsage().rss, uptime: process.uptime() }
+
+const memoryDumpDir = () => process.env.HERMES_HEAPDUMP_DIR?.trim() || join(homedir() || tmpdir(), '.hermes', 'heapdumps')
+
+const memoryDumpBase = (trigger: MemoryTrigger) =>
+  `hermes-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-${trigger}`
 
 // Returns undefined when the probe isn't available (non-Linux paths, sandboxed FS).
 const swallow = async <T>(fn: () => Promise<T>): Promise<T | undefined> => {
