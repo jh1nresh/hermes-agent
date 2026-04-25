@@ -1924,6 +1924,7 @@ class TestPtyWebSocket:
                 f"/api/events?token={self.token}"
             ):
                 pass
+        assert exc.value.code == 4400
 
 
 class TestEnvVarUpdateValidation:
