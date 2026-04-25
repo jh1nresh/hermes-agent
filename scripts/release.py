@@ -504,6 +504,8 @@ AUTHOR_MAP = {
     "screenmachine@gmail.com": "teknium1",
     "chenzeshi@live.com": "chen1749144759",
     "mor.aleksandr@yahoo.com": "MorAlekss",
+    "poruru.code@gmail.com": "poruru-code",
+    "138243371+poruru-code@users.noreply.github.com": "poruru-code",
 }
 
 
