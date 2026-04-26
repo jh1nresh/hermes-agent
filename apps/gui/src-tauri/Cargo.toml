@@ -1,0 +1,17 @@
+[package]
+name = "hermes-gui"
+version = "0.0.0"
+description = "Hermes GUI shell"
+edition = "2021"
+
+[lib]
+name = "hermes_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"

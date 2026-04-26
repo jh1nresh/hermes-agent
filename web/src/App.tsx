@@ -1,19 +1,34 @@
+import { Backdrop } from "@/components/Backdrop";
+import { DesktopBridge } from "@/components/DesktopBridge";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { RuntimeOverlay } from "@/components/RuntimeOverlay";
+import { SidebarFooter } from "@/components/SidebarFooter";
+import { SidebarStatusStrip } from "@/components/SidebarStatusStrip";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
+import type { SystemAction } from "@/contexts/system-actions-context";
+import { useSystemActions } from "@/contexts/useSystemActions";
+import { useI18n } from "@/i18n";
+import { api, type SetupStateResponse } from "@/lib/api";
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentType,
-  type ReactNode,
-} from "react";
-import {
-  Routes,
-  Route,
-  NavLink,
-  Navigate,
-  useLocation,
-  useNavigate,
-} from "react-router-dom";
+  isDashboardEmbeddedChatEnabled,
+  isDashboardGuiEnabled,
+} from "@/lib/dashboard-flags";
+import { cn } from "@/lib/utils";
+import AnalyticsPage from "@/pages/AnalyticsPage";
+import ChatPage from "@/pages/ChatPage";
+import ConfigPage from "@/pages/ConfigPage";
+import CronPage from "@/pages/CronPage";
+import DocsPage from "@/pages/DocsPage";
+import EnvPage from "@/pages/EnvPage";
+import LogsPage from "@/pages/LogsPage";
+import SessionsPage from "@/pages/SessionsPage";
+import SetupPage from "@/pages/SetupPage";
+import SkillsPage from "@/pages/SkillsPage";
+import type { PluginManifest } from "@/plugins";
+import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
+import { useTheme } from "@/themes";
+import { SelectionSwitcher, Typography } from "@nous-research/ui";
 import {
   Activity,
   BarChart3,
@@ -42,30 +57,22 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { SelectionSwitcher, Typography } from "@nous-research/ui";
-import { cn } from "@/lib/utils";
-import { Backdrop } from "@/components/Backdrop";
-import { SidebarFooter } from "@/components/SidebarFooter";
-import { SidebarStatusStrip } from "@/components/SidebarStatusStrip";
-import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
-import { useSystemActions } from "@/contexts/useSystemActions";
-import type { SystemAction } from "@/contexts/system-actions-context";
-import ConfigPage from "@/pages/ConfigPage";
-import DocsPage from "@/pages/DocsPage";
-import EnvPage from "@/pages/EnvPage";
-import SessionsPage from "@/pages/SessionsPage";
-import LogsPage from "@/pages/LogsPage";
-import AnalyticsPage from "@/pages/AnalyticsPage";
-import CronPage from "@/pages/CronPage";
-import SkillsPage from "@/pages/SkillsPage";
-import ChatPage from "@/pages/ChatPage";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
-import { useI18n } from "@/i18n";
-import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
-import type { PluginManifest } from "@/plugins";
-import { useTheme } from "@/themes";
-import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
+import {
+  NavLink,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 
 function RootRedirect() {
   return <Navigate to="/sessions" replace />;
@@ -144,7 +151,10 @@ function resolveIcon(name: string): ComponentType<{ className?: string }> {
   return ICON_MAP[name] ?? Puzzle;
 }
 
-function buildNavItems(builtIn: NavItem[], manifests: PluginManifest[]): NavItem[] {
+function buildNavItems(
+  builtIn: NavItem[],
+  manifests: PluginManifest[],
+): NavItem[] {
   const items = [...builtIn];
 
   for (const manifest of manifests) {
@@ -240,21 +250,25 @@ function buildRoutes(
 export default function App() {
   const { t } = useI18n();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { manifests } = usePlugins();
   const { theme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [setupState, setSetupState] = useState<SetupStateResponse | null>(null);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
+  const guiMode = isDashboardGuiEnabled();
   const embeddedChat = isDashboardEmbeddedChatEnabled();
 
   const builtinRoutes = useMemo(
     () => ({
       ...BUILTIN_ROUTES_CORE,
+      ...(guiMode ? { "/setup": SetupPage } : {}),
       ...(embeddedChat ? { "/chat": ChatPage } : {}),
     }),
-    [embeddedChat],
+    [embeddedChat, guiMode],
   );
 
   const builtinNav = useMemo(
@@ -283,6 +297,48 @@ export default function App() {
   );
 
   const layoutVariant = theme.layoutVariant ?? "standard";
+
+  useEffect(() => {
+    if (!guiMode) return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const state = await api.getSetupState();
+        if (!cancelled) {
+          setSetupState(state);
+        }
+      } catch {
+        if (!cancelled) {
+          setSetupState(null);
+        }
+      }
+    };
+
+    const onRefresh = () => {
+      void refresh();
+    };
+
+    void refresh();
+    window.addEventListener("hermes:setup-refresh", onRefresh);
+    const id = window.setInterval(refresh, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      window.removeEventListener("hermes:setup-refresh", onRefresh);
+    };
+  }, [guiMode]);
+
+  useEffect(() => {
+    if (!guiMode || !setupState) return;
+    if (setupState.needs_setup && normalizedPath !== "/setup") {
+      navigate("/setup", { replace: true });
+      return;
+    }
+    if (!setupState.needs_setup && normalizedPath === "/setup") {
+      navigate("/sessions", { replace: true });
+    }
+  }, [guiMode, navigate, normalizedPath, setupState]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -507,7 +563,8 @@ export default function App() {
               <div
                 className={cn(
                   "w-full min-w-0",
-                  (isDocsRoute || isChatRoute) && "min-h-0 flex flex-1 flex-col",
+                  (isDocsRoute || isChatRoute) &&
+                    "min-h-0 flex flex-1 flex-col",
                 )}
               >
                 <Routes>
@@ -527,6 +584,8 @@ export default function App() {
       </div>
 
       <PluginSlot name="overlay" />
+      <DesktopBridge />
+      <RuntimeOverlay />
     </div>
   );
 }

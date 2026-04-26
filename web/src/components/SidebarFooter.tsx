@@ -1,7 +1,7 @@
-import { Typography } from "@nous-research/ui";
 import { useSidebarStatus } from "@/hooks/useSidebarStatus";
-import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+import { Typography } from "@nous-research/ui";
 
 export function SidebarFooter() {
   const status = useSidebarStatus();
@@ -19,7 +19,9 @@ export function SidebarFooter() {
         mondwest
         className="font-mono-ui text-[0.7rem] tabular-nums tracking-[0.1em] text-muted-foreground/70"
       >
-        {status?.version != null ? `v${status.version}` : "—"}
+        {status?.version != null
+          ? `v${status.version}${status.gui ? " · GUI" : ""}`
+          : "—"}
       </Typography>
 
       <a

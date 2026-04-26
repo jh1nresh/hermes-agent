@@ -1,0 +1,13 @@
+{
+  "name": "@hermes/gui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev-shell.mjs",
+    "dev:tauri": "node scripts/tauri.mjs dev",
+    "build": "node scripts/tauri.mjs build",
+    "dashboard": "node scripts/start-dashboard.mjs",
+    "tauri": "node scripts/tauri.mjs"
+  }
+}

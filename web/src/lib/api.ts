@@ -18,7 +18,10 @@ function setSessionHeader(headers: Headers, token: string): void {
   }
 }
 
-export async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+export async function fetchJSON<T>(
+  url: string,
+  init?: RequestInit,
+): Promise<T> {
   // Inject the session token into all /api/ requests.
   const headers = new Headers(init?.headers);
   const token = window.__HERMES_SESSION_TOKEN__;
@@ -40,32 +43,50 @@ async function getSessionToken(): Promise<string> {
     _sessionToken = injected;
     return _sessionToken;
   }
-  throw new Error("Session token not available — page must be served by the Hermes dashboard server");
+  throw new Error(
+    "Session token not available — page must be served by the Hermes dashboard server",
+  );
 }
 
 export const api = {
+  getHealth: () => fetchJSON<HealthResponse>("/api/health"),
+  getRuntime: () => fetchJSON<RuntimeResponse>("/api/runtime"),
+  getSetupState: () => fetchJSON<SetupStateResponse>("/api/setup/state"),
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
   getSessions: (limit = 20, offset = 0) =>
-    fetchJSON<PaginatedSessions>(`/api/sessions?limit=${limit}&offset=${offset}`),
+    fetchJSON<PaginatedSessions>(
+      `/api/sessions?limit=${limit}&offset=${offset}`,
+    ),
   getSessionMessages: (id: string) =>
-    fetchJSON<SessionMessagesResponse>(`/api/sessions/${encodeURIComponent(id)}/messages`),
+    fetchJSON<SessionMessagesResponse>(
+      `/api/sessions/${encodeURIComponent(id)}/messages`,
+    ),
   deleteSession: (id: string) =>
     fetchJSON<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
-  getLogs: (params: { file?: string; lines?: number; level?: string; component?: string }) => {
+  getLogs: (params: {
+    file?: string;
+    lines?: number;
+    level?: string;
+    component?: string;
+  }) => {
     const qs = new URLSearchParams();
     if (params.file) qs.set("file", params.file);
     if (params.lines) qs.set("lines", String(params.lines));
     if (params.level && params.level !== "ALL") qs.set("level", params.level);
-    if (params.component && params.component !== "all") qs.set("component", params.component);
+    if (params.component && params.component !== "all")
+      qs.set("component", params.component);
     return fetchJSON<LogsResponse>(`/api/logs?${qs.toString()}`);
   },
   getAnalytics: (days: number) =>
     fetchJSON<AnalyticsResponse>(`/api/analytics/usage?days=${days}`),
   getConfig: () => fetchJSON<Record<string, unknown>>("/api/config"),
   getDefaults: () => fetchJSON<Record<string, unknown>>("/api/config/defaults"),
-  getSchema: () => fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>("/api/config/schema"),
+  getSchema: () =>
+    fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>(
+      "/api/config/schema",
+    ),
   getModelInfo: () => fetchJSON<ModelInfoResponse>("/api/model/info"),
   saveConfig: (config: Record<string, unknown>) =>
     fetchJSON<{ ok: boolean }>("/api/config", {
@@ -107,18 +128,29 @@ export const api = {
 
   // Cron jobs
   getCronJobs: () => fetchJSON<CronJob[]>("/api/cron/jobs"),
-  createCronJob: (job: { prompt: string; schedule: string; name?: string; deliver?: string }) =>
+  createCronJob: (job: {
+    prompt: string;
+    schedule: string;
+    name?: string;
+    deliver?: string;
+  }) =>
     fetchJSON<CronJob>("/api/cron/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(job),
     }),
   pauseCronJob: (id: string) =>
-    fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}/pause`, { method: "POST" }),
+    fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}/pause`, {
+      method: "POST",
+    }),
   resumeCronJob: (id: string) =>
-    fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}/resume`, { method: "POST" }),
+    fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}/resume`, {
+      method: "POST",
+    }),
   triggerCronJob: (id: string) =>
-    fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}/trigger`, { method: "POST" }),
+    fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}/trigger`, {
+      method: "POST",
+    }),
   deleteCronJob: (id: string) =>
     fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${id}`, { method: "DELETE" }),
 
@@ -134,7 +166,9 @@ export const api = {
 
   // Session search (FTS5)
   searchSessions: (q: string) =>
-    fetchJSON<SessionSearchResponse>(`/api/sessions/search?q=${encodeURIComponent(q)}`),
+    fetchJSON<SessionSearchResponse>(
+      `/api/sessions/search?q=${encodeURIComponent(q)}`,
+    ),
 
   // OAuth provider management
   getOAuthProviders: () =>
@@ -163,7 +197,11 @@ export const api = {
       },
     );
   },
-  submitOAuthCode: async (providerId: string, sessionId: string, code: string) => {
+  submitOAuthCode: async (
+    providerId: string,
+    sessionId: string,
+    code: string,
+  ) => {
     const token = await getSessionToken();
     return fetchJSON<OAuthSubmitResponse>(
       `/api/providers/oauth/${encodeURIComponent(providerId)}/submit`,
@@ -209,8 +247,7 @@ export const api = {
     fetchJSON<{ ok: boolean; count: number }>("/api/dashboard/plugins/rescan"),
 
   // Dashboard themes
-  getThemes: () =>
-    fetchJSON<DashboardThemesResponse>("/api/dashboard/themes"),
+  getThemes: () => fetchJSON<DashboardThemesResponse>("/api/dashboard/themes"),
   setTheme: (name: string) =>
     fetchJSON<{ ok: boolean; theme: string }>("/api/dashboard/theme", {
       method: "PUT",
@@ -244,6 +281,7 @@ export interface StatusResponse {
   active_sessions: number;
   config_path: string;
   config_version: number;
+  embedded_chat: boolean;
   env_path: string;
   gateway_exit_reason: string | null;
   gateway_health_url: string | null;
@@ -252,10 +290,66 @@ export interface StatusResponse {
   gateway_running: boolean;
   gateway_state: string | null;
   gateway_updated_at: string | null;
+  gui: boolean;
   hermes_home: string;
   latest_config_version: number;
   release_date: string;
   version: string;
+}
+
+export interface HealthResponse {
+  embedded_chat: boolean;
+  mode: "browser" | "gui";
+  profile: string;
+  status: "ok";
+  version: string;
+}
+
+export interface RuntimeResponse {
+  dashboard: {
+    embedded_chat: boolean;
+  };
+  gateway: {
+    pid: number | null;
+    platforms: Record<string, PlatformStatus>;
+    running: boolean;
+    state: string | null;
+  };
+  gui: boolean;
+  hermes_home: string;
+  profile: string;
+  status: string;
+}
+
+export interface SetupStateResponse {
+  checklist: {
+    model: boolean;
+    provider: boolean;
+    terminal: boolean;
+  };
+  gui: boolean;
+  hermes_home: string;
+  is_fresh_mode: boolean;
+  model: {
+    configured: boolean;
+    value: string;
+  };
+  needs_setup: boolean;
+  profile: string;
+  provider: {
+    active_provider: string | null;
+    configured_env_keys: string[];
+    recommended_keys: Array<{
+      description: string;
+      is_set: boolean;
+      name: string;
+      url: string | null;
+    }>;
+  };
+  terminal: {
+    backend: string;
+    configured: boolean;
+  };
 }
 
 export interface SessionInfo {

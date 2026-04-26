@@ -18,6 +18,9 @@ export function resolvePageTitle(
   pluginTabs: { path: string; label: string }[],
 ): string {
   const normalized = pathname.replace(/\/$/, "") || "/";
+  if (normalized === "/setup") {
+    return "Setup";
+  }
   if (normalized === "/") {
     return t.app.nav.sessions;
   }
