@@ -514,6 +514,53 @@ const ClarifyPromptStatic = ({
   </Box>
 )
 
+const ModelPickerStatic = ({
+  currentModel,
+  items,
+  selected = 0,
+  stage,
+  theme
+}: {
+  currentModel: string
+  items: string[]
+  selected?: number
+  stage: 'model' | 'provider'
+  theme: Theme
+}) => (
+  <Box borderStyle="double" borderColor={theme.color.amber} flexDirection="column" paddingX={1} width={50}>
+    <Text bold color={theme.color.amber} wrap="truncate-end">
+      {stage === 'provider' ? 'Select Provider' : 'Select Model'}
+    </Text>
+
+    <Text color={theme.color.dim} wrap="truncate-end">
+      {stage === 'provider' ? `Current model: ${currentModel}` : currentModel}
+    </Text>
+
+    <Text color={theme.color.label} wrap="truncate-end">
+      {' '}
+    </Text>
+
+    <Text color={theme.color.dim}>{' '}</Text>
+
+    {items.map((item, i) => (
+      <Text
+        bold={i === selected}
+        color={i === selected ? theme.color.amber : theme.color.dim}
+        inverse={i === selected}
+        key={item}
+        wrap="truncate-end"
+      >
+        {i === selected ? '▸ ' : '  '}
+        {i + 1}. {item}
+      </Text>
+    ))}
+
+    <Text color={theme.color.dim}>{' '}</Text>
+    <Text color={theme.color.dim}>persist: session · g toggle</Text>
+    <Text color={theme.color.dim}>↑/↓ select · Enter choose · 1-9,0 quick · Esc/q cancel</Text>
+  </Box>
+)
+
 const interactivePrompts = async () => {
   // User asks for something that triggers approval
   const userAsk = await snap(
@@ -611,6 +658,112 @@ const interactivePrompts = async () => {
   }
 }
 
+const modelPicker = async () => {
+  const userAsk = await snap(
+    <Msg role="user" text="Switch to Claude." />
+  )
+
+  const assistantReply = await snap(
+    <Msg role="assistant" text="Opening the model picker — pick a provider first, then a model." />
+  )
+
+  // Provider selection stage
+  const providers = await snap(
+    <ModelPickerStatic
+      currentModel="gpt-5-codex"
+      items={[
+        'OpenAI · 8 models',
+        'Anthropic · 6 models',
+        'Google · 5 models',
+        'OpenRouter · 42 models',
+        'xAI · 3 models'
+      ]}
+      selected={1}
+      stage="provider"
+      theme={t}
+    />,
+    180
+  )
+
+  // Model selection stage
+  const models = await snap(
+    <ModelPickerStatic
+      currentModel="Anthropic"
+      items={[
+        'claude-opus-4',
+        'claude-sonnet-4',
+        'claude-sonnet-3.7',
+        'claude-haiku-3.5',
+        'claude-sonnet-3.5'
+      ]}
+      selected={1}
+      stage="model"
+      theme={t}
+    />,
+    180
+  )
+
+  const result = await snap(
+    <Panel
+      sections={[
+        {
+          rows: [
+            ['from', 'gpt-5-codex'],
+            ['to', 'claude-sonnet-4'],
+            ['scope', 'this session']
+          ]
+        }
+      ]}
+      t={t}
+      title="model switched"
+    />,
+    180
+  )
+
+  return {
+    composer: '',
+    timeline: [
+      { at: 200, duration: 500, text: '/model', type: 'compose' },
+      { ansi: userAsk, at: 900, id: 'ask', type: 'frame' },
+      { ansi: assistantReply, at: 1800, id: 'reply', type: 'frame' },
+      { ansi: providers, at: 3000, id: 'providers', type: 'frame' },
+      { at: 3300, duration: 1800, target: 'providers', type: 'spotlight' },
+      {
+        at: 3500,
+        duration: 2000,
+        position: 'right',
+        target: 'providers',
+        text: 'Provider stage: pick from authenticated backends. Shows model count per provider.',
+        type: 'caption'
+      },
+      { at: 5600, duration: 300, text: '2', type: 'compose' },
+      { ansi: models, at: 6200, id: 'models', type: 'frame' },
+      { at: 6500, duration: 1800, target: 'models', type: 'spotlight' },
+      {
+        at: 6700,
+        duration: 2000,
+        position: 'right',
+        target: 'models',
+        text: 'Model stage: scrollable list with ▸ selection. Number keys for quick pick.',
+        type: 'caption'
+      },
+      { at: 9000, duration: 300, text: '2', type: 'compose' },
+      { ansi: result, at: 9600, id: 'result', type: 'frame' },
+      { at: 9900, duration: 1300, target: 'result', type: 'highlight' },
+      {
+        at: 10100,
+        duration: 1700,
+        position: 'right',
+        target: 'result',
+        text: 'Model swap mid-session. Transcript and cache stay intact.',
+        type: 'caption'
+      }
+    ],
+    title: 'Hermes TUI · Model Picker',
+    viewport: { cols: COLS, rows: ROWS }
+  }
+}
+
 const main = async () => {
   console.log('recording workflows…')
 
@@ -623,6 +776,7 @@ const main = async () => {
     'slash-commands.json',
     'voice-mode.json',
     'interactive-prompts.json',
+    'model-picker.json',
     'ink-frames.json'
   ]) {
     try {
@@ -637,6 +791,7 @@ const main = async () => {
   writeWorkflow('slash-commands', await slashCommands())
   writeWorkflow('voice-mode', await voiceMode())
   writeWorkflow('interactive-prompts', await interactivePrompts())
+  writeWorkflow('model-picker', await modelPicker())
 
   console.log('done')
 }

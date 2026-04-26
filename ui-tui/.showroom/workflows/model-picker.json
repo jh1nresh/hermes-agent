@@ -1,0 +1,100 @@
+{
+  "composer": "",
+  "timeline": [
+    {
+      "at": 200,
+      "duration": 500,
+      "text": "/model",
+      "type": "compose"
+    },
+    {
+      "ansi": "\u001b[?25l\u001b[?2026h\r\n❯\u001b[2CSwitch\u001b[1Cto\u001b[1CClaude.\r\n\r\n\u001b[?2026l\u001b[?2026h\u001b[?25h\u001b[?2026l\u001b[?25h",
+      "at": 900,
+      "id": "ask",
+      "type": "frame"
+    },
+    {
+      "ansi": "\u001b[?25l\u001b[?2026h┊\u001b[2COpening\u001b[1Cthe\u001b[1Cmodel\u001b[1Cpicker\u001b[1C—\u001b[1Cpick\u001b[1Ca\u001b[1Cprovider\u001b[1Cfirst,\u001b[1Cthen\u001b[1Ca\u001b[1Cmodel.\r\n\u001b[?2026l\u001b[?2026h\u001b[?25h\u001b[?2026l\u001b[?25h",
+      "at": 1800,
+      "id": "reply",
+      "type": "frame"
+    },
+    {
+      "ansi": "\u001b[?25l\u001b[?2026h╔════════════════════════════════════════════════╗\r\n║\u001b[1CSelect\u001b[1CProvider\u001b[32C║\r\n║\u001b[1CCurrent\u001b[1Cmodel:\u001b[1Cgpt-5-codex\u001b[21C║\r\n║\u001b[48C║\r\n║\u001b[48C║\r\n║\u001b[3C1.\u001b[1COpenAI\u001b[1C·\u001b[1C8\u001b[1Cmodels\u001b[25C║\r\n║\u001b[1C▸\u001b[1C2.\u001b[1CAnthropic\u001b[1C·\u001b[1C6\u001b[1Cmodels\u001b[22C║\r\n║\u001b[3C3.\u001b[1CGoogle\u001b[1C·\u001b[1C5\u001b[1Cmodels\u001b[25C║\r\n║\u001b[3C4.\u001b[1COpenRouter\u001b[1C·\u001b[1C42\u001b[1Cmodels\u001b[20C║\r\n║\u001b[3C5.\u001b[1CxAI\u001b[1C·\u001b[1C3\u001b[1Cmodels\u001b[28C║\r\n║\u001b[48C║\r\n║\u001b[1Cpersist:\u001b[1Csession\u001b[1C·\u001b[1Cg\u001b[1Ctoggle\u001b[20C║\r\n║\u001b[1C↑/↓\u001b[1Cselect\u001b[1C·\u001b[1CEnter\u001b[1Cchoose\u001b[1C·\u001b[1C1-9,0\u001b[1Cquick\u001b[1C·\u001b[6C║\r\n║\u001b[1CEsc/q\u001b[1Ccancel\u001b[35C║\r\n╚════════════════════════════════════════════════╝\r\n\u001b[?2026l\u001b[?2026h\u001b[?25h\u001b[?2026l\u001b[?25h",
+      "at": 3000,
+      "id": "providers",
+      "type": "frame"
+    },
+    {
+      "at": 3300,
+      "duration": 1800,
+      "target": "providers",
+      "type": "spotlight"
+    },
+    {
+      "at": 3500,
+      "duration": 2000,
+      "position": "right",
+      "target": "providers",
+      "text": "Provider stage: pick from authenticated backends. Shows model count per provider.",
+      "type": "caption"
+    },
+    {
+      "at": 5600,
+      "duration": 300,
+      "text": "2",
+      "type": "compose"
+    },
+    {
+      "ansi": "\u001b[?25l\u001b[?2026h╔════════════════════════════════════════════════╗\r\n║\u001b[1CSelect\u001b[1CModel\u001b[35C║\r\n║\u001b[1CAnthropic\u001b[38C║\r\n║\u001b[48C║\r\n║\u001b[48C║\r\n║\u001b[3C1.\u001b[1Cclaude-opus-4\u001b[29C║\r\n║\u001b[1C▸\u001b[1C2.\u001b[1Cclaude-sonnet-4\u001b[27C║\r\n║\u001b[3C3.\u001b[1Cclaude-sonnet-3.7\u001b[25C║\r\n║\u001b[3C4.\u001b[1Cclaude-haiku-3.5\u001b[26C║\r\n║\u001b[3C5.\u001b[1Cclaude-sonnet-3.5\u001b[25C║\r\n║\u001b[48C║\r\n║\u001b[1Cpersist:\u001b[1Csession\u001b[1C·\u001b[1Cg\u001b[1Ctoggle\u001b[20C║\r\n║\u001b[1C↑/↓\u001b[1Cselect\u001b[1C·\u001b[1CEnter\u001b[1Cchoose\u001b[1C·\u001b[1C1-9,0\u001b[1Cquick\u001b[1C·\u001b[6C║\r\n║\u001b[1CEsc/q\u001b[1Ccancel\u001b[35C║\r\n╚════════════════════════════════════════════════╝\r\n\u001b[?2026l\u001b[?2026h\u001b[?25h\u001b[?2026l\u001b[?25h",
+      "at": 6200,
+      "id": "models",
+      "type": "frame"
+    },
+    {
+      "at": 6500,
+      "duration": 1800,
+      "target": "models",
+      "type": "spotlight"
+    },
+    {
+      "at": 6700,
+      "duration": 2000,
+      "position": "right",
+      "target": "models",
+      "text": "Model stage: scrollable list with ▸ selection. Number keys for quick pick.",
+      "type": "caption"
+    },
+    {
+      "at": 9000,
+      "duration": 300,
+      "text": "2",
+      "type": "compose"
+    },
+    {
+      "ansi": "\u001b[?25l\u001b[?2026h╭──────────────────────────────────────────────────────────────────────────────╮\r\n│\u001b[78C│\r\n│\u001b[32Cmodel\u001b[1Cswitched\u001b[32C│\r\n│\u001b[78C│\r\n│\u001b[2Cfrom\u001b[16Cgpt-5-codex\u001b[45C│\r\n│\u001b[2Cto\u001b[18Cclaude-sonnet-4\u001b[41C│\r\n│\u001b[2Cscope\u001b[15Cthis\u001b[1Csession\u001b[44C│\r\n│\u001b[78C│\r\n╰──────────────────────────────────────────────────────────────────────────────╯\r\n\u001b[?2026l\u001b[?2026h\u001b[?25h\u001b[?2026l\u001b[?25h",
+      "at": 9600,
+      "id": "result",
+      "type": "frame"
+    },
+    {
+      "at": 9900,
+      "duration": 1300,
+      "target": "result",
+      "type": "highlight"
+    },
+    {
+      "at": 10100,
+      "duration": 1700,
+      "position": "right",
+      "target": "result",
+      "text": "Model swap mid-session. Transcript and cache stay intact.",
+      "type": "caption"
+    }
+  ],
+  "title": "Hermes TUI · Model Picker",
+  "viewport": {
+    "cols": 80,
+    "rows": 16
+  }
+}
