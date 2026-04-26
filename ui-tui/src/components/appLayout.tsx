@@ -1,5 +1,7 @@
 import { AlternateScreen, Box, NoSelect, ScrollBox, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
+import { $uiState } from '../app/uiStore.js'
+import { OptimizedTranscriptPane } from './OptimizedTranscriptPane.js'
 import { memo } from 'react'
 
 import { useGateway } from '../app/gatewayContext.js'
@@ -98,21 +100,23 @@ const StreamingAssistant = memo(function StreamingAssistant({
 })
 
 const TranscriptPane = memo(function TranscriptPane({
-  actions,
-  composer,
-  progress,
-  transcript
+const TranscriptPane = memo(function TranscriptPane({
+ actions,
+ composer,
+ progress,
+ transcript
 }: Pick<AppLayoutProps, 'actions' | 'composer' | 'progress' | 'transcript'>) {
-  const ui = useStore($uiState)
-
-  return (
-    <>
-      <ScrollBox flexDirection="column" flexGrow={1} flexShrink={1} ref={transcript.scrollRef} stickyScroll>
-        <Box flexDirection="column" paddingX={1}>
-          {transcript.virtualHistory.topSpacer > 0 ? <Box height={transcript.virtualHistory.topSpacer} /> : null}
-
-          {transcript.virtualRows.slice(transcript.virtualHistory.start, transcript.virtualHistory.end).map(row => (
-            <Box flexDirection="column" key={row.key} ref={transcript.virtualHistory.measureRef(row.key)}>
+ const ui = useStore($uiState)
+  const usePerfMode = true // Always use performance mode for better scrolling
+ return (
+   <>
+      {usePerfMode ? (
+        <OptimizedTranscriptPane
+          messages={transcript.virtualRows}
+          height={ui.rows - 6} // Reserve space for input/status
+          width={composer.cols}
+          renderMessage={(row) => (
+            <Box flexDirection="column" key={row.key} paddingX={1}>
               {row.msg.kind === 'intro' ? (
                 <Box flexDirection="column" paddingTop={1}>
                   <Banner t={ui.theme} />
@@ -132,18 +136,35 @@ const TranscriptPane = memo(function TranscriptPane({
                 />
               )}
             </Box>
-          ))}
+          )}
+        />
+      ) : (
+        <ScrollBox flexDirection="column" flexGrow={1} flexShrink={1} ref={transcript.scrollRef} stickyScroll>
+          <Box flexDirection="column" paddingX={1}>
+            {transcript.virtualHistory.topSpacer > 0 ? <Box height={transcript.virtualHistory.topSpacer} /> : null}
 
-          {transcript.virtualHistory.bottomSpacer > 0 ? <Box height={transcript.virtualHistory.bottomSpacer} /> : null}
+            {transcript.virtualRows.slice(transcript.virtualHistory.start, transcript.virtualHistory.end).map(row => (
+              <Box flexDirection="column" key={row.key} ref={transcript.virtualHistory.measureRef(row.key)}>
+                {row.msg.kind === 'intro' ? (
+                  <Box flexDirection="column" paddingTop={1}>
+                    <Banner t={ui.theme} />
 
-          <StreamingAssistant
-            busy={ui.busy}
-            cols={composer.cols}
-            compact={ui.compact}
-            detailsMode={ui.detailsMode}
-            progress={progress}
-            sections={ui.sections}
-            t={ui.theme}
+                    {row.msg.info?.version && <SessionPanel info={row.msg.info} sid={ui.sid} t={ui.theme} />}
+                  </Box>
+                ) : row.msg.kind === 'panel' && row.msg.panelData ? (
+                  <Panel sections={row.msg.panelData.sections} t={ui.theme} title={row.msg.panelData.title} />
+                ) : (
+                  <MessageLine
+                    cols={composer.cols}
+                    compact={ui.compact}
+                    detailsMode={ui.detailsMode}
+                    msg={row.msg}
+                    sections={ui.sections}
+                    t={ui.theme}
+                  />
+                )}
+              </Box>
+            ))}
           />
         </Box>
       </ScrollBox>
