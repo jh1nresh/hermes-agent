@@ -386,9 +386,14 @@ class BaseEnvironment(ABC):
 
         parts = []
 
-        # Source snapshot (env vars from previous commands)
+        # Source snapshot (env vars from previous commands).
+        # Redirect stdout to /dev/null because on macOS, sourcing a file
+        # that contains `declare -x` statements prints each declaration to
+        # stdout, leaking 60+ lines of env vars into the LLM context
+        # (issue #15459). On Linux this is silent, so the redirect is
+        # harmless there.
         if self._snapshot_ready:
-            parts.append(f"source {self._snapshot_path} 2>/dev/null || true")
+            parts.append(f"source {self._snapshot_path} > /dev/null 2>&1 || true")
 
         # Preserve bare ``~`` expansion, but rewrite ``~/...`` through
         # ``$HOME`` so suffixes with spaces remain a single shell word.
