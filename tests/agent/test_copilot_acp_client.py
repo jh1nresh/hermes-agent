@@ -181,7 +181,7 @@ def test_run_prompt_prefers_profile_home_when_available(monkeypatch, tmp_path):
     captured = {}
     client = _make_home_client(tmp_path)
 
-    with _patch("agent.copilot_acp_client.subprocess.Popen", side_effect=_fake_popen_capture(captured)):
+    with _patch("acp_adapter.copilot_client.subprocess.Popen", side_effect=_fake_popen_capture(captured)):
         with pytest.raises(RuntimeError, match="Could not start Copilot ACP command"):
             client._run_prompt("hello", timeout_seconds=1)
 
@@ -195,7 +195,7 @@ def test_run_prompt_passes_home_when_parent_env_is_clean(monkeypatch, tmp_path):
     captured = {}
     client = _make_home_client(tmp_path)
 
-    with _patch("agent.copilot_acp_client.subprocess.Popen", side_effect=_fake_popen_capture(captured)):
+    with _patch("acp_adapter.copilot_client.subprocess.Popen", side_effect=_fake_popen_capture(captured)):
         with pytest.raises(RuntimeError, match="Could not start Copilot ACP command"):
             client._run_prompt("hello", timeout_seconds=1)
 
