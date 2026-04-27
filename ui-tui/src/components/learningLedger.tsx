@@ -28,14 +28,6 @@ const typeIcon: Record<string, string> = {
   user: '●'
 }
 
-const typeVerb: Record<string, string> = {
-  integration: 'connected',
-  memory: 'remembered',
-  recall: 'recalled',
-  'skill-use': 'applied skill',
-  user: 'remembered'
-}
-
 const fmtTime = (ts?: null | number) => {
   if (!ts) {
     return ''
@@ -181,7 +173,7 @@ export function LearningLedger({ borderColor, gw, maxHeight, onClose, t, width: 
           ? [
               {
                 content: <LedgerDetails item={selected} t={t} />,
-                grow: 3,
+                grow: 2,
                 id: 'learning-details',
                 title: 'Details'
               }
@@ -229,14 +221,13 @@ function LedgerRow({ active, index, item, t }: LedgerRowProps) {
   const when = fmtTime(item.last_used_at ?? item.learned_at)
   const count = item.count ? ` ×${item.count}` : ''
   const icon = typeIcon[item.type] ?? '•'
-  const verb = typeVerb[item.type] ?? item.type
-  const title = item.type === 'memory' || item.type === 'user' ? item.summary : item.name
+  const title = compactTitle(item)
 
   return (
     <Box flexShrink={0} width="100%">
       <Text bold={active} color={active ? t.color.accent : t.color.muted} inverse={active} wrap="truncate-end">
         {active ? '▸ ' : '  '}
-        {index}. {icon} {verb}: {title}
+        {index}. {icon} {title}
         <Text color={active ? t.color.accent : t.color.muted}>
           {' '}
           {count}
@@ -245,6 +236,14 @@ function LedgerRow({ active, index, item, t }: LedgerRowProps) {
       </Text>
     </Box>
   )
+}
+
+function compactTitle(item: LearningLedgerItem) {
+  const raw = item.type === 'memory' || item.type === 'user' ? item.summary : item.name
+  return raw
+    .replace(/^User\s+/i, '')
+    .replace(/^Durable memory updates$/i, 'memory updated')
+    .replace(/^session_search$/i, 'past sessions')
 }
 
 function LedgerDetails({ item, t }: LedgerDetailsProps) {
