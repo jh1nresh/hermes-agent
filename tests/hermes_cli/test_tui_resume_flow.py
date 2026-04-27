@@ -156,6 +156,7 @@ def test_launch_tui_exports_model_and_provider(monkeypatch, main_mod):
     assert active_path.suffix == ".json"
     assert active_path_during_call == active_path
     assert not active_path.exists()
+    assert env["NODE_ENV"] == "production"
 
 
 def test_print_tui_exit_summary_includes_resume_and_token_totals(monkeypatch, capsys):

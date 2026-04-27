@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs'
 
 import type { ScrollBoxHandle } from '@hermes/ink'
+import { evictInkCaches } from '@hermes/ink'
 import { type RefObject, useCallback } from 'react'
 
 import { buildSetupRequiredSections, SETUP_REQUIRED_TITLE } from '../content/setup.js'
@@ -98,6 +99,9 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     setLastUserMsg('')
     setStickyPrompt('')
     composerActions.setPasteSnips([])
+    // Half-prune: new session has new keys, but keep a warm pool in case
+    // the user resumes back to the prior session.
+    evictInkCaches('half')
   }, [composerActions, setHistoryItems, setLastUserMsg, setStickyPrompt, setVoiceProcessing, setVoiceRecording])
 
   const resetVisibleHistory = useCallback(

@@ -1067,6 +1067,7 @@ def _launch_tui(
     )
     env.setdefault("HERMES_PYTHON", sys.executable)
     env.setdefault("HERMES_CWD", os.getcwd())
+    env.setdefault("NODE_ENV", "development" if tui_dev else "production")
     if model:
         env["HERMES_MODEL"] = model
         env["HERMES_INFERENCE_MODEL"] = model
@@ -8712,10 +8713,16 @@ Examples:
 
     skills_install = skills_subparsers.add_parser("install", help="Install a skill")
     skills_install.add_argument(
-        "identifier", help="Skill identifier (e.g. openai/skills/skill-creator)"
+        "identifier",
+        help="Skill identifier (e.g. openai/skills/skill-creator) or a direct HTTP(S) URL to a SKILL.md file",
     )
     skills_install.add_argument(
         "--category", default="", help="Category folder to install into"
+    )
+    skills_install.add_argument(
+        "--name",
+        default="",
+        help="Override the skill name (useful when installing from a URL whose SKILL.md has no `name:` frontmatter)",
     )
     skills_install.add_argument(
         "--force", action="store_true", help="Install despite blocked scan verdict"
