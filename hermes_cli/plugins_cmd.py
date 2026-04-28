@@ -1,7 +1,13 @@
 """``hermes plugins`` CLI subcommand — install, update, remove, and list plugins.
 
-Plugins are installed from Git repositories into ``~/.hermes/plugins/``.
-Supports full URLs and ``owner/repo`` shorthand (resolves to GitHub).
+Plugins can be installed from:
+- Official optional plugins shipped with the repo: ``official/<category>/<name>``
+- Git repositories (full URL or ``owner/repo`` GitHub shorthand)
+
+Official plugins live in ``optional-plugins/`` inside the Hermes repo and are
+copied into ``~/.hermes/plugins/`` on install — no git clone needed, no network
+required. They are NOT auto-discovered from ``optional-plugins/``; only installed
+copies in ``~/.hermes/plugins/`` are loaded by Hermes.
 
 After install, if the plugin ships an ``after-install.md`` file it is
 rendered with Rich Markdown.  Otherwise a default confirmation is shown.
@@ -95,8 +101,78 @@ def _resolve_git_url(identifier: str) -> str:
 
     raise ValueError(
         f"Invalid plugin identifier: '{identifier}'. "
-        "Use a Git URL or owner/repo shorthand."
+        "Use 'official/<category>/<name>', a Git URL, or owner/repo shorthand."
     )
+
+
+def _optional_plugins_dir() -> Path:
+    """Return the optional-plugins/ directory shipped with the Hermes repo."""
+    return Path(__file__).resolve().parent.parent / "optional-plugins"
+
+
+def _resolve_official_plugin(identifier: str) -> Optional[Path]:
+    """If *identifier* is 'official/<category>/<name>', return its source path.
+
+    Returns ``None`` when the identifier is not in official format or the
+    plugin directory does not exist.
+    """
+    # Accept 'official/category/name' or just 'category/name' when the
+    # category/name path exists under optional-plugins/.
+    parts = identifier.strip("/").split("/")
+
+    # Strip leading 'official' prefix if present
+    if parts and parts[0] == "official":
+        parts = parts[1:]
+
+    if len(parts) < 1:
+        return None
+
+    base = _optional_plugins_dir()
+    # Try category/name  (2 parts) or bare name  (1 part)
+    for nparts in (2, 1):
+        if len(parts) < nparts:
+            continue
+        candidate = base.joinpath(*parts[-nparts:])
+        try:
+            resolved = candidate.resolve()
+            base_resolved = base.resolve()
+            resolved.relative_to(base_resolved)  # traversal guard
+        except (ValueError, OSError):
+            continue
+        if resolved.is_dir() and (
+            (resolved / "plugin.yaml").exists() or (resolved / "__init__.py").exists()
+        ):
+            return resolved
+
+    return None
+
+
+def _list_official_plugins() -> list[tuple[str, str]]:
+    """Return [(identifier, description), ...] for all official optional plugins."""
+    base = _optional_plugins_dir()
+    if not base.is_dir():
+        return []
+
+    results = []
+    for category_dir in sorted(base.iterdir()):
+        if not category_dir.is_dir() or category_dir.name.startswith("."):
+            continue
+        for plugin_dir in sorted(category_dir.iterdir()):
+            if not plugin_dir.is_dir() or plugin_dir.name.startswith("."):
+                continue
+            manifest_file = plugin_dir / "plugin.yaml"
+            desc = ""
+            if manifest_file.exists():
+                try:
+                    import yaml
+                    data = yaml.safe_load(manifest_file.read_text()) or {}
+                    desc = data.get("description", "")
+                except Exception:
+                    pass
+            identifier = f"official/{category_dir.name}/{plugin_dir.name}"
+            results.append((identifier, desc))
+
+    return results
 
 
 def _repo_name_from_url(url: str) -> str:
@@ -296,7 +372,61 @@ def cmd_install(
     from rich.console import Console
 
     console = Console()
+    plugins_dir = _plugins_dir()
 
+    # ── Official optional plugins (no network, copied from optional-plugins/) ──
+    official_src = _resolve_official_plugin(identifier)
+    if official_src is not None:
+        manifest = _read_manifest(official_src)
+        plugin_name = manifest.get("name") or official_src.name
+        target = _sanitize_plugin_name(plugin_name, plugins_dir)
+
+        if target.exists():
+            if not force:
+                console.print(
+                    f"[red]Error:[/red] Plugin '{plugin_name}' already exists at {target}.\n"
+                    f"Use [bold]--force[/bold] to reinstall, or "
+                    f"[bold]hermes plugins update {plugin_name}[/bold] to update."
+                )
+                sys.exit(1)
+            console.print(f"[dim]  Removing existing {plugin_name}...[/dim]")
+            shutil.rmtree(target)
+
+        console.print(f"[dim]Installing {plugin_name} from official optional plugins...[/dim]")
+        shutil.copytree(str(official_src), str(target))
+
+        _copy_example_files(target, console)
+        _prompt_plugin_env_vars(manifest, console)
+        _display_after_install(target, identifier)
+
+        installed_name = manifest.get("name") or target.name
+        should_enable = enable
+        if should_enable is None:
+            if sys.stdin.isatty() and sys.stdout.isatty():
+                try:
+                    answer = input("  Enable now? [y/N] ").strip().lower()
+                    should_enable = answer in ("y", "yes")
+                except (EOFError, KeyboardInterrupt):
+                    should_enable = False
+            else:
+                should_enable = False
+
+        if should_enable:
+            enabled = _get_enabled_set()
+            disabled = _get_disabled_set()
+            enabled.add(installed_name)
+            disabled.discard(installed_name)
+            _save_enabled_set(enabled)
+            _save_disabled_set(disabled)
+            console.print(f"  [green]✓[/green] Plugin [bold]{installed_name}[/bold] enabled.")
+        else:
+            console.print(
+                f"  [dim]Plugin installed but not enabled. "
+                f"Run [bold]hermes plugins enable {installed_name}[/bold] to activate.[/dim]"
+            )
+        return
+
+    # ── Git URL / owner/repo install ──────────────────────────────────────────
     try:
         git_url = _resolve_git_url(identifier)
     except ValueError as e:
@@ -309,8 +439,6 @@ def cmd_install(
             "[yellow]Warning:[/yellow] Using insecure/local URL scheme. "
             "Consider using https:// or git@ for production installs."
         )
-
-    plugins_dir = _plugins_dir()
 
     # Clone into a temp directory first so we can read plugin.yaml for the name
     with tempfile.TemporaryDirectory() as tmp:
@@ -696,16 +824,21 @@ def _discover_all_plugins() -> list:
     return list(seen.values())
 
 
-def cmd_list() -> None:
-    """List all plugins (bundled + user) with enabled/disabled state."""
+def cmd_list(available: bool = False) -> None:
+    """List all plugins (bundled + user) with enabled/disabled state.
+
+    When *available* is True, also show official optional plugins that are
+    not yet installed.
+    """
     from rich.console import Console
     from rich.table import Table
 
     console = Console()
     entries = _discover_all_plugins()
-    if not entries:
+    if not entries and not available:
         console.print("[dim]No plugins installed.[/dim]")
-        console.print("[dim]Install with:[/dim] hermes plugins install owner/repo")
+        console.print("[dim]Install with:[/dim] hermes plugins install official/<category>/<name>")
+        console.print("[dim]Browse available:[/dim] hermes plugins list --available")
         return
 
     enabled = _get_enabled_set()
@@ -733,6 +866,31 @@ def cmd_list() -> None:
     console.print("[dim]Interactive toggle:[/dim] hermes plugins")
     console.print("[dim]Enable/disable:[/dim] hermes plugins enable/disable <name>")
     console.print("[dim]Plugins are opt-in by default — only 'enabled' plugins load.[/dim]")
+
+    if available:
+        official = _list_official_plugins()
+        if official:
+            installed_names = {name for name, *_ in entries}
+            def _is_installed(ident: str) -> bool:
+                dirname = ident.rsplit("/", 1)[-1]
+                # Check both the directory name (langfuse-tracing) and
+                # common underscore variant (langfuse_tracing) since the
+                # installed plugin uses the manifest name, not the dir name.
+                return (dirname in installed_names
+                        or dirname.replace("-", "_") in installed_names)
+            not_installed = [(ident, desc) for ident, desc in official
+                             if not _is_installed(ident)]
+            if not_installed:
+                console.print()
+                avail_table = Table(title="Official optional plugins (not installed)", show_lines=False)
+                avail_table.add_column("Identifier", style="bold")
+                avail_table.add_column("Description")
+                for ident, desc in not_installed:
+                    avail_table.add_row(ident, desc)
+                console.print(avail_table)
+                console.print("[dim]Install:[/dim] hermes plugins install official/<category>/<name>")
+            else:
+                console.print("[dim]All official optional plugins are already installed.[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -1270,7 +1428,7 @@ def plugins_command(args) -> None:
     elif action == "disable":
         cmd_disable(args.name)
     elif action in ("list", "ls"):
-        cmd_list()
+        cmd_list(available=getattr(args, "available", False))
     elif action is None:
         cmd_toggle()
     else:
