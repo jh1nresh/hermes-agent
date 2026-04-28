@@ -374,6 +374,37 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
     ),
 }
 
+# Auto-extend PROVIDER_REGISTRY with any api-key provider registered in
+# providers/ that is not already declared above.  New providers only need a
+# providers/*.py file — no edits to this file required.
+try:
+    from providers import list_providers as _list_providers_for_registry
+    for _pp in _list_providers_for_registry():
+        if _pp.name in PROVIDER_REGISTRY:
+            continue
+        if _pp.auth_type != "api_key" or not _pp.env_vars:
+            continue
+        # Skip providers that need custom token resolution (copilot, kimi, zai)
+        # — those are already fully declared above.
+        if _pp.name in {"copilot", "kimi-coding", "kimi-coding-cn", "zai"}:
+            continue
+        _api_key_vars = tuple(v for v in _pp.env_vars if not v.endswith("_BASE_URL") and not v.endswith("_URL"))
+        _base_url_var = next((v for v in _pp.env_vars if v.endswith("_BASE_URL") or v.endswith("_URL")), None)
+        PROVIDER_REGISTRY[_pp.name] = ProviderConfig(
+            id=_pp.name,
+            name=_pp.display_name or _pp.name,
+            auth_type="api_key",
+            inference_base_url=_pp.base_url,
+            api_key_env_vars=_api_key_vars or _pp.env_vars,
+            base_url_env_var=_base_url_var or "",
+        )
+        # Also register aliases so resolve_provider() resolves them
+        for _alias in _pp.aliases:
+            if _alias not in PROVIDER_REGISTRY:
+                PROVIDER_REGISTRY[_alias] = PROVIDER_REGISTRY[_pp.name]
+except Exception:
+    pass
+
 
 # =============================================================================
 # Anthropic Key Helper
@@ -1150,6 +1181,17 @@ def resolve_provider(
         "vllm": "custom", "llamacpp": "custom",
         "llama.cpp": "custom", "llama-cpp": "custom",
     }
+    # Extend with aliases declared in providers/*.py that aren't already mapped.
+    # This keeps providers/ as the single source for new aliases while the
+    # hardcoded dict above remains authoritative for existing ones.
+    try:
+        from providers import list_providers as _lp
+        for _pp in _lp():
+            for _alias in _pp.aliases:
+                if _alias not in _PROVIDER_ALIASES:
+                    _PROVIDER_ALIASES[_alias] = _pp.name
+    except Exception:
+        pass
     normalized = _PROVIDER_ALIASES.get(normalized, normalized)
 
     if normalized == "openrouter":
