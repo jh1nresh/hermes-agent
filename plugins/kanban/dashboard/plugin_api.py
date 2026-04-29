@@ -331,7 +331,22 @@ def create_task(payload: CreateTaskBody):
             skills=payload.skills,
         )
         task = kanban_db.get_task(conn, task_id)
-        return {"task": _task_dict(task) if task else None}
+        body: dict[str, Any] = {"task": _task_dict(task) if task else None}
+        # Surface a dispatcher-presence warning so the UI can show a
+        # banner when a `ready` task would otherwise sit idle because no
+        # gateway is running (or dispatch_in_gateway=false). Only emit
+        # for ready+assigned tasks; triage/todo are expected to wait,
+        # and unassigned tasks can't be dispatched regardless.
+        if task and task.status == "ready" and task.assignee:
+            try:
+                from hermes_cli.kanban import _check_dispatcher_presence
+                running, message = _check_dispatcher_presence()
+                if not running and message:
+                    body["warning"] = message
+            except Exception:
+                # Probe failure must never block the create itself.
+                pass
+        return body
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     finally:

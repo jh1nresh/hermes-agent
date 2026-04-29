@@ -2293,6 +2293,12 @@ class GatewayRunner:
         # so human-in-the-loop workflows hear back without polling.
         asyncio.create_task(self._kanban_notifier_watcher())
 
+        # Start background kanban dispatcher — spawns workers for ready
+        # tasks. Gated by `kanban.dispatch_in_gateway` (default True).
+        # When false, users run `hermes kanban daemon` externally or
+        # simply don't use kanban; this loop becomes a no-op.
+        asyncio.create_task(self._kanban_dispatcher_watcher())
+
         # Start background reconnection watcher for platforms that failed at startup
         if self._failed_platforms:
             logger.info(
@@ -2702,6 +2708,164 @@ class GatewayRunner:
             )
         finally:
             conn.close()
+
+    async def _kanban_dispatcher_watcher(self) -> None:
+        """Embedded kanban dispatcher — one tick every `dispatch_interval_seconds`.
+
+        Gated by `kanban.dispatch_in_gateway` in config.yaml (default True).
+        When true, the gateway hosts the single dispatcher for this profile:
+        no separate `hermes kanban daemon` process needed. When false, the
+        loop exits immediately and an external daemon is expected.
+
+        Each tick calls :func:`kanban_db.dispatch_once` inside
+        ``asyncio.to_thread`` so the SQLite WAL lock never blocks the
+        event loop. Failures in one tick don't stop subsequent ticks —
+        same pattern as `_kanban_notifier_watcher`.
+
+        Shutdown: the loop checks ``self._running`` between ticks; gateway
+        stop() flips it to False and cancels pending tasks, and the
+        in-flight ``to_thread`` returns on its own after the current
+        ``dispatch_once`` call finishes (typically <1ms on an idle board).
+        """
+        # Read config once at boot. If the user flips the flag later, they
+        # restart the gateway; same pattern as every other background
+        # watcher here. Honours HERMES_KANBAN_DISPATCH_IN_GATEWAY env var
+        # as an escape hatch (false-y value disables without editing YAML).
+        try:
+            from hermes_cli.config import load_config as _load_config
+        except Exception:
+            logger.warning("kanban dispatcher: config loader unavailable; disabled")
+            return
+        env_override = os.environ.get("HERMES_KANBAN_DISPATCH_IN_GATEWAY", "").strip().lower()
+        if env_override in ("0", "false", "no", "off"):
+            logger.info("kanban dispatcher: disabled via HERMES_KANBAN_DISPATCH_IN_GATEWAY env")
+            return
+
+        try:
+            cfg = _load_config()
+        except Exception as exc:
+            logger.warning("kanban dispatcher: cannot load config (%s); disabled", exc)
+            return
+        kanban_cfg = cfg.get("kanban", {}) if isinstance(cfg, dict) else {}
+        if not kanban_cfg.get("dispatch_in_gateway", True):
+            logger.info(
+                "kanban dispatcher: disabled via config kanban.dispatch_in_gateway=false"
+            )
+            return
+
+        try:
+            from hermes_cli import kanban_db as _kb
+        except Exception:
+            logger.warning("kanban dispatcher: kanban_db not importable; dispatcher disabled")
+            return
+
+        interval = float(kanban_cfg.get("dispatch_interval_seconds", 60) or 60)
+        if interval < 1.0:
+            interval = 1.0  # sanity floor — tighter than this is a footgun
+
+        # Initial delay so the gateway finishes wiring adapters before the
+        # dispatcher spawns workers (those workers may hit gateway notify
+        # subscriptions etc.). Matches the notifier watcher's delay.
+        await asyncio.sleep(5)
+
+        # Health telemetry mirrored from `_cmd_daemon`: warn when ready
+        # queue is non-empty but spawns are 0 for N consecutive ticks —
+        # usually means broken PATH, missing venv, or credential loss.
+        HEALTH_WINDOW = 6
+        bad_ticks = 0
+        last_warn_at = 0
+
+        def _tick_once() -> "Optional[object]":
+            """Run one dispatch_once; return result or None on error.
+
+            Runs in a worker thread via `asyncio.to_thread`."""
+            conn = None
+            try:
+                conn = _kb.connect()
+                try:
+                    _kb.init_db()  # idempotent, handles first-run
+                except Exception:
+                    pass
+                return _kb.dispatch_once(conn)
+            except Exception:
+                logger.exception("kanban dispatcher: tick failed")
+                return None
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+        def _ready_nonempty() -> bool:
+            """Cheap probe: is there at least one ready+assigned+unclaimed task?"""
+            conn = None
+            try:
+                conn = _kb.connect()
+                row = conn.execute(
+                    "SELECT 1 FROM tasks "
+                    "WHERE status = 'ready' AND assignee IS NOT NULL "
+                    "    AND claim_lock IS NULL LIMIT 1"
+                ).fetchone()
+                return row is not None
+            except Exception:
+                return False
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+        logger.info(
+            "kanban dispatcher: embedded in gateway (interval=%.1fs)", interval
+        )
+        while self._running:
+            try:
+                res = await asyncio.to_thread(_tick_once)
+                if res is not None and getattr(res, "spawned", None):
+                    # Quiet by default — only log when something actually
+                    # happened, so an idle gateway stays silent.
+                    logger.info(
+                        "kanban dispatcher: tick spawned=%d reclaimed=%d "
+                        "crashed=%d timed_out=%d promoted=%d auto_blocked=%d",
+                        len(res.spawned),
+                        res.reclaimed,
+                        len(res.crashed) if hasattr(res.crashed, "__len__") else 0,
+                        len(res.timed_out) if hasattr(res.timed_out, "__len__") else 0,
+                        res.promoted,
+                        len(res.auto_blocked) if hasattr(res.auto_blocked, "__len__") else 0,
+                    )
+                # Health telemetry
+                ready_pending = await asyncio.to_thread(_ready_nonempty)
+                spawned_any = bool(res and getattr(res, "spawned", None))
+                if ready_pending and not spawned_any:
+                    bad_ticks += 1
+                else:
+                    bad_ticks = 0
+                if bad_ticks >= HEALTH_WINDOW:
+                    now = int(time.time())
+                    if now - last_warn_at >= 300:
+                        logger.warning(
+                            "kanban dispatcher stuck: ready queue non-empty for "
+                            "%d consecutive ticks but 0 workers spawned. Check "
+                            "profile health (venv, PATH, credentials) and "
+                            "`hermes kanban list --status ready`.",
+                            bad_ticks,
+                        )
+                        last_warn_at = now
+            except asyncio.CancelledError:
+                logger.debug("kanban dispatcher: cancelled")
+                raise
+            except Exception:
+                logger.exception("kanban dispatcher: unexpected watcher error")
+
+            # Sleep in 1s slices so shutdown is snappy — otherwise a stop()
+            # waits up to `interval` seconds for the current sleep to finish.
+            slept = 0.0
+            while slept < interval and self._running:
+                await asyncio.sleep(min(1.0, interval - slept))
+                slept += 1.0
 
     async def _platform_reconnect_watcher(self) -> None:
         """Background task that periodically retries connecting failed platforms.

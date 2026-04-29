@@ -820,3 +820,70 @@ def test_create_task_without_skills_defaults_to_empty_list(client):
     # dataclasses.asdict which keeps it None. The drawer's
     # `t.skills && t.skills.length > 0` guard handles both null and [].
     assert task.get("skills") in (None, [])
+
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher-presence warning in POST /tasks response
+# ---------------------------------------------------------------------------
+
+def test_create_task_includes_warning_when_no_dispatcher(client, monkeypatch):
+    """ready+assigned task + no gateway -> response has `warning` field
+    so the dashboard UI can surface a banner."""
+    # Force the dispatcher probe to report "not running".
+    monkeypatch.setattr(
+        "hermes_cli.kanban._check_dispatcher_presence",
+        lambda: (False, "No gateway is running — start `hermes gateway start`."),
+    )
+    r = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "warn-me", "assignee": "worker"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("warning")
+    assert "gateway" in data["warning"].lower()
+
+
+def test_create_task_no_warning_when_dispatcher_up(client, monkeypatch):
+    """Dispatcher running -> no `warning` field in the response."""
+    monkeypatch.setattr(
+        "hermes_cli.kanban._check_dispatcher_presence",
+        lambda: (True, ""),
+    )
+    r = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "silent", "assignee": "worker"},
+    )
+    assert r.status_code == 200
+    assert "warning" not in r.json() or not r.json()["warning"]
+
+
+def test_create_task_no_warning_on_triage(client, monkeypatch):
+    """Triage tasks never get the warning (they can't be dispatched
+    anyway until promoted)."""
+    monkeypatch.setattr(
+        "hermes_cli.kanban._check_dispatcher_presence",
+        lambda: (False, "oh no"),
+    )
+    r = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "triage-task", "assignee": "worker", "triage": True},
+    )
+    assert r.status_code == 200
+    assert "warning" not in r.json() or not r.json()["warning"]
+
+
+def test_create_task_probe_error_does_not_break_create(client, monkeypatch):
+    """Probe failure must never break task creation."""
+    def _raise():
+        raise RuntimeError("probe crashed")
+    monkeypatch.setattr(
+        "hermes_cli.kanban._check_dispatcher_presence", _raise,
+    )
+    r = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "resilient", "assignee": "worker"},
+    )
+    assert r.status_code == 200
+    assert r.json()["task"]["title"] == "resilient"

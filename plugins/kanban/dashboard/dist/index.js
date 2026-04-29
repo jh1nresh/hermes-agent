@@ -428,7 +428,17 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      }).then(loadBoard);
+      }).then(function (res) {
+        // Surface dispatcher-presence warnings (e.g. "no gateway is
+        // running") via the existing error banner channel. Not fatal —
+        // the task was created successfully — but the user should know
+        // their ready task will sit idle until the gateway is up.
+        if (res && res.warning) {
+          setError("Task created, but: " + res.warning);
+        }
+        loadBoard();
+        return res;
+      });
     }, [loadBoard]);
 
     const toggleSelected = useCallback(function (id, additive) {

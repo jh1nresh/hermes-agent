@@ -111,12 +111,12 @@ for sku in 1001 1002 1003 1004; do
 done
 ```
 
-Start the daemon and walk away:
+Start the gateway and walk away — it hosts the embedded dispatcher
+that picks up all three specialist profiles' tasks on the same
+kanban.db:
 
 ```bash
-hermes kanban daemon --assignee translator &
-hermes kanban daemon --assignee transcriber &
-hermes kanban daemon --assignee copywriter &
+hermes gateway start
 ```
 
 Now filter the board to `content-ops` (or just search for "Transcribe") and you get this:

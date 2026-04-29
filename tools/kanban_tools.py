@@ -44,7 +44,7 @@ def _check_kanban_mode() -> bool:
     set in its env, which the dispatcher sets when spawning a worker.
 
     Humans running ``hermes chat`` see zero kanban tools. Workers spawned
-    by ``hermes kanban daemon`` see all seven.
+    by the kanban dispatcher (gateway-embedded by default) see all seven.
     """
     return bool(os.environ.get("HERMES_KANBAN_TASK"))
 

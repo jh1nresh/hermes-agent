@@ -52,7 +52,7 @@ They coexist: a kanban worker may call `delegate_task` internally during its run
   - `scratch` (default) — fresh tmp dir under `~/.hermes/kanban/workspaces/<id>/`.
   - `dir:<path>` — an existing shared directory (Obsidian vault, mail ops dir, per-account folder). **Must be an absolute path.** Relative paths like `dir:../tenants/foo/` are rejected at dispatch because they'd resolve against whatever CWD the dispatcher happens to be in, which is ambiguous and a confused-deputy escape vector. The path is otherwise trusted — it's your box, your filesystem, the worker runs with your uid. This is the trusted-local-user threat model; kanban is single-host by design.
   - `worktree` — a git worktree under `.worktrees/<id>/` for coding tasks. Worker-side `git worktree add` creates it.
-- **Dispatcher** — a long-lived loop that, every N seconds (default 60): reclaims stale claims, reclaims crashed workers (PID gone but TTL not yet expired), promotes ready tasks, atomically claims, spawns assigned profiles. Runs as `hermes kanban daemon` (foreground) or as a systemd user service. After ~5 consecutive spawn failures on the same task the dispatcher auto-blocks it with the last error as the reason — prevents thrashing on tasks whose profile doesn't exist, workspace can't mount, etc.
+- **Dispatcher** — a long-lived loop that, every N seconds (default 60): reclaims stale claims, reclaims crashed workers (PID gone but TTL not yet expired), promotes ready tasks, atomically claims, spawns assigned profiles. Runs **inside the gateway** by default (`kanban.dispatch_in_gateway: true`). After ~5 consecutive spawn failures on the same task the dispatcher auto-blocks it with the last error as the reason — prevents thrashing on tasks whose profile doesn't exist, workspace can't mount, etc.
 - **Tenant** — optional string namespace. One specialist fleet can serve multiple businesses (`--tenant business-a`) with data isolation by workspace path and memory key prefix.
 
 ## Quick start
@@ -61,8 +61,8 @@ They coexist: a kanban worker may call `delegate_task` internally during its run
 # 1. Create the board
 hermes kanban init
 
-# 2. Start the dispatcher (foreground; Ctrl-C to stop)
-hermes kanban daemon &
+# 2. Start the gateway (hosts the embedded dispatcher)
+hermes gateway start
 
 # 3. Create a task
 hermes kanban create "research AI funding landscape" --assignee researcher
@@ -75,22 +75,32 @@ hermes kanban list
 hermes kanban stats
 ```
 
-### Running the dispatcher as a service
+### Gateway-embedded dispatcher (default)
 
-For production, install the systemd user unit shipped at
-`plugins/kanban/systemd/hermes-kanban-dispatcher.service`:
+The dispatcher runs inside the gateway process. Nothing to install, no
+separate service to manage — if the gateway is up, ready tasks get picked
+up on the next tick (60s by default).
 
-```bash
-mkdir -p ~/.config/systemd/user
-cp plugins/kanban/systemd/hermes-kanban-dispatcher.service \
-   ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now hermes-kanban-dispatcher.service
-systemctl --user status hermes-kanban-dispatcher
-journalctl --user -u hermes-kanban-dispatcher -f   # follow logs
+```yaml
+# config.yaml
+kanban:
+  dispatch_in_gateway: true        # default
+  dispatch_interval_seconds: 60    # default
 ```
 
-Without a running dispatcher `ready` tasks stay where they are — `hermes kanban init` will remind you of this on first run.
+Override the config flag at runtime via `HERMES_KANBAN_DISPATCH_IN_GATEWAY=0`
+for debugging. Standard gateway supervision applies: run `hermes gateway
+start` directly, or wire the gateway up as a systemd user unit (see the
+gateway docs). Without a running gateway, `ready` tasks stay where they are
+until one comes up — `hermes kanban create` warns about this at creation
+time.
+
+Running `hermes kanban daemon` as a separate process is **deprecated**;
+use the gateway. If you truly cannot run the gateway (headless host
+policy forbids long-lived services, etc.) a `--force` escape hatch keeps
+the old standalone daemon alive for one release cycle, but running both
+a gateway-embedded dispatcher AND a standalone daemon against the same
+`kanban.db` causes claim races and is not supported.
 
 ### Idempotent create (for automation / webhooks)
 
@@ -345,7 +355,7 @@ hermes kanban runs <id> [--json]                       # attempt history (one ro
 hermes kanban assignees [--json]                       # profiles on disk + per-assignee task counts
 hermes kanban dispatch [--dry-run] [--max N]           # one-shot pass
         [--failure-limit N] [--json]
-hermes kanban daemon [--interval SECS] [--max N]       # long-lived loop
+hermes kanban daemon --force                           # DEPRECATED — standalone dispatcher (use `hermes gateway start` instead)
         [--failure-limit N] [--pidfile PATH] [-v]
 hermes kanban stats [--json]                           # per-status + per-assignee counts
 hermes kanban log <id> [--tail BYTES]                  # worker log from ~/.hermes/kanban/logs/

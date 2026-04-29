@@ -10,6 +10,7 @@ parity across every registered verb.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import threading
@@ -2454,3 +2455,259 @@ def test_legacy_db_without_skills_column_migrates(tmp_path):
     assert "skills" in keys
     assert row["skills"] is None
     conn.close()
+
+
+
+# ---------------------------------------------------------------------------
+# Gateway-embedded dispatcher: config, CLI warnings, daemon deprecation stub
+# ---------------------------------------------------------------------------
+
+def test_config_default_dispatch_in_gateway_is_true():
+    """Default config must enable gateway-embedded dispatch out of the box.
+    Flipping this default to false is a user-visible behaviour change and
+    should require a conscious migration."""
+    from hermes_cli.config import DEFAULT_CONFIG
+    kanban = DEFAULT_CONFIG.get("kanban", {})
+    assert kanban.get("dispatch_in_gateway") is True, (
+        "kanban.dispatch_in_gateway default should be True; got "
+        f"{kanban.get('dispatch_in_gateway')!r}"
+    )
+    interval = kanban.get("dispatch_interval_seconds")
+    assert isinstance(interval, (int, float)) and interval >= 1, (
+        f"dispatch_interval_seconds must be a positive number, got {interval!r}"
+    )
+
+
+def test_check_dispatcher_presence_silent_when_gateway_running(monkeypatch):
+    from hermes_cli import kanban as kb_cli
+    monkeypatch.setattr("gateway.status.get_running_pid", lambda: 12345)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": True}},
+    )
+    running, msg = kb_cli._check_dispatcher_presence()
+    assert running is True
+    # Either empty (if import failed defensively) or includes the pid.
+    assert msg == "" or "12345" in msg
+
+
+def test_check_dispatcher_presence_warns_when_no_gateway(monkeypatch):
+    from hermes_cli import kanban as kb_cli
+    monkeypatch.setattr("gateway.status.get_running_pid", lambda: None)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": True}},
+    )
+    running, msg = kb_cli._check_dispatcher_presence()
+    assert running is False
+    assert "hermes gateway start" in msg
+
+
+def test_check_dispatcher_presence_warns_when_flag_off(monkeypatch):
+    """Gateway is up but dispatch_in_gateway=false -> warning."""
+    from hermes_cli import kanban as kb_cli
+    monkeypatch.setattr("gateway.status.get_running_pid", lambda: 999)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": False}},
+    )
+    running, msg = kb_cli._check_dispatcher_presence()
+    assert running is False
+    assert "dispatch_in_gateway" in msg
+
+
+def test_check_dispatcher_presence_silent_on_probe_error(monkeypatch):
+    """If the probe itself errors, we stay silent."""
+    from hermes_cli import kanban as kb_cli
+    def _raise():
+        raise RuntimeError("boom")
+    monkeypatch.setattr("gateway.status.get_running_pid", _raise)
+    running, msg = kb_cli._check_dispatcher_presence()
+    assert running is True
+    assert msg == ""
+
+
+def _make_create_ns(**overrides):
+    """Build a Namespace suitable for kb_cli._cmd_create()."""
+    ns = argparse.Namespace(
+        title="x", body=None, assignee="worker",
+        created_by="user", workspace="scratch", tenant=None,
+        priority=0, parent=None, triage=False,
+        idempotency_key=None, max_runtime=None, skills=None,
+        json=False,
+    )
+    for k, v in overrides.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def test_cli_create_warns_when_no_gateway(kanban_home, monkeypatch, capsys):
+    """ready+assigned task + no gateway -> warning on stderr."""
+    from hermes_cli import kanban as kb_cli
+    monkeypatch.setattr("gateway.status.get_running_pid", lambda: None)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": True}},
+    )
+    ns = _make_create_ns(title="warn-me", assignee="worker")
+    assert kb_cli._cmd_create(ns) == 0
+    captured = capsys.readouterr()
+    # Stderr has the warning prefix + guidance.
+    assert "hermes gateway start" in captured.err
+
+
+def test_cli_create_silent_when_gateway_up(kanban_home, monkeypatch, capsys):
+    """gateway running + dispatch enabled -> no warning."""
+    from hermes_cli import kanban as kb_cli
+    monkeypatch.setattr("gateway.status.get_running_pid", lambda: 4242)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": True}},
+    )
+    ns = _make_create_ns(title="silent", assignee="worker")
+    assert kb_cli._cmd_create(ns) == 0
+    captured = capsys.readouterr()
+    assert "hermes gateway start" not in captured.err
+
+
+def test_cli_create_no_warn_on_triage(kanban_home, monkeypatch, capsys):
+    """Triage tasks can't be dispatched -> no warning."""
+    from hermes_cli import kanban as kb_cli
+    monkeypatch.setattr("gateway.status.get_running_pid", lambda: None)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": True}},
+    )
+    ns = _make_create_ns(title="triage-task", assignee=None, triage=True)
+    assert kb_cli._cmd_create(ns) == 0
+    err = capsys.readouterr().err
+    assert "hermes gateway start" not in err
+
+
+def test_cli_create_no_warn_unassigned(kanban_home, monkeypatch, capsys):
+    """Unassigned tasks can't be dispatched -> no warning."""
+    from hermes_cli import kanban as kb_cli
+    monkeypatch.setattr("gateway.status.get_running_pid", lambda: None)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": True}},
+    )
+    ns = _make_create_ns(title="nobody", assignee=None)
+    assert kb_cli._cmd_create(ns) == 0
+    err = capsys.readouterr().err
+    assert "hermes gateway start" not in err
+
+
+def test_cli_daemon_without_force_prints_deprecation_exits_2(kanban_home, capsys):
+    """`hermes kanban daemon` (no --force) is a deprecation stub."""
+    from hermes_cli import kanban as kb_cli
+    ns = argparse.Namespace(
+        force=False, interval=60.0, max=None, failure_limit=3,
+        pidfile=None, verbose=False,
+    )
+    rc = kb_cli._cmd_daemon(ns)
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "DEPRECATED" in err
+    assert "hermes gateway start" in err
+
+
+def test_cli_daemon_help_marks_deprecated():
+    """The argparse help string on `daemon` mentions deprecation so users
+    scanning `--help` see the migration before running the stub."""
+    import argparse as _ap
+    from hermes_cli import kanban as kb_cli
+    root = _ap.ArgumentParser()
+    subs = root.add_subparsers()
+    kb_cli.build_parser(subs)
+    # Walk the subparser tree to find the daemon action.
+    daemon_help = None
+    for action in root._actions:
+        if isinstance(action, _ap._SubParsersAction):
+            for name, parser in action.choices.items():
+                if name == "kanban":
+                    for sub_action in parser._actions:
+                        if isinstance(sub_action, _ap._SubParsersAction):
+                            for sname, _ in sub_action.choices.items():
+                                if sname == "daemon":
+                                    daemon_help = sub_action._choices_actions
+                                    break
+    # _choices_actions is a list of _ChoicesPseudoAction-like objects with .help
+    found_deprecation = False
+    if daemon_help:
+        for act in daemon_help:
+            if getattr(act, "dest", "") == "daemon":
+                if "DEPRECATED" in (act.help or ""):
+                    found_deprecation = True
+                    break
+    assert found_deprecation, (
+        "daemon subparser help should be marked DEPRECATED so users see "
+        "the migration guidance in `hermes kanban --help` output"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Gateway embedded dispatcher watcher
+# ---------------------------------------------------------------------------
+
+def test_gateway_dispatcher_watcher_respects_config_flag_off(monkeypatch):
+    """dispatch_in_gateway=false -> watcher exits fast, no loop."""
+    import asyncio
+    from gateway.run import GatewayRunner
+    import hermes_cli.config as _cfg_mod
+
+    runner = object.__new__(GatewayRunner)
+    runner._running = True
+
+    monkeypatch.setattr(
+        _cfg_mod, "load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": False}},
+    )
+    asyncio.run(
+        asyncio.wait_for(
+            runner._kanban_dispatcher_watcher(),
+            timeout=3.0,
+        )
+    )
+
+
+def test_gateway_dispatcher_watcher_respects_env_override(monkeypatch):
+    """HERMES_KANBAN_DISPATCH_IN_GATEWAY=0 disables without touching config."""
+    import asyncio
+    from gateway.run import GatewayRunner
+    monkeypatch.setenv("HERMES_KANBAN_DISPATCH_IN_GATEWAY", "0")
+
+    runner = object.__new__(GatewayRunner)
+    runner._running = True
+    asyncio.run(
+        asyncio.wait_for(
+            runner._kanban_dispatcher_watcher(),
+            timeout=3.0,
+        )
+    )
+
+
+def test_gateway_dispatcher_watcher_env_truthy_uses_config(monkeypatch):
+    """Truthy env value doesn't force-enable — config still decides.
+    (We only treat explicit falses as an override; unset or truthy
+    defers to config.)"""
+    import asyncio
+    from gateway.run import GatewayRunner
+    import hermes_cli.config as _cfg_mod
+
+    monkeypatch.setenv("HERMES_KANBAN_DISPATCH_IN_GATEWAY", "yes")
+    monkeypatch.setattr(
+        _cfg_mod, "load_config",
+        lambda: {"kanban": {"dispatch_in_gateway": False}},
+    )
+
+    runner = object.__new__(GatewayRunner)
+    runner._running = True
+    # config says false, env is truthy — watcher should still exit
+    # (because config is authoritative when env isn't a falsey override).
+    asyncio.run(
+        asyncio.wait_for(
+            runner._kanban_dispatcher_watcher(),
+            timeout=3.0,
+        )
+    )
