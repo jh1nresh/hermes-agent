@@ -447,22 +447,52 @@ class TestResumeJob:
 
 class TestRunJob:
     @pytest.mark.asyncio
-    async def test_run_job(self, adapter):
-        """POST /api/jobs/{id}/run returns triggered job."""
+    async def test_run_job_defers_when_gateway_running(self, adapter):
+        """POST /api/jobs/{id}/run calls trigger_job when a gateway ticker is up."""
         app = _create_app(adapter)
         triggered_job = {**SAMPLE_JOB, "last_run": "2025-01-01T00:00:00Z"}
         mock_trigger = MagicMock(return_value=triggered_job)
         async with TestClient(TestServer(app)) as cli:
-            with patch(
-                f"{_MOD}._CRON_AVAILABLE", True
-            ), patch(
-                f"{_MOD}._cron_trigger", mock_trigger
-            ):
+            with patch(f"{_MOD}._CRON_AVAILABLE", True), \
+                 patch(f"{_MOD}._cron_trigger", mock_trigger), \
+                 patch("hermes_cli.gateway.find_gateway_pids", return_value=[12345]):
                 resp = await cli.post(f"/api/jobs/{VALID_JOB_ID}/run")
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["job"] == triggered_job
+                assert "tick" in data.get("message", "").lower()
                 mock_trigger.assert_called_once_with(VALID_JOB_ID)
+
+    @pytest.mark.asyncio
+    async def test_run_job_executes_inline_when_no_gateway(self, adapter):
+        """POST /api/jobs/{id}/run calls run_job_now when no gateway ticker is up.
+
+        Regression for issue #16612: the old handler only called
+        trigger_job(), which just set next_run_at=now without executing
+        anything.  Users saw last_run_at=null forever.
+        """
+        app = _create_app(adapter)
+        executed_job = {
+            **SAMPLE_JOB,
+            "last_run_at": "2026-04-28T00:00:00",
+            "last_status": "ok",
+        }
+        mock_run_now = MagicMock(return_value=executed_job)
+        mock_trigger = MagicMock()
+
+        async with TestClient(TestServer(app)) as cli:
+            with patch(f"{_MOD}._CRON_AVAILABLE", True), \
+                 patch(f"{_MOD}._cron_trigger", mock_trigger), \
+                 patch("hermes_cli.gateway.find_gateway_pids", return_value=[]), \
+                 patch("cron.scheduler.run_job_now", mock_run_now):
+                resp = await cli.post(f"/api/jobs/{VALID_JOB_ID}/run")
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["job"]["last_run_at"] == "2026-04-28T00:00:00"
+                assert data["job"]["last_status"] == "ok"
+                assert "inline" in data.get("message", "").lower()
+                mock_run_now.assert_called_once_with(VALID_JOB_ID)
+                mock_trigger.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

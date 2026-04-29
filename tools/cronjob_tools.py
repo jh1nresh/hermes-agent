@@ -243,6 +243,109 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _gateway_ticker_running() -> bool:
+    """Return True if a ``hermes gateway`` process with a live cron ticker
+    is running (either a different process or the current one).
+
+    The ticker fires due jobs every 60 seconds; when it's up, ``action="run"``
+    just needs to set ``next_run_at=now`` and let the ticker pick it up on the
+    next pass.  When it isn't, ``action="run"`` would otherwise be a no-op —
+    so we fall back to executing the job inline in the caller's process.
+    """
+    try:
+        from hermes_cli.gateway import find_gateway_pids
+    except Exception:
+        return False
+    try:
+        return bool(find_gateway_pids())
+    except Exception:
+        # If we can't tell, err on the side of inline execution so
+        # ``action="run"`` never silently drops on the floor.
+        return False
+
+
+def _handle_run_action(job_id: str) -> str:
+    """Handle ``cronjob(action="run")``.
+
+    When a gateway is running (ticker alive), set ``next_run_at=now`` and
+    return — the ticker will pick the job up within its interval (≤60s).
+
+    When no gateway is running, execute the job inline in this process so
+    the caller actually observes ``last_run_at`` / ``last_status`` updates.
+    Blocks the caller for the duration of the agent run.
+    """
+    if _gateway_ticker_running():
+        updated = trigger_job(job_id)
+        if not updated:
+            return tool_error(f"Job with ID '{job_id}' not found.", success=False)
+        return json.dumps(
+            {
+                "success": True,
+                "job": _format_job(updated),
+                "message": (
+                    "Job scheduled for immediate execution. The gateway cron "
+                    "ticker will fire it on its next pass (within ~60s). "
+                    "Re-inspect with cronjob(action='list') to see last_run_at "
+                    "and last_status once it completes."
+                ),
+            },
+            indent=2,
+        )
+
+    # No gateway → inline execution so the user actually gets a run.
+    try:
+        from cron.scheduler import run_job_now
+    except Exception as e:
+        # Extremely unlikely, but if scheduler can't be imported (circular
+        # import, missing deps) fall back to the defer path with a warning.
+        logger.warning("run_job_now unavailable, falling back to defer: %s", e)
+        updated = trigger_job(job_id)
+        if not updated:
+            return tool_error(f"Job with ID '{job_id}' not found.", success=False)
+        return json.dumps(
+            {
+                "success": True,
+                "job": _format_job(updated),
+                "warning": (
+                    "Gateway is not running and inline execution is unavailable. "
+                    "Job was re-scheduled (next_run_at=now) but will not execute "
+                    "until you start the gateway with 'hermes gateway'."
+                ),
+            },
+            indent=2,
+        )
+
+    updated = run_job_now(job_id)
+    if not updated:
+        # Either the job doesn't exist or the tick lock was held by a
+        # concurrent ticker that started after we checked _gateway_ticker_running.
+        # Double-check existence vs. lock contention.
+        if not get_job(job_id):
+            return tool_error(f"Job with ID '{job_id}' not found.", success=False)
+        # Lock was busy — fall back to defer.
+        updated = trigger_job(job_id)
+        return json.dumps(
+            {
+                "success": True,
+                "job": _format_job(updated) if updated else None,
+                "message": "Another cron tick is running; job scheduled for that tick.",
+            },
+            indent=2,
+        )
+
+    formatted = _format_job(updated)
+    last_status = updated.get("last_status")
+    if last_status == "ok":
+        msg = "Job executed inline (no gateway ticker running)."
+    elif last_status == "error":
+        msg = (
+            f"Job executed inline but failed: {updated.get('last_error') or 'unknown error'}"
+        )
+    else:
+        msg = "Job executed inline (no gateway ticker running)."
+    return json.dumps({"success": True, "job": formatted, "message": msg}, indent=2)
+
+
 def cronjob(
     action: str,
     job_id: Optional[str] = None,
@@ -372,8 +475,7 @@ def cronjob(
             return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
 
         if normalized in {"run", "run_now", "trigger"}:
-            updated = trigger_job(job_id)
-            return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
+            return _handle_run_action(job_id)
 
         if normalized == "update":
             updates: Dict[str, Any] = {}
@@ -476,7 +578,7 @@ Important safety rule: cron-run sessions should not recursively schedule more cr
         "properties": {
             "action": {
                 "type": "string",
-                "description": "One of: create, list, update, pause, resume, remove, run"
+                "description": "One of: create, list, update, pause, resume, remove, run. 'run' executes the job now when no gateway ticker is up, or schedules it for the next tick (≤60s) when one is."
             },
             "job_id": {
                 "type": "string",

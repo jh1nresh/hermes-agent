@@ -2216,7 +2216,17 @@ class APIServerAdapter(BasePlatformAdapter):
             return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_run_job(self, request: "web.Request") -> "web.Response":
-        """POST /api/jobs/{job_id}/run — trigger immediate execution."""
+        """POST /api/jobs/{job_id}/run — trigger immediate execution.
+
+        When a gateway ticker is up (which it is for any live api_server
+        process hosted inside ``hermes gateway``), this sets ``next_run_at``
+        to now and returns — the ticker will fire the job on its next pass
+        (within ~60s).
+
+        When no gateway ticker is up (rare, e.g. api_server running standalone
+        via a one-off invocation), the job is executed inline off the event
+        loop and the response includes ``last_run_at`` / ``last_status``.
+        """
         auth_err = self._check_auth(request)
         if auth_err:
             return auth_err
@@ -2227,10 +2237,61 @@ class APIServerAdapter(BasePlatformAdapter):
         if id_err:
             return id_err
         try:
-            job = _cron_trigger(job_id)
-            if not job:
-                return web.json_response({"error": "Job not found"}, status=404)
-            return web.json_response({"job": job})
+            ticker_up = True
+            try:
+                from hermes_cli.gateway import find_gateway_pids
+                ticker_up = bool(find_gateway_pids())
+            except Exception:
+                pass
+
+            if ticker_up:
+                job = _cron_trigger(job_id)
+                if not job:
+                    return web.json_response({"error": "Job not found"}, status=404)
+                return web.json_response(
+                    {
+                        "job": job,
+                        "message": (
+                            "Job scheduled for next tick (within ~60s). "
+                            "Poll /api/jobs/{job_id} for updated last_run_at/last_status."
+                        ),
+                    }
+                )
+
+            # Inline execution off the event loop.
+            try:
+                from cron.scheduler import run_job_now
+            except Exception:
+                # Fall back to defer with a warning.
+                job = _cron_trigger(job_id)
+                if not job:
+                    return web.json_response({"error": "Job not found"}, status=404)
+                return web.json_response(
+                    {
+                        "job": job,
+                        "warning": (
+                            "Gateway is not running and inline execution is unavailable. "
+                            "Start the gateway with 'hermes gateway' so jobs fire automatically."
+                        ),
+                    }
+                )
+
+            loop = asyncio.get_running_loop()
+            updated = await loop.run_in_executor(None, run_job_now, job_id)
+            if not updated:
+                if not _cron_get(job_id):
+                    return web.json_response({"error": "Job not found"}, status=404)
+                # Lock contention — fall back to defer.
+                job = _cron_trigger(job_id)
+                return web.json_response(
+                    {
+                        "job": job,
+                        "message": "Another cron tick is running; job scheduled for that tick.",
+                    }
+                )
+            return web.json_response(
+                {"job": updated, "message": "Job executed inline (no gateway ticker running)."}
+            )
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 

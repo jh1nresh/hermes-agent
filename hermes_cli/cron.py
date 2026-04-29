@@ -255,7 +255,18 @@ def _job_action(action: str, job_id: str, success_verb: str) -> int:
     if action in {"resume", "run"} and result.get("job", {}).get("next_run_at"):
         print(f"  Next run: {result['job']['next_run_at']}")
     if action == "run":
-        print("  It will run on the next scheduler tick.")
+        msg = result.get("message") or "  It will run on the next scheduler tick."
+        last_status = job.get("last_status")
+        if last_status == "ok":
+            print(f"  {color('✓ Last run:', Colors.GREEN)} {job.get('last_run_at', '?')}  {color('ok', Colors.GREEN)}")
+        elif last_status == "error":
+            last_err = job.get("last_error", "?")
+            print(f"  {color('✗ Last run:', Colors.RED)} {job.get('last_run_at', '?')}  "
+                  f"{color('error: ' + str(last_err), Colors.RED)}")
+        print(f"  {msg}")
+        warning = result.get("warning")
+        if warning:
+            print(color(f"  ⚠ {warning}", Colors.YELLOW))
     return 0
 
 
