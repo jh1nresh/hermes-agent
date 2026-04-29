@@ -174,12 +174,79 @@ Show images to the user via `vision_analyze` or return the file path directly.
 
 ## Setup & Onboarding
 
-When a user asks to set up ComfyUI, walk them through the path that fits their situation.
-Ask what hardware they have and whether they want local or cloud.
+When a user asks to set up ComfyUI, **detect their system first** before asking questions.
+Run the checks below, then recommend the best path based on what you find.
 
 **Official docs:** https://docs.comfy.org/installation
 **CLI docs:** https://docs.comfy.org/comfy-cli/getting-started
 **Cloud docs:** https://docs.comfy.org/get_started/cloud
+
+### Step 1: Detect System & Capabilities
+
+Run these checks to understand what the user has:
+
+```bash
+# OS detection
+uname -s                               # Darwin = macOS, Linux = Linux
+# or on Windows: check via platform in python
+
+# GPU detection
+# macOS (Apple Silicon):
+sysctl -n machdep.cpu.brand_string 2>/dev/null
+system_profiler SPDisplaysDataType 2>/dev/null | grep "Chip\|Metal\|VRAM\|Model"
+
+# Linux (NVIDIA):
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null
+
+# Linux (AMD):
+rocm-smi --showproductname 2>/dev/null || lspci | grep -i "VGA\|3D" 2>/dev/null
+
+# RAM
+# macOS:
+sysctl -n hw.memsize 2>/dev/null | awk '{print $0/1024/1024/1024 " GB"}'
+# Linux:
+free -h | grep Mem | awk '{print $2}'
+
+# Disk space (need ~15GB minimum, more for models)
+df -h . | tail -1 | awk '{print $4 " available"}'
+
+# Python version
+python3 --version 2>/dev/null
+
+# Is comfy-cli already installed?
+command -v comfy >/dev/null 2>&1 && comfy which 2>/dev/null
+
+# Is a server already running?
+curl -s http://127.0.0.1:8188/system_stats 2>/dev/null
+```
+
+### Step 2: Recommend Installation Path
+
+Based on detection results, recommend ONE path:
+
+| System detected | Recommendation |
+|----------------|----------------|
+| **macOS + Apple Silicon (M1/M2/M3/M4)** | ComfyUI Desktop for Mac — one-click install, Metal acceleration. Or `comfy-cli` if they prefer terminal. |
+| **Windows + NVIDIA GPU (≥8GB VRAM)** | ComfyUI Desktop for Windows — easiest path. Or Portable build for power users. |
+| **Windows + NVIDIA GPU (<8GB VRAM)** | Portable build with `--lowvram` flag. Or Cloud if <4GB. |
+| **Linux + NVIDIA GPU** | `comfy-cli` — best for headless/server setups. `comfy install --nvidia` |
+| **Linux + AMD GPU (ROCm)** | `comfy-cli` with `comfy install --amd`. Only Linux supported for AMD. |
+| **Any system + no GPU / weak GPU** | **Comfy Cloud** — no local install, runs on RTX 6000 Pro. Just needs API key. |
+| **Intel Arc GPU** | Manual install with `torch.xpu`. Not supported by comfy-cli. |
+| **Already has ComfyUI running** | Skip install — go straight to workflow execution. |
+
+### Hardware Requirements
+
+| Tier | VRAM | What it can run |
+|------|------|----------------|
+| Minimum | 4GB | SD 1.5 with `--lowvram`, slow |
+| Recommended | 8GB | SD 1.5, some SDXL with optimizations |
+| Comfortable | 12GB+ | SDXL, Flux, most workflows |
+| Ideal | 16-24GB+ | Everything including video generation |
+| Cloud | N/A | RTX 6000 Pro (48GB) — runs anything |
+
+**RAM:** 16GB minimum, 32GB recommended (models load into system RAM first).
+**Disk:** ~15GB for ComfyUI + Python. Each model is 2-7GB. Plan for 50-100GB total.
 
 ### Choosing an Installation Path
 
