@@ -54,15 +54,53 @@ def _module_registers_tools(module_path: Path) -> bool:
     return any(_is_registry_register_call(stmt) for stmt in tree.body)
 
 
+def _load_manifest() -> Optional[List[str]]:
+    """Return the cached ``TOOL_MODULES`` tuple from ``tools/_manifest.py``.
+
+    Returns ``None`` when the manifest is missing (fresh checkout, or the
+    ``scripts/build_tool_manifest.py`` generator hasn't been run yet). The
+    caller falls back to the AST scan in that case.
+
+    NOTE: This intentionally does NOT check for mtime drift between the
+    manifest and ``tools/*.py`` files. Drift protection belongs in CI
+    (``python scripts/build_tool_manifest.py --check``) — adding a
+    per-startup stat walk here would both (a) add overhead to the path
+    we're trying to speed up and (b) give false positives when devs edit
+    helper modules that don't register tools. If the manifest lists a
+    tool that no longer exists, the import fails loudly at startup.
+    """
+    try:
+        from tools._manifest import TOOL_MODULES
+        return list(TOOL_MODULES)
+    except ImportError:
+        return None
+
+
 def discover_builtin_tools(tools_dir: Optional[Path] = None) -> List[str]:
-    """Import built-in self-registering tool modules and return their module names."""
+    """Import built-in self-registering tool modules and return their module names.
+
+    Fast path: read ``tools/_manifest.py`` and import the listed modules
+    directly. Skips the ~145 ms AST scan of every ``tools/*.py`` file.
+
+    Fallback path: if the manifest is missing or stale (any ``tools/*.py`` is
+    newer than the manifest's mtime), scan AST and log a warning. The
+    fallback is the only behavior when running from a git checkout that
+    hasn't regenerated the manifest after local edits.
+    """
     tools_path = Path(tools_dir) if tools_dir is not None else Path(__file__).resolve().parent
-    module_names = [
-        f"tools.{path.stem}"
-        for path in sorted(tools_path.glob("*.py"))
-        if path.name not in {"__init__.py", "registry.py", "mcp_tool.py"}
-        and _module_registers_tools(path)
-    ]
+
+    # Only use the committed manifest when scanning the default tools/
+    # directory. Tests and embedders that pass a custom tools_dir always
+    # get the AST-scan path.
+    default_tools_path = Path(__file__).resolve().parent
+    module_names = _load_manifest() if tools_path == default_tools_path else None
+    if module_names is None:
+        module_names = [
+            f"tools.{path.stem}"
+            for path in sorted(tools_path.glob("*.py"))
+            if path.name not in {"__init__.py", "_manifest.py", "registry.py", "mcp_tool.py"}
+            and _module_registers_tools(path)
+        ]
 
     imported: List[str] = []
     for mod_name in module_names:
