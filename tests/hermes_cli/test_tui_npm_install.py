@@ -31,6 +31,13 @@ def _touch_ink_bundle(root: Path) -> None:
     bundle.write_text("export {}")
 
 
+def _touch_prebuilt_tui(root: Path) -> None:
+    _touch_tui_entry(root)
+    _touch_ink(root)
+    _touch_ink_bundle(root)
+    (root / ".hermes-prebuilt-tui").write_text("")
+
+
 def test_need_install_when_ink_missing(tmp_path: Path, main_mod) -> None:
     (tmp_path / "package-lock.json").write_text("{}")
     assert main_mod._tui_need_npm_install(tmp_path) is True
@@ -101,5 +108,24 @@ def test_build_not_needed_when_entry_and_ink_bundle_present(tmp_path: Path, main
     _touch_tui_entry(tmp_path)
     _touch_ink(tmp_path)
     _touch_ink_bundle(tmp_path)
+
+    assert main_mod._tui_build_needed(tmp_path) is False
+
+
+def test_prebuilt_tui_marker_skips_install_without_hidden_lock(tmp_path: Path, main_mod) -> None:
+    _touch_prebuilt_tui(tmp_path)
+    (tmp_path / "package-lock.json").write_text(
+        '{"packages":{"node_modules/foo":{"version":"1.0.0"}}}'
+    )
+
+    assert main_mod._tui_need_npm_install(tmp_path) is False
+
+
+def test_prebuilt_tui_marker_skips_build(tmp_path: Path, main_mod) -> None:
+    _touch_prebuilt_tui(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "entry.tsx").write_text("newer")
+    os.utime(tmp_path / "src" / "entry.tsx", (200, 200))
+    os.utime(tmp_path / "dist" / "entry.js", (100, 100))
 
     assert main_mod._tui_build_needed(tmp_path) is False

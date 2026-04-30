@@ -135,6 +135,15 @@ def test_dockerfile_materializes_local_tui_ink_package(dockerfile_text):
     )
 
 
+def test_dockerfile_marks_tui_as_prebuilt_after_validation(dockerfile_text):
+    assert any(
+        "ui-tui" in step
+        and "await import('@hermes/ink')" in step
+        and "touch .hermes-prebuilt-tui" in step
+        for step in _run_steps(dockerfile_text)
+    )
+
+
 def test_dockerignore_excludes_nested_dependency_dirs():
     if not DOCKERIGNORE.exists():
         pytest.skip(".dockerignore not present in this checkout")

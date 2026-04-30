@@ -836,6 +836,16 @@ def _print_tui_exit_summary(session_id: Optional[str], active_session_file: Opti
 
 
 _NPM_LOCK_RUNTIME_KEYS = frozenset({"ideallyInert"})
+_TUI_PREBUILT_MARKER = ".hermes-prebuilt-tui"
+
+
+def _tui_prebuilt_ready(root: Path) -> bool:
+    return (
+        (root / _TUI_PREBUILT_MARKER).is_file()
+        and (root / "dist" / "entry.js").is_file()
+        and (root / "node_modules" / "@hermes" / "ink" / "package.json").is_file()
+        and (root / "packages" / "hermes-ink" / "dist" / "ink-bundle.js").is_file()
+    )
 
 
 def _tui_need_npm_install(root: Path) -> bool:
@@ -858,6 +868,9 @@ def _tui_need_npm_install(root: Path) -> bool:
     we'd rather not force a reinstall for them. Falls back to mtime
     comparison if either lockfile is unparseable.
     """
+    if _tui_prebuilt_ready(root):
+        return False
+
     ink = root / "node_modules" / "@hermes" / "ink" / "package.json"
     if not ink.is_file():
         return True
@@ -911,6 +924,8 @@ def _find_bundled_tui(tui_dir: Path) -> Optional[Path]:
 
 
 def _tui_build_needed(tui_dir: Path) -> bool:
+    if _tui_prebuilt_ready(tui_dir):
+        return False
     if _hermes_ink_bundle_stale(tui_dir):
         return True
     entry = tui_dir / "dist" / "entry.js"
