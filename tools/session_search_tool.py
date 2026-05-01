@@ -82,11 +82,15 @@ def _format_conversation(messages: List[Dict[str, Any]]) -> str:
         content = msg.get("content") or ""
         tool_name = msg.get("tool_name")
 
-        if role == "TOOL" and tool_name:
-            # Truncate long tool outputs
+        if role == "TOOL":
+            # Truncate long tool outputs regardless of whether tool_name is set —
+            # stored sessions sometimes have tool_name=None, and without this
+            # guard those rows render as untruncated [TOOL]: <huge-blob>, drowning
+            # out actual conversation content during summarization.
             if len(content) > 500:
                 content = content[:250] + "\n...[truncated]...\n" + content[-250:]
-            parts.append(f"[TOOL:{tool_name}]: {content}")
+            header = f"[TOOL:{tool_name}]" if tool_name else "[TOOL]"
+            parts.append(f"{header}: {content}")
         elif role == "ASSISTANT":
             # Include tool call names if present
             tool_calls = msg.get("tool_calls")
