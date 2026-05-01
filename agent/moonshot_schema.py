@@ -15,6 +15,16 @@ and MoonshotAI/kimi-cli#1595:
 2. When ``anyOf`` is used, ``type`` must be on the ``anyOf`` children, not
    the parent.  Presence of both causes "type should be defined in anyOf
    items instead of the parent schema".
+3. ``$ref`` nodes may not carry sibling keywords.  Moonshot expands the
+   reference before validation and then rejects the node if sibling keys
+   like ``description`` remain on the same node as ``$ref``.  Strip every
+   sibling from ``$ref`` nodes so only ``{"$ref": "..."}`` survives.
+   (Ported from anomalyco/opencode#24730.)
+4. ``items`` may not be a tuple-style array (``items: [schemaA, schemaB]``
+   for positional element schemas).  Moonshot's schema engine requires a
+   single object schema applied to every array element.  Collapse tuple
+   ``items`` to the first element schema (or ``{}`` if the tuple is empty).
+   (Ported from anomalyco/opencode#24730.)
 
 The ``#/definitions/...`` → ``#/$defs/...`` rewrite for draft-07 refs is
 handled separately in ``tools/mcp_tool._normalize_mcp_input_schema`` so it
@@ -66,6 +76,16 @@ def _repair_schema(node: Any, is_schema: bool = True) -> Any:
             }
         elif key in _SCHEMA_LIST_KEYS and isinstance(value, list):
             repaired[key] = [_repair_schema(v, is_schema=True) for v in value]
+        elif key == "items" and isinstance(value, list):
+            # Rule 4: tuple-style ``items`` arrays (positional element
+            # schemas) are not accepted by Moonshot.  Collapse to the
+            # first element schema if present, else to ``{}``.  This
+            # matches opencode's behaviour for moonshotai / kimi models.
+            first = value[0] if value else {}
+            if isinstance(first, dict):
+                repaired[key] = _repair_schema(first, is_schema=True)
+            else:
+                repaired[key] = first
         elif key in _SCHEMA_NODE_KEYS:
             # items / not / additionalProperties: single nested schema.
             # additionalProperties can also be a bool — leave those alone.
@@ -85,10 +105,12 @@ def _repair_schema(node: Any, is_schema: bool = True) -> Any:
         repaired.pop("type", None)
         return repaired
 
-    # Rule 1: property schemas without type need one.  $ref nodes are exempt
-    # — their type comes from the referenced definition.
+    # Rule 3: $ref nodes must not have sibling keywords.  Strip everything
+    # except $ref itself so Moonshot's validator (which expands the ref
+    # before checking) doesn't reject the node for redundant keys like
+    # ``description`` / ``type`` / ``default`` appearing alongside $ref.
     if "$ref" in repaired:
-        return repaired
+        return {"$ref": repaired["$ref"]}
     return _fill_missing_type(repaired)
 
 
