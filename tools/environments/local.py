@@ -358,6 +358,19 @@ class LocalEnvironment(BaseEnvironment):
         args = [bash, "-l", "-c", cmd_string] if login else [bash, "-c", cmd_string]
         run_env = _make_run_env(self.env)
 
+        # Validate that self.cwd still exists.  When subagents share a single
+        # LocalEnvironment and one cd's into a temp dir that gets deleted,
+        # subprocess.Popen raises FileNotFoundError for ALL subsequent calls.
+        # The shell script from _wrap_command already does `cd -- <path>` so
+        # Popen's cwd just needs to be a valid launch directory for bash.
+        popen_cwd = self.cwd
+        if not os.path.isdir(popen_cwd):
+            # Reset self.cwd to a safe fallback so future calls don't
+            # keep hitting the same stale path.
+            fallback = os.path.expanduser("~") if os.path.isdir(os.path.expanduser("~")) else "/"
+            self.cwd = fallback
+            popen_cwd = fallback
+
         proc = subprocess.Popen(
             args,
             text=True,
@@ -368,7 +381,7 @@ class LocalEnvironment(BaseEnvironment):
             stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
             preexec_fn=None if _IS_WINDOWS else os.setsid,
-            cwd=self.cwd,
+            cwd=popen_cwd,
         )
         if not _IS_WINDOWS:
             try:
@@ -456,8 +469,14 @@ class LocalEnvironment(BaseEnvironment):
         try:
             with open(self._cwd_file) as f:
                 cwd_path = f.read().strip()
-            if cwd_path:
+            if cwd_path and os.path.isdir(cwd_path):
                 self.cwd = cwd_path
+            elif cwd_path and not os.path.isdir(cwd_path):
+                # The recorded cwd no longer exists (temp dir deleted by
+                # another process).  Reset to a safe fallback so subsequent
+                # commands don't loop on exit-126 from a stale cd target.
+                fallback = os.path.expanduser("~") if os.path.isdir(os.path.expanduser("~")) else "/"
+                self.cwd = fallback
         except (OSError, FileNotFoundError):
             pass
 
