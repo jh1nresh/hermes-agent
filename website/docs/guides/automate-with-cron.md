@@ -14,6 +14,10 @@ For the full feature reference, see [Scheduled Tasks (Cron)](/docs/user-guide/fe
 Cron jobs run in fresh agent sessions with no memory of your current chat. Prompts must be **completely self-contained** — include everything the agent needs to know.
 :::
 
+:::tip No LLM needed? Use `hermes send`.
+If your cron script already produces the exact text you want to send and doesn't need an agent to reason about it, reach for [`hermes send`](/docs/guides/pipe-script-output) instead. It's a zero-LLM CLI that pipes stdout/files to any configured messaging platform.
+:::
+
 ---
 
 ## Pattern 1: Website Change Monitor
