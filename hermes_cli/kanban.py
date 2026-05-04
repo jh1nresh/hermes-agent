@@ -557,7 +557,16 @@ def _cmd_init(args: argparse.Namespace) -> int:
         for name in profiles:
             print(f"  {name}")
     else:
-        print("No profiles found under ~/.hermes/profiles/.")
+        # Show the actually-resolved path, not a hardcoded ~/.hermes —
+        # Docker / custom deployments have profiles at
+        # <HERMES_HOME>/profiles/ (e.g. /opt/data/profiles/), and
+        # printing ~/.hermes there sends users down the wrong path.
+        try:
+            profiles_dir = kb.kanban_home() / "profiles"
+            where = str(profiles_dir)
+        except Exception:
+            where = "~/.hermes/profiles/"
+        print(f"No profiles found under {where}.")
         print("Create one with `hermes -p <name> setup` before assigning tasks.")
     print()
     print("Next step: start the gateway so ready tasks actually get picked up.")

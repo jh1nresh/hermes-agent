@@ -899,9 +899,13 @@ def test_migration_renames_legacy_event_kinds(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_list_profiles_on_disk(tmp_path, monkeypatch):
-    """list_profiles_on_disk returns directories under ~/.hermes/profiles/
-    that contain a config.yaml."""
+    """list_profiles_on_disk returns directories under
+    ``<HERMES_HOME>/profiles/`` that contain a config.yaml.
+
+    Standard (non-Docker) layout: HERMES_HOME is ``~/.hermes``.
+    """
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     profiles = tmp_path / ".hermes" / "profiles"
     profiles.mkdir(parents=True)
     (profiles / "researcher").mkdir()
@@ -911,6 +915,40 @@ def test_list_profiles_on_disk(tmp_path, monkeypatch):
     (profiles / "empty_dir").mkdir()
     # A stray file; should be ignored.
     (profiles / "stray.txt").write_text("noise")
+
+    names = kb.list_profiles_on_disk()
+    assert names == ["researcher", "writer"]
+
+
+def test_list_profiles_on_disk_docker_layout(tmp_path, monkeypatch):
+    """list_profiles_on_disk discovers profiles under HERMES_HOME even when
+    HERMES_HOME points outside ~/.hermes (standard Docker layout).
+
+    In the shipped Docker image, HERMES_HOME is the mounted volume (e.g.
+    /opt/data) and the user's $HOME inside the container doesn't contain
+    a .hermes dir. Profiles live at <HERMES_HOME>/profiles/<name>/ and
+    must still be discoverable by the kanban board — otherwise the
+    dashboard assignee dropdown is empty and users can only create tasks
+    with assignee=None, which the dispatcher skips forever. See the
+    kanban_home() helper in this module for the canonical resolution.
+    """
+    # Simulate the Docker layout: HOME has no .hermes dir at all; the
+    # real profiles live under a HERMES_HOME that's completely unrelated
+    # to ~/.hermes.
+    fake_home = tmp_path / "home" / "hermes"
+    fake_home.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    docker_root = tmp_path / "opt" / "data"
+    docker_root.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(docker_root))
+
+    profiles = docker_root / "profiles"
+    profiles.mkdir()
+    (profiles / "researcher").mkdir()
+    (profiles / "researcher" / "config.yaml").write_text("model: {}\n")
+    (profiles / "writer").mkdir()
+    (profiles / "writer" / "config.yaml").write_text("model: {}\n")
 
     names = kb.list_profiles_on_disk()
     assert names == ["researcher", "writer"]

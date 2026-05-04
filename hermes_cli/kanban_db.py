@@ -2726,13 +2726,24 @@ def read_worker_log(
 def list_profiles_on_disk() -> list[str]:
     """Return the set of named profiles discovered on disk.
 
-    Reads ``~/.hermes/profiles/`` directly so this module has no import
-    dependency on ``hermes_cli.profiles`` (which pulls in a large chunk
-    of the CLI startup path). Only returns directories that contain a
-    ``config.yaml`` — a bare dir without config isn't a real profile.
+    Anchored at :func:`kanban_home` so the Docker / custom-deployment
+    layout (``HERMES_HOME=/opt/data`` with profiles at
+    ``/opt/data/profiles/<name>/``) is discovered correctly — not just
+    the standard ``~/.hermes/profiles/`` layout. ``kanban_home`` already
+    routes through ``get_default_hermes_root``, which handles both the
+    profile-active case (``HERMES_HOME=<root>/profiles/<name>`` → return
+    ``<root>``) and the Docker case (``HERMES_HOME`` outside ``~/.hermes``
+    → return ``HERMES_HOME`` as-is).
+
+    Only returns directories that contain a ``config.yaml`` — a bare
+    dir without config isn't a real profile.
+
+    Stays import-safe by reusing ``kanban_home`` (already defined in
+    this module) rather than importing ``hermes_cli.profiles``, which
+    would pull in a large chunk of the CLI startup path.
     """
     try:
-        home = Path.home() / ".hermes" / "profiles"
+        home = kanban_home() / "profiles"
     except Exception:
         return []
     if not home.is_dir():
