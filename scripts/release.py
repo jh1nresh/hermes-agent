@@ -124,6 +124,9 @@ AUTHOR_MAP = {
     "git@local.invalid": "hendrixfreire",
     "1060770+benjaminsehl@users.noreply.github.com": "benjaminsehl",
     "nerijusn76@gmail.com": "Nerijusas",
+    # Compaction salvage batch (May 2026)
+    "MacroAnarchy@users.noreply.github.com": "MacroAnarchy",
+    "74554762+wmagev@users.noreply.github.com": "wmagev",
     "itonov@proton.me": "Ito-69",
     "glesstech@gmail.com": "georgeglessner",
     "maxim.smetanin@gmail.com": "maxims-oss",
