@@ -93,6 +93,8 @@ Project-local plugins under `./.hermes/plugins/` are disabled by default. Enable
 
 ## What plugins can do
 
+Every `ctx.*` API below is available inside a plugin's `register(ctx)` function.
+
 | Capability | How |
 |-----------|-----|
 | Add tools | `ctx.register_tool(name=..., toolset=..., schema=..., handler=...)` |
@@ -104,6 +106,11 @@ Project-local plugins under `./.hermes/plugins/` are disabled by default. Enable
 | Bundle skills | `ctx.register_skill(name, path)` — namespaced as `plugin:skill`, loaded via `skill_view("plugin:skill")` |
 | Gate on env vars | `requires_env: [API_KEY]` in plugin.yaml — prompted during `hermes plugins install` |
 | Distribute via pip | `[project.entry-points."hermes_agent.plugins"]` |
+| Register a gateway platform (Discord, Telegram, IRC, …) | `ctx.register_platform(name, label, adapter_factory, check_fn, ...)` — see [Adding Platform Adapters](/docs/developer-guide/adding-platform-adapters) |
+| Register an image-generation backend | `ctx.register_image_gen_provider(provider)` — see `plugins/image_gen/openai/` for an example |
+| Register a context-compression engine | `ctx.register_context_engine(engine)` — see [Context Engine Plugins](/docs/developer-guide/context-engine-plugin) |
+| Register a memory backend | Subclass `MemoryProvider` in `plugins/memory/<name>/__init__.py` — see [Memory Provider Plugins](/docs/developer-guide/memory-provider-plugin) (uses a separate discovery system) |
+| Register an inference backend (LLM provider) | `register_provider(ProviderProfile(...))` in `plugins/model-providers/<name>/__init__.py` — see [Model Provider Plugins](/docs/developer-guide/model-provider-plugin) (uses a separate discovery system) |
 
 ## Plugin discovery
 
@@ -116,6 +123,21 @@ Project-local plugins under `./.hermes/plugins/` are disabled by default. Enable
 | Nix | `services.hermes-agent.extraPlugins` / `extraPythonPackages` | NixOS declarative installs — see [Nix Setup](/docs/getting-started/nix-setup#plugins) |
 
 Later sources override earlier ones on name collision, so a user plugin with the same name as a bundled plugin replaces it.
+
+### Plugin sub-categories
+
+Within each source, Hermes also recognizes sub-category directories that route plugins to specialized discovery systems:
+
+| Sub-directory | What it holds | Discovery system |
+|---|---|---|
+| `plugins/` (root) | General plugins — tools, hooks, slash commands, CLI commands, bundled skills | `PluginManager` (kind: `standalone` or `backend`) |
+| `plugins/platforms/<name>/` | Gateway channel adapters (`ctx.register_platform()`) | `PluginManager` (kind: `platform`, one level deeper) |
+| `plugins/image_gen/<name>/` | Image-generation backends (`ctx.register_image_gen_provider()`) | `PluginManager` (kind: `backend`, one level deeper) |
+| `plugins/memory/<name>/` | Memory providers (subclass `MemoryProvider`) | **Own loader** in `plugins/memory/__init__.py` (kind: `exclusive` — one active at a time) |
+| `plugins/context_engine/<name>/` | Context-compression engines (`ctx.register_context_engine()`) | **Own loader** in `plugins/context_engine/__init__.py` (one active at a time) |
+| `plugins/model-providers/<name>/` | LLM provider profiles (`register_provider(ProviderProfile(...))`) | **Own loader** in `providers/__init__.py` (lazily scanned on first `get_provider_profile()` call) |
+
+User plugins at `~/.hermes/plugins/model-providers/<name>/` and `~/.hermes/plugins/memory/<name>/` override bundled plugins of the same name — last-writer-wins in `register_provider()` / `register_memory_provider()`. Drop a directory in, and it replaces the built-in without any repo edits.
 
 ## Plugins are opt-in
 
