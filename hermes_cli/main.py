@@ -5239,10 +5239,17 @@ def cmd_cron(args):
 
 
 def cmd_webhook(args):
-    """Webhook subscription management."""
+    """Entry point for 'hermes webhook' command."""
     from hermes_cli.webhook import webhook_command
 
     webhook_command(args)
+
+
+def cmd_watch(args):
+    """Entry point for 'hermes watch' command."""
+    from hermes_cli.watchers import watch_command
+
+    watch_command(args)
 
 
 def cmd_slack(args):
@@ -8070,6 +8077,7 @@ def _coalesce_session_name_args(argv: list) -> list:
         "plugins",
         "acp",
         "webhook",
+        "watch",
         "memory",
         "dump",
         "debug",
@@ -9264,6 +9272,83 @@ def main():
     )
 
     webhook_parser.set_defaults(func=cmd_webhook)
+
+    # =========================================================================
+    # watch command — interval-polling watchers (pull-based sibling of webhook)
+    # =========================================================================
+    watch_parser = subparsers.add_parser(
+        "watch",
+        help="Manage interval-polling watchers (HTTP JSON, RSS, GitHub, ...)",
+        description=(
+            "Watchers poll an external source on an interval, detect new items via "
+            "watermark-based dedup, and deliver the result (verbatim in --deliver-only "
+            "mode, or as prompt context to a short-lived agent otherwise)."
+        ),
+    )
+    watch_subparsers = watch_parser.add_subparsers(dest="watch_action")
+
+    w_add = watch_subparsers.add_parser(
+        "add", aliases=["subscribe"], help="Create or update a watcher"
+    )
+    w_add.add_argument("name", help="Watcher name (lowercase alphanumerics + '-'/'_')")
+    w_add.add_argument(
+        "--provider",
+        required=True,
+        help="Provider name: http_json | rss | github | <custom>",
+    )
+    w_add.add_argument(
+        "--interval", type=int, default=300, help="Poll interval in seconds (default: 300)"
+    )
+    w_add.add_argument("--prompt", default="", help="Prompt template (supports {items_json}, {name}, {count})")
+    w_add.add_argument("--skills", default="", help="Comma-separated skill names to load")
+    w_add.add_argument(
+        "--deliver",
+        default="origin",
+        help="Delivery target: origin | local | multi | all | telegram | telegram:-100:17 | ... (see 'hermes cron' docs)",
+    )
+    w_add.add_argument(
+        "--deliver-only",
+        action="store_true",
+        help="Skip the agent — deliver the rendered prompt directly. Zero LLM cost.",
+    )
+    w_add.add_argument("--url", default="", help="Shortcut for --arg url=<URL> (http_json / rss)")
+    w_add.add_argument("--repo", default="", help="Shortcut for --arg repo=owner/name (github)")
+    w_add.add_argument(
+        "--scope",
+        default="",
+        help="github scope: issues | pulls | releases | commits (default: issues)",
+    )
+    w_add.add_argument(
+        "--arg",
+        action="append",
+        default=[],
+        help="Additional provider config as key=value (repeatable)",
+    )
+    w_add.add_argument(
+        "--config",
+        default="",
+        help="Full provider config as a JSON object (merged with --arg)",
+    )
+
+    w_list = watch_subparsers.add_parser("list", aliases=["ls"], help="List all watchers")
+    w_list.add_argument("--verbose", action="store_true", help="Include last_error detail")
+
+    w_rm = watch_subparsers.add_parser("remove", aliases=["rm"], help="Remove a watcher")
+    w_rm.add_argument("name", help="Watcher name to remove")
+
+    w_run = watch_subparsers.add_parser(
+        "run", help="Fire one watcher once, out of band (respects dedup)"
+    )
+    w_run.add_argument("name", help="Watcher name to run")
+
+    w_reset = watch_subparsers.add_parser(
+        "reset", help="Clear a watcher's watermark — next run treats it as a first poll"
+    )
+    w_reset.add_argument("name", help="Watcher name to reset")
+
+    watch_subparsers.add_parser("tick", help="Poll every due watcher (ad-hoc)")
+
+    watch_parser.set_defaults(func=cmd_watch)
 
     # =========================================================================
     # kanban command — multi-profile collaboration board

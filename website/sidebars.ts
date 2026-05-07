@@ -63,6 +63,7 @@ const sidebars: SidebarsConfig = {
           label: 'Automation',
           items: [
             'user-guide/features/cron',
+            'user-guide/features/watchers',
             'user-guide/features/delegation',
             'user-guide/features/kanban',
             'user-guide/features/kanban-tutorial',

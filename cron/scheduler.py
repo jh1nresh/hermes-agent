@@ -1724,6 +1724,20 @@ def tick(verbose: bool = True, adapters=None, loop=None) -> int:
         except Exception as _e:
             logger.debug("Post-tick MCP orphan cleanup failed: %s", _e)
 
+        # Piggyback watcher tick — runs after cron jobs so cron stays the
+        # priority path.  Watchers have their own file lock and are safe to
+        # invoke from any tick.  Best-effort: if the watcher subsystem is
+        # missing (e.g. mid-migration), cron keeps working.
+        try:
+            from watchers.engine import tick as _watcher_tick
+            _watcher_outcomes = _watcher_tick(adapters=adapters, loop=loop, verbose=verbose)
+            if verbose and _watcher_outcomes:
+                logger.info("%d watcher(s) polled", len(_watcher_outcomes))
+        except ImportError:
+            pass
+        except Exception as _wexc:
+            logger.warning("Watcher tick failed (non-fatal): %s", _wexc)
+
         return sum(_results)
     finally:
         if fcntl:
