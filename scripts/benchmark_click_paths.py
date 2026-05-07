@@ -26,8 +26,12 @@ import time
 import urllib.request
 from statistics import mean, median, stdev
 from typing import List, Dict, Optional, Tuple
+import os
 
-sys.path.insert(0, "/private/tmp/hermes-coord-click")
+# Add repo root to sys.path when running this script directly
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
 LIGHTPANDA_WS = "ws://127.0.0.1:63372/"
 AGENT_BROWSER_PORT = 63371

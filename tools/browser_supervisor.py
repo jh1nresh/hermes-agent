@@ -487,12 +487,12 @@ class CDPSupervisor:
             # Pipeline both events — send without awaiting press ack.
             # Browser processes CDP messages in order; if mouseReleased is
             # acked, mousePressed has already been applied.
-            press_fut = asyncio.ensure_future(
+            press_fut = asyncio.create_task(
                 self._cdp("Input.dispatchMouseEvent",
                           {**mouse_params, "type": "mousePressed"},
                           session_id=session_id, timeout=timeout)
             )
-            release_fut = asyncio.ensure_future(
+            release_fut = asyncio.create_task(
                 self._cdp("Input.dispatchMouseEvent",
                           {**mouse_params, "type": "mouseReleased"},
                           session_id=session_id, timeout=timeout)

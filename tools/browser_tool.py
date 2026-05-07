@@ -2336,7 +2336,7 @@ async def _cdp_resolve_session(
 
     async def _recv_until(call_id: int) -> dict:
         while True:
-            remaining = deadline - _asyncio.get_event_loop().time()
+            remaining = deadline - _asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise TimeoutError(f"CDP timed out waiting for id={call_id}")
             raw = await _asyncio.wait_for(ws.recv(), timeout=remaining)
@@ -2403,7 +2403,7 @@ async def _cdp_coordinate_click_async(
         ping_interval=None,
         compression=None,       # small CDP messages don't benefit from compression
     ) as ws:
-        deadline = _asyncio.get_event_loop().time() + timeout
+        deadline = _asyncio.get_running_loop().time() + timeout
         msg_id_ref = [0]        # mutable so nested helpers can increment
 
         def _next_id() -> int:
@@ -2425,7 +2425,7 @@ async def _cdp_coordinate_click_async(
 
         async def _recv_until(call_id: int) -> dict:
             while True:
-                remaining = deadline - _asyncio.get_event_loop().time()
+                remaining = deadline - _asyncio.get_running_loop().time()
                 if remaining <= 0:
                     raise TimeoutError(f"CDP timed out waiting for id={call_id}")
                 raw = await _asyncio.wait_for(ws.recv(), timeout=remaining)
@@ -2443,7 +2443,7 @@ async def _cdp_coordinate_click_async(
         # --- fire mousePressed + mouseReleased without awaiting press ack ---
         # Both messages are sent before we await either response.  The browser
         # processes them in order, so waiting only for mouseReleased is enough.
-        press_id = await _send_mouse("mousePressed", session_id)
+        _press_id = await _send_mouse("mousePressed", session_id)
         release_id = await _send_mouse("mouseReleased", session_id)
         try:
             await _recv_until(release_id)
@@ -2452,7 +2452,7 @@ async def _cdp_coordinate_click_async(
             if "Session with given id not found" in str(exc) and session_id:
                 _CDP_SESSION_CACHE.pop(ws_url, None)
                 session_id = await _cdp_resolve_session(ws, ws_url, deadline, msg_id_ref)
-                press_id = await _send_mouse("mousePressed", session_id)
+                _press_id = await _send_mouse("mousePressed", session_id)
                 release_id = await _send_mouse("mouseReleased", session_id)
                 await _recv_until(release_id)
             else:
@@ -2489,9 +2489,10 @@ def _cdp_coordinate_click(
                     "clicked_at": {"x": ix, "y": iy},
                     "method": "cdp_supervisor",
                 }, ensure_ascii=False)
-            except Exception as exc:
-                # Supervisor present but errored — fall through to per-click path
-                pass
+            except Exception as _exc:
+                # Supervisor present but errored (WS disconnect, stale session, etc.)
+                # — fall through to per-click WS path.
+                logger.debug("supervisor coordinate click failed for task=%s, falling back: %s", task_id, _exc)
     except ImportError:
         pass
 
