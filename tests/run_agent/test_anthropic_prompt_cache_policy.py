@@ -247,13 +247,132 @@ class TestQwenAlibabaFamily:
         assert agent._anthropic_prompt_cache_policy() == (False, False)
 
     def test_qwen_on_openrouter_not_affected(self):
-        # Qwen via OpenRouter falls through — OpenRouter has its own
-        # upstream caching arrangement for Qwen (provider-dependent).
+        # Qwen via OpenRouter falls through for models NOT in the explicit
+        # cache-control allowlist — the bare ``qwen/qwen3-coder`` slug (as
+        # opposed to ``qwen3-coder-plus`` / ``qwen3-coder-flash``) is served
+        # on OpenRouter without the explicit-cache requirement. Models that
+        # DO require ``cache_control`` on OpenRouter are covered separately
+        # by TestOpenRouterExplicitCacheControl.
         agent = _make_agent(
             provider="openrouter",
             base_url="https://openrouter.ai/api/v1",
             api_mode="chat_completions",
             model="qwen/qwen3-coder",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (False, False)
+
+
+class TestOpenRouterExplicitCacheControl:
+    """OpenRouter models that need explicit ``cache_control`` breakpoints.
+
+    OpenRouter's prompt-caching docs list a set of non-Claude models
+    (Alibaba Qwen-family, DeepSeek V3.2) as explicit-cache models.
+    Without breakpoints these serve 0% cache reads across turns —
+    re-billing the full prompt every call.  Ported from
+    cline/cline#10578 which verified empirically: a 5-turn harness
+    on ``qwen/qwen3.6-plus`` went from 0% cache hits to a 99.28%
+    post-warmup hit rate after adding breakpoints.
+
+    Envelope layout (``native_anthropic=False``) — OpenRouter speaks
+    OpenAI ``chat.completions`` wire format.
+    """
+
+    def test_qwen_plus(self):
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="qwen/qwen-plus",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (True, False)
+
+    def test_qwen3_max(self):
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="qwen/qwen3-max",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (True, False)
+
+    def test_qwen3_6_plus(self):
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="qwen/qwen3.6-plus",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (True, False)
+
+    def test_qwen3_coder_plus(self):
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="qwen/qwen3-coder-plus",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (True, False)
+
+    def test_qwen3_coder_flash(self):
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="qwen/qwen3-coder-flash",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (True, False)
+
+    def test_deepseek_v3_2(self):
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="deepseek/deepseek-v3.2",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (True, False)
+
+    def test_uppercased_model_id_still_matches(self):
+        # ``_anthropic_prompt_cache_policy`` lowercases the model; explicit
+        # allowlist entries are all lowercase. An uppercase variant of the
+        # same slug must resolve identically.
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="Qwen/Qwen3.6-Plus",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (True, False)
+
+    def test_allowlist_only_applies_on_openrouter(self):
+        # The same model id served via a non-OpenRouter OpenAI-wire gateway
+        # must NOT get cache_control — we have no evidence that third-party
+        # proxies for these models honour the marker.
+        agent = _make_agent(
+            provider="custom",
+            base_url="https://api.fireworks.ai/inference/v1",
+            api_mode="chat_completions",
+            model="qwen/qwen3.6-plus",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (False, False)
+
+    def test_non_allowlisted_qwen_on_openrouter_stays_off(self):
+        # Qwen models NOT in the OpenRouter explicit-cache list (per cline's
+        # empirical testing) stay off — sending unknown cache_control fields
+        # risks breaking strict upstreams that don't silently ignore them.
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="qwen/qwen2.5-72b-instruct",
+        )
+        assert agent._anthropic_prompt_cache_policy() == (False, False)
+
+    def test_non_allowlisted_deepseek_on_openrouter_stays_off(self):
+        agent = _make_agent(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            api_mode="chat_completions",
+            model="deepseek/deepseek-chat",
         )
         assert agent._anthropic_prompt_cache_policy() == (False, False)
 

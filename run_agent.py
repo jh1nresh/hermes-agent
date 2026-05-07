@@ -336,6 +336,22 @@ _PARALLEL_SAFE_TOOLS = frozenset({
 # File tools can run concurrently when they target independent paths.
 _PATH_SCOPED_TOOLS = frozenset({"read_file", "write_file", "patch"})
 
+# OpenRouter model IDs that require explicit ``cache_control`` breakpoints for
+# prompt caching on their upstream provider. OpenRouter's prompt-caching docs
+# list Alibaba's Qwen family and DeepSeek V3.2 as explicit-cache models —
+# without breakpoints they return 0% cache reads and re-bill the full prompt
+# on every turn.  Claude models are handled separately (``is_claude`` branch).
+# OpenAI and Google models are intentionally excluded — OpenRouter manages
+# their caching automatically.  Ported from cline/cline#10578.
+_OPENROUTER_EXPLICIT_CACHE_CONTROL_MODEL_IDS = frozenset({
+    "deepseek/deepseek-v3.2",
+    "qwen/qwen-plus",
+    "qwen/qwen3-max",
+    "qwen/qwen3.6-plus",
+    "qwen/qwen3-coder-plus",
+    "qwen/qwen3-coder-flash",
+})
+
 # Maximum number of concurrent worker threads for parallel tool execution.
 _MAX_TOOL_WORKERS = 8
 
@@ -2965,6 +2981,20 @@ class AIAgent:
         if is_native_anthropic:
             return True, True
         if is_openrouter and is_claude:
+            return True, False
+        if is_openrouter and model_lower in _OPENROUTER_EXPLICIT_CACHE_CONTROL_MODEL_IDS:
+            # OpenRouter's prompt-caching docs list a set of non-Claude models
+            # (Alibaba Qwen-family, DeepSeek V3.2) that only cache when the
+            # request carries explicit ``cache_control`` breakpoints — otherwise
+            # the upstream provider serves 0% cache hits, re-billing the full
+            # prompt on every turn.  Ported from cline/cline#10578 which
+            # verified empirically: qwen/qwen3.6-plus went from 0% cache reads
+            # across 5 turns to a 99.28% hit rate post-warmup after adding
+            # breakpoints.  OpenAI- and Google-family models are intentionally
+            # omitted: OpenRouter handles their caching automatically and
+            # sending ``cache_control`` is ignored at best, rejected at worst.
+            # Envelope layout (native_anthropic=False) — OpenRouter's wire
+            # format is OpenAI chat.completions.
             return True, False
         if is_anthropic_wire and is_claude:
             # Third-party Anthropic-compatible gateway.
