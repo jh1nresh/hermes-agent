@@ -253,6 +253,16 @@ def get_client_credentials() -> Tuple[str, str]:
     if _NOUS_CLIENT_ID and _NOUS_CLIENT_ID != "PLACEHOLDER.apps.googleusercontent.com":
         return _NOUS_CLIENT_ID, _NOUS_CLIENT_SECRET
 
+    # Placeholder credentials are not usable — raise so callers get a clear error
+    if _NOUS_CLIENT_ID.startswith("PLACEHOLDER"):
+        raise GoogleWorkspaceOAuthError(
+            "No usable Google OAuth client credentials found.\n"
+            "The bundled Nous Research app is not yet verified. Please either:\n"
+            "  1. Set HERMES_GOOGLE_WORKSPACE_CLIENT_ID and HERMES_GOOGLE_WORKSPACE_CLIENT_SECRET env vars\n"
+            "  2. Place a google_client_secret.json in ~/.hermes/\n",
+            code="google_workspace_oauth_no_client",
+        )
+
     # If we only have the placeholder, still return it — caller can decide
     # whether to proceed or error out.
     return _NOUS_CLIENT_ID, _NOUS_CLIENT_SECRET
@@ -706,8 +716,7 @@ def run_oauth_login() -> dict:
     saves the token. This function polls the dashboard session until
     it's approved.
 
-    Falls back to a standalone local HTTP server on port 8098 if the
-    dashboard is not reachable.
+    If the dashboard is not running, exits with instructions to start it or use --no-browser mode.
 
     Returns:
         The saved token data dict.
@@ -727,7 +736,8 @@ def run_oauth_login() -> dict:
         )
 
     # Try the dashboard flow first (preferred — single source of truth)
-    dashboard_url = "http://127.0.0.1:9119"
+    dashboard_port = os.environ.get("HERMES_DASHBOARD_PORT", "9119")
+    dashboard_url = f"http://127.0.0.1:{dashboard_port}"
     use_dashboard = _is_dashboard_running(dashboard_url)
 
     if use_dashboard:

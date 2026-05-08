@@ -1874,14 +1874,24 @@ def login_google_workspace_command(args) -> None:
 
         # Extract code from URL if user pasted the full redirect URL
         code = callback_input
+        returned_state = None
         if callback_input.startswith("http"):
             from urllib.parse import parse_qs, urlparse
             parsed = urlparse(callback_input)
             params = parse_qs(parsed.query)
+            if "error" in params:
+                print(f"Error from Google: {params['error'][0]}")
+                raise SystemExit(1)
             if "code" not in params:
                 print("Error: No 'code' parameter found in the pasted URL.")
                 raise SystemExit(1)
             code = params["code"][0]
+            returned_state = params.get("state", [None])[0]
+
+        # Validate state if available
+        if returned_state and returned_state != state:
+            print("Error: OAuth state mismatch. This may be a code from a different session.")
+            raise SystemExit(1)
 
         try:
             token_data = exchange_code(code, state, code_verifier, redirect_uri="http://localhost:1")
@@ -1891,7 +1901,7 @@ def login_google_workspace_command(args) -> None:
     else:
         # Interactive flow — opens browser, waits for callback
         print("Starting Google Workspace PKCE login...")
-        print(f"  Client ID: {client_id[:20]}...")
+        print(f"  Client ID: {client_id[:8]}…")
         print(f"  Token will be saved to: {credentials_path()}")
         print()
         try:

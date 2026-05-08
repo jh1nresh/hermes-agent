@@ -12,6 +12,7 @@ Usage:
 import asyncio
 import base64
 import hashlib
+import html
 import hmac
 import importlib.util
 import json
@@ -2157,7 +2158,9 @@ def _start_google_workspace_pkce() -> Dict[str, Any]:
     sess["client_secret"] = client_secret
 
     # Use localhost:9119 callback so the dashboard catches the redirect automatically
-    redirect_uri = "http://localhost:9119/auth/google/callback"
+    # Use the actual bound port if available, default to 9119
+    bound_port = getattr(app.state, "bound_port", 9119)
+    redirect_uri = f"http://localhost:{bound_port}/auth/google/callback"
     sess["redirect_uri"] = redirect_uri
 
     params = {
@@ -2242,6 +2245,12 @@ def _submit_google_workspace_pkce(session_id: str, code_input: str) -> Dict[str,
             sess["error_message"] = "No access token returned"
         return {"ok": False, "status": "error", "message": sess["error_message"]}
 
+    if not refresh_token:
+        with _oauth_sessions_lock:
+            sess["status"] = "error"
+            sess["error_message"] = "No refresh token returned. Ensure 'access_type=offline' and 'prompt=consent' are set."
+        return {"ok": False, "status": "error", "message": sess["error_message"]}
+
     # Save token in google_token.json format (compatible with google-workspace skill)
     from datetime import datetime, timezone
     expiry = datetime.fromtimestamp(
@@ -2262,7 +2271,12 @@ def _submit_google_workspace_pkce(session_id: str, code_input: str) -> Dict[str,
 
     token_path = credentials_path()
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(json.dumps(token_payload, indent=2), encoding="utf-8")
+    import os as _os
+    fd = _os.open(str(token_path), _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
+    try:
+        _os.write(fd, json.dumps(token_payload, indent=2).encode("utf-8"))
+    finally:
+        _os.close(fd)
 
     with _oauth_sessions_lock:
         sess["status"] = "approved"
@@ -2369,7 +2383,7 @@ body{{background:#041c1c;color:#ffe6cb;font-family:system-ui,-apple-system,"Sego
 h1{{font-size:1.5rem;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;margin-bottom:0.75rem}}
 p{{color:rgba(255,230,203,0.7);font-size:0.95rem;line-height:1.6}}
 </style></head>
-<body><div class="card"><div class="icon">✗</div><h1>Authorization Failed</h1><p>{error}</p></div></body>
+<body><div class="card"><div class="icon">✗</div><h1>Authorization Failed</h1><p>{html.escape(error)}</p></div></body>
 </html>""",
             status_code=400,
         )
@@ -2396,7 +2410,7 @@ p{color:rgba(255,230,203,0.7);font-size:0.95rem;line-height:1.6}
         result = _submit_google_workspace_pkce(state, code)
     except HTTPException as exc:
         return HTMLResponse(
-            f"<html><body><h2>❌ {exc.detail}</h2></body></html>",
+            f"<html><body><h2>❌ {html.escape(str(exc.detail))}</h2></body></html>",
             status_code=exc.status_code,
         )
 
@@ -2488,7 +2502,7 @@ p{color:rgba(255,230,203,0.7);font-size:0.95rem;line-height:1.6}
 <div class="card">
   <div class="icon">✗</div>
   <h1>Connection Failed</h1>
-  <p>{msg}</p>
+  <p>{html.escape(str(msg))}</p>
 </div>
 </body>
 </html>""",
