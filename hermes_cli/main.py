@@ -43,12 +43,20 @@ Usage:
     hermes claw migrate --dry-run  # Preview migration without changes
 """
 
+import os
+import sys
+from utf8_bootstrap import ensure_windows_utf8_mode
+
+# Force UTF-8 defaults on Windows before any module-level file I/O.
+ensure_windows_utf8_mode(
+    module="hermes_cli.main",
+    entrypoint_markers=("hermes", "main.py"),
+)
+
 import argparse
 import json
-import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Optional
 

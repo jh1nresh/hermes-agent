@@ -58,6 +58,7 @@ from datetime import datetime
 from pathlib import Path
 
 from hermes_constants import get_hermes_home
+from utf8_bootstrap import ensure_windows_utf8_mode
 
 
 _OPENAI_CLS_CACHE: Optional[type] = None
@@ -14483,6 +14484,11 @@ def main(
     Toolset Examples:
         - "research": Web search, extract, crawl + vision tools
     """
+    ensure_windows_utf8_mode(
+        module="run_agent",
+        entrypoint_markers=("hermes-agent", "run_agent.py"),
+    )
+
     print("🤖 AI Agent with Tool Calling")
     print("=" * 50)
     

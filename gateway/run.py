@@ -15500,6 +15500,12 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
 
 def main():
     """CLI entry point for the gateway."""
+    from utf8_bootstrap import ensure_windows_utf8_mode
+    ensure_windows_utf8_mode(
+        module="gateway.run",
+        entrypoint_markers=("gateway", "run.py"),
+    )
+
     import argparse
     
     parser = argparse.ArgumentParser(description="Hermes Gateway - Multi-platform messaging")

@@ -34,6 +34,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
+from utf8_bootstrap import ensure_windows_utf8_mode
+
 logger = logging.getLogger(__name__)
 
 # Suppress startup messages for clean CLI experience
@@ -12341,6 +12343,11 @@ def main(
         python cli.py -w -q "Fix issue #123"     # Single query in worktree
     """
     global _active_worktree
+
+    ensure_windows_utf8_mode(
+        module="cli",
+        entrypoint_markers=("hermes", "cli.py"),
+    )
 
     # Signal to terminal_tool that we're in interactive mode
     # This enables interactive sudo password prompts with timeout
