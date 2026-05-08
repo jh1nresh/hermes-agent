@@ -145,15 +145,30 @@ function Test-Python {
     # Python not found — use uv to install it (no admin needed!)
     Write-Info "Python $PythonVersion not found, installing via uv..."
     try {
+        # Temporarily relax ErrorActionPreference: uv writes download progress
+        # to stderr, and with $ErrorActionPreference = "Stop" PowerShell wraps
+        # those stderr lines as ErrorRecord objects via 2>&1, then throws a
+        # terminating exception — even when uv exits 0.  This caused fresh
+        # installs to fail on the first run despite Python being installed
+        # successfully.  We verify success with `uv python find` afterwards
+        # which is the reliable signal regardless of exit code semantics.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         $uvOutput = & $UvCmd python install $PythonVersion 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            $pythonPath = & $UvCmd python find $PythonVersion 2>$null
-            if ($pythonPath) {
-                $ver = & $pythonPath --version 2>$null
-                Write-Success "Python installed: $ver"
-                return $true
-            }
-        } else {
+        $uvExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+
+        # Check if Python is now available (more reliable than exit code
+        # since uv may return non-zero due to "already installed" etc.)
+        $pythonPath = & $UvCmd python find $PythonVersion 2>$null
+        if ($pythonPath) {
+            $ver = & $pythonPath --version 2>$null
+            Write-Success "Python installed: $ver"
+            return $true
+        }
+
+        # uv ran but Python still not findable — show what happened
+        if ($uvExitCode -ne 0) {
             Write-Warn "uv python install output:"
             Write-Host $uvOutput -ForegroundColor DarkGray
         }
