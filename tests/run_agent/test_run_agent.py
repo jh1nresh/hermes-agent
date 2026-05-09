@@ -2671,6 +2671,44 @@ class TestRunConversation:
         assert result["final_response"] == "Here is the actual answer."
         assert result["api_calls"] == 2  # 1 original + 1 nudge retry
 
+    def test_reasoning_content_after_tool_skips_nudge_routes_to_prefill(self, agent):
+        """Regression for #21811: when the model returns empty content but populated
+        reasoning_content after a tool call, the post-tool empty nudge must NOT fire.
+        The response should route to the prefill branch instead."""
+        self._setup_agent(agent)
+        agent.base_url = "http://127.0.0.1:1234/v1"
+        tc = _mock_tool_call(name="memory_save", arguments="{}", call_id="c1")
+        # Turn 1: tool call from model
+        tool_resp = _mock_response(content="", finish_reason="tool_calls", tool_calls=[tc])
+        # Turn 2: parser-split reasoning (empty content, reasoning in separate field)
+        reasoning_resp = _mock_response(
+            content=None,
+            finish_reason="stop",
+            reasoning_content="Thought: The user wants me to save…",
+        )
+        # Turn 3: prefill continuation produces the real answer
+        answer_resp = _mock_response(content="Saved your preference.", finish_reason="stop")
+        agent.client.chat.completions.create.side_effect = [tool_resp, reasoning_resp, answer_resp]
+
+        status_messages = []
+
+        with (
+            patch("run_agent.handle_function_call", return_value="Saved."),
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+            patch.object(agent, "_emit_status", side_effect=status_messages.append),
+        ):
+            result = agent.run_conversation("Save my preference: concise responses")
+
+        assert result["completed"] is True
+        assert result["final_response"] == "Saved your preference."
+        # Nudge must not have fired: no "nudging to continue" status emitted
+        nudge_msgs = [m for m in status_messages if "nudging" in m.lower()]
+        assert not nudge_msgs, (
+            f"Post-tool empty nudge fired despite reasoning_content being populated: {nudge_msgs}"
+        )
+
     def test_empty_response_triggers_fallback_provider(self, agent):
         """After 3 empty retries, fallback provider is activated and produces content."""
         self._setup_agent(agent)

@@ -14245,10 +14245,24 @@ class AIAgent:
                                 re.IGNORECASE,
                             )
                         )
+                        # Parsers like Ollama's qwen3.5 PARSER or DeepSeek's
+                        # reasoning channel split thinking out of content and
+                        # into a separate API field (reasoning_content /
+                        # reasoning / reasoning_details).  When that happens,
+                        # final_response is empty AND contains no <think> tag,
+                        # so the inline check misses it and the nudge fires.
+                        # Gate on the structured field too so the response
+                        # routes to the prefill branch instead. Fixes #21811.
+                        _has_separate_reasoning = bool(
+                            getattr(assistant_message, "reasoning_content", None)
+                            or getattr(assistant_message, "reasoning", None)
+                            or getattr(assistant_message, "reasoning_details", None)
+                        )
                         if (
                             _prior_was_tool
                             and not getattr(self, "_post_tool_empty_retried", False)
                             and not _has_inline_thinking  # thinking model still working — let prefill handle
+                            and not _has_separate_reasoning  # ditto for parser-split reasoning fields
                         ):
                             self._post_tool_empty_retried = True
                             # Clear stale narration so it doesn't resurface
