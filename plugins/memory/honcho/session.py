@@ -448,23 +448,61 @@ class HonchoSessionManager:
             if self._turn_counter % wf == 0:
                 self._flush_session(session)
 
+    # Combined wall-clock budget for ``flush_all`` calls issued from
+    # shutdown paths.  Each ``_flush_session`` makes a synchronous HTTP
+    # call against the Honcho service, and a slow backend would
+    # otherwise let N cached sessions multiply the latency.  When the
+    # deadline hits we log and skip the remainder — messages that
+    # weren't flushed stay in-memory and the next successful
+    # ``on_session_end`` / ``flush_all`` call picks them up.
+    _FLUSH_ALL_DEADLINE_SECONDS = 3.0
+
     def flush_all(self) -> None:
         """Flush all pending unsynced messages for all cached sessions.
 
         Called at session end for "session" write_frequency, or to force
         a sync before process exit regardless of mode.
+
+        Bounded by ``_FLUSH_ALL_DEADLINE_SECONDS``: once the combined
+        wall-clock budget is spent, remaining sessions are left
+        unflushed so ``hermes`` shutdown isn't held hostage by a slow
+        Honcho service.  Unsynced messages stay in-memory and get
+        another attempt on the next flush.
         """
+        import time as _time  # local import — avoid polluting module scope
+
         with self._cache_lock:
             sessions = list(self._cache.values())
+
+        deadline = _time.monotonic() + self._FLUSH_ALL_DEADLINE_SECONDS
+        flushed = 0
         for session in sessions:
+            if _time.monotonic() >= deadline:
+                remaining = len(sessions) - flushed
+                logger.warning(
+                    "Honcho flush_all exceeded %.1fs budget — skipping %d "
+                    "session(s); unsynced messages will retry later",
+                    self._FLUSH_ALL_DEADLINE_SECONDS,
+                    remaining,
+                )
+                return
             try:
                 self._flush_session(session)
             except Exception as e:
                 logger.error("Honcho flush_all error for %s: %s", session.key, e)
+            flushed += 1
 
-        # Drain async queue synchronously if it exists
+        # Drain async queue synchronously if it exists — also bounded
+        # by the same overall deadline.
         if self._async_queue is not None:
             while not self._async_queue.empty():
+                if _time.monotonic() >= deadline:
+                    logger.warning(
+                        "Honcho flush_all exceeded %.1fs budget while draining "
+                        "async queue — remaining items retry later",
+                        self._FLUSH_ALL_DEADLINE_SECONDS,
+                    )
+                    return
                 try:
                     item = self._async_queue.get_nowait()
                     if item is not _ASYNC_SHUTDOWN:
@@ -472,12 +510,23 @@ class HonchoSessionManager:
                 except queue.Empty:
                     break
 
+    # Async-writer join timeout on ``shutdown``.  ``flush_all`` (above)
+    # already bounded the synchronous flush work; the writer thread
+    # only needs enough time to observe the shutdown sentinel and
+    # unwind, so a tight bound is safe here.
+    _ASYNC_THREAD_JOIN_TIMEOUT = 1.0
+
     def shutdown(self) -> None:
-        """Gracefully shut down the async writer thread."""
+        """Gracefully shut down the async writer thread.
+
+        All shutdown paths are bounded — ``flush_all`` has its own
+        wall-clock deadline and the writer-thread join uses a short
+        timeout so a stuck Honcho HTTP call can't hold the CLI open.
+        """
         if self._async_queue is not None and self._async_thread is not None:
             self.flush_all()
             self._async_queue.put(_ASYNC_SHUTDOWN)
-            self._async_thread.join(timeout=10)
+            self._async_thread.join(timeout=self._ASYNC_THREAD_JOIN_TIMEOUT)
 
     def delete(self, key: str) -> bool:
         """Delete a session from local cache."""

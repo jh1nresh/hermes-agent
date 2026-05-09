@@ -1180,15 +1180,29 @@ class HonchoMemoryProvider(MemoryProvider):
         t = threading.Thread(target=_write, daemon=True, name="honcho-memwrite")
         t.start()
 
+    # Shutdown-path budgets.  The Honcho service is best-effort during
+    # CLI exit: a slow / unreachable backend used to stall ``hermes``
+    # shutdown by up to ~28s (10s sync-thread join on ``on_session_end``
+    # + 5s×2 joins on ``shutdown`` + 10s async-thread join in the
+    # session cache).  Tight bounds keep worst-case shutdown under ~6s
+    # without sacrificing the happy path — a responsive Honcho finishes
+    # its final flush in < 200ms.
+    _SESSION_END_SYNC_JOIN_TIMEOUT = 2.0
+    _SHUTDOWN_THREAD_JOIN_TIMEOUT = 1.0
+
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
-        """Flush all pending messages to Honcho on session end."""
+        """Flush all pending messages to Honcho on session end.
+
+        Bounded work: the sync-thread join + ``flush_all`` together
+        must not stall CLI shutdown when Honcho is slow or unreachable.
+        """
         if self._cron_skipped:
             return
         if not self._manager:
             return
         # Wait for pending sync
         if self._sync_thread and self._sync_thread.is_alive():
-            self._sync_thread.join(timeout=10.0)
+            self._sync_thread.join(timeout=self._SESSION_END_SYNC_JOIN_TIMEOUT)
         try:
             self._manager.flush_all()
         except Exception as e:
@@ -1308,9 +1322,16 @@ class HonchoMemoryProvider(MemoryProvider):
             return tool_error(f"Honcho {tool_name} failed: {e}")
 
     def shutdown(self) -> None:
+        """Tear down Honcho background threads with bounded joins.
+
+        Prefetch and sync threads are daemon threads doing HTTP work
+        against the Honcho service; join timeouts are kept short so a
+        slow backend can't stall CLI exit.  Outstanding messages are
+        flushed once at the end on a best-effort basis.
+        """
         for t in (self._prefetch_thread, self._sync_thread):
             if t and t.is_alive():
-                t.join(timeout=5.0)
+                t.join(timeout=self._SHUTDOWN_THREAD_JOIN_TIMEOUT)
         # Flush any remaining messages
         if self._manager:
             try:
