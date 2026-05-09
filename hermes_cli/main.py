@@ -8858,7 +8858,7 @@ def _build_provider_choices() -> list[str]:
     except Exception:
         # Fallback: static list guarantees the CLI always works
         return [
-            "auto", "openrouter", "nous", "openai-codex", "copilot-acp", "copilot",
+            "auto", "openrouter", "nous", "openai-codex", "copilot-acp", "codex-cli", "copilot",
             "anthropic", "gemini", "google-gemini-cli", "xai", "bedrock", "azure-foundry",
             "ollama-cloud", "huggingface", "zai", "kimi-coding", "kimi-coding-cn",
             "stepfun", "minimax", "minimax-cn", "kilocode", "xiaomi", "arcee",

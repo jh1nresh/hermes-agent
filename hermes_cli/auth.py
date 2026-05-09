@@ -197,6 +197,13 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         inference_base_url=DEFAULT_COPILOT_ACP_BASE_URL,
         base_url_env_var="COPILOT_ACP_BASE_URL",
     ),
+    "codex-cli": ProviderConfig(
+        id="codex-cli",
+        name="OpenAI Codex CLI",
+        auth_type="external_process",
+        inference_base_url="codex-cli://local",
+        base_url_env_var="CODEX_CLI_BASE_URL",
+    ),
     "gemini": ProviderConfig(
         id="gemini",
         name="Google AI Studio",
@@ -1377,6 +1384,7 @@ def resolve_provider(
         "github": "copilot", "github-copilot": "copilot",
         "github-models": "copilot", "github-model": "copilot",
         "github-copilot-acp": "copilot-acp", "copilot-acp-agent": "copilot-acp",
+        "codexcli": "codex-cli", "openai-codex-cli": "codex-cli",
         "aigateway": "ai-gateway", "vercel": "ai-gateway", "vercel-ai-gateway": "ai-gateway",
         "opencode": "opencode-zen", "zen": "opencode-zen",
         "qwen-portal": "qwen-oauth", "qwen-cli": "qwen-oauth", "qwen-oauth": "qwen-oauth", "google-gemini-cli": "google-gemini-cli", "gemini-cli": "google-gemini-cli", "gemini-oauth": "google-gemini-cli",
@@ -4009,28 +4017,60 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
     if not pconfig or pconfig.auth_type != "external_process":
         return {"configured": False}
 
-    command = (
-        os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
-        or os.getenv("COPILOT_CLI_PATH", "").strip()
-        or "copilot"
-    )
-    raw_args = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
-    args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
-    base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
-    if not base_url:
-        base_url = pconfig.inference_base_url
+    if provider_id == "copilot-acp":
+        command = (
+            os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
+            or os.getenv("COPILOT_CLI_PATH", "").strip()
+            or "copilot"
+        )
+        raw_args = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
+        args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
+        base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
+        if not base_url:
+            base_url = pconfig.inference_base_url
+        resolved_command = shutil.which(command) if command else None
+        return {
+            "configured": bool(resolved_command or base_url.startswith("acp+tcp://")),
+            "provider": provider_id,
+            "name": pconfig.name,
+            "command": command,
+            "args": args,
+            "resolved_command": resolved_command,
+            "base_url": base_url,
+            "logged_in": bool(resolved_command or base_url.startswith("acp+tcp://")),
+        }
 
-    resolved_command = shutil.which(command) if command else None
-    return {
-        "configured": bool(resolved_command or base_url.startswith("acp+tcp://")),
-        "provider": provider_id,
-        "name": pconfig.name,
-        "command": command,
-        "args": args,
-        "resolved_command": resolved_command,
-        "base_url": base_url,
-        "logged_in": bool(resolved_command or base_url.startswith("acp+tcp://")),
-    }
+    if provider_id == "codex-cli":
+        command = (
+            os.getenv("HERMES_CODEX_CLI_COMMAND", "").strip()
+            or os.getenv("CODEX_CLI_PATH", "").strip()
+            or "codex"
+        )
+        raw_args = os.getenv("HERMES_CODEX_CLI_ARGS", "").strip()
+        default_args = [
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
+        ]
+        args = shlex.split(raw_args) if raw_args else default_args
+        base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
+        if not base_url:
+            base_url = pconfig.inference_base_url
+        resolved_command = shutil.which(command) if command else None
+        return {
+            "configured": bool(resolved_command),
+            "provider": provider_id,
+            "name": pconfig.name,
+            "command": command,
+            "args": args,
+            "resolved_command": resolved_command,
+            "base_url": base_url,
+            "logged_in": bool(resolved_command),
+        }
+
+    return {"configured": False}
 
 
 def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
@@ -4047,6 +4087,8 @@ def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
     if target == "google-gemini-cli":
         return get_gemini_oauth_auth_status()
     if target == "copilot-acp":
+        return get_external_process_provider_status(target)
+    if target == "codex-cli":
         return get_external_process_provider_status(target)
     # API-key providers
     pconfig = PROVIDER_REGISTRY.get(target)
@@ -4121,30 +4163,69 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
     if not base_url:
         base_url = pconfig.inference_base_url
 
-    command = (
-        os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
-        or os.getenv("COPILOT_CLI_PATH", "").strip()
-        or "copilot"
-    )
-    raw_args = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
-    args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
-    resolved_command = shutil.which(command) if command else None
-    if not resolved_command and not base_url.startswith("acp+tcp://"):
-        raise AuthError(
-            f"Could not find the Copilot CLI command '{command}'. "
-            "Install GitHub Copilot CLI or set HERMES_COPILOT_ACP_COMMAND/COPILOT_CLI_PATH.",
-            provider=provider_id,
-            code="missing_copilot_cli",
+    if provider_id == "copilot-acp":
+        command = (
+            os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
+            or os.getenv("COPILOT_CLI_PATH", "").strip()
+            or "copilot"
         )
+        raw_args = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
+        args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
+        resolved_command = shutil.which(command) if command else None
+        if not resolved_command and not base_url.startswith("acp+tcp://"):
+            raise AuthError(
+                f"Could not find the Copilot CLI command '{command}'. "
+                "Install GitHub Copilot CLI or set HERMES_COPILOT_ACP_COMMAND/COPILOT_CLI_PATH.",
+                provider=provider_id,
+                code="missing_copilot_cli",
+            )
+        return {
+            "provider": provider_id,
+            "api_key": "copilot-acp",
+            "base_url": base_url.rstrip("/"),
+            "command": resolved_command or command,
+            "args": args,
+            "source": "process",
+        }
 
-    return {
-        "provider": provider_id,
-        "api_key": "copilot-acp",
-        "base_url": base_url.rstrip("/"),
-        "command": resolved_command or command,
-        "args": args,
-        "source": "process",
-    }
+    if provider_id == "codex-cli":
+        command = (
+            os.getenv("HERMES_CODEX_CLI_COMMAND", "").strip()
+            or os.getenv("CODEX_CLI_PATH", "").strip()
+            or "codex"
+        )
+        raw_args = os.getenv("HERMES_CODEX_CLI_ARGS", "").strip()
+        default_args = [
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--skip-git-repo-check",
+        ]
+        args = shlex.split(raw_args) if raw_args else default_args
+        resolved_command = shutil.which(command) if command else None
+        if not resolved_command:
+            raise AuthError(
+                f"Could not find the Codex CLI command '{command}'. "
+                "Install Codex CLI (npm install -g @openai/codex) or set "
+                "HERMES_CODEX_CLI_COMMAND / CODEX_CLI_PATH.",
+                provider=provider_id,
+                code="missing_codex_cli",
+            )
+        return {
+            "provider": provider_id,
+            "api_key": "codex-cli",
+            "base_url": base_url.rstrip("/"),
+            "command": resolved_command or command,
+            "args": args,
+            "source": "process",
+        }
+
+    raise AuthError(
+        f"Unknown external-process provider '{provider_id}'.",
+        provider=provider_id,
+        code="unknown_external_process_provider",
+    )
 
 
 # =============================================================================

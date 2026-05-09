@@ -1264,6 +1264,7 @@ class AIAgent:
             api_mode is None
             and self.api_mode == "chat_completions"
             and self.provider != "copilot-acp"
+            and self.provider != "codex-cli"
             and not str(self.base_url or "").lower().startswith("acp://copilot")
             and not str(self.base_url or "").lower().startswith("acp+tcp://")
             and not self._is_azure_openai_url()
@@ -1587,6 +1588,9 @@ class AIAgent:
                 if self.provider == "copilot-acp":
                     client_kwargs["command"] = self.acp_command
                     client_kwargs["args"] = self.acp_args
+                if self.provider == "codex-cli":
+                    client_kwargs["command"] = self.acp_command
+                    client_kwargs["args"] = self.acp_args
                 effective_base = base_url
                 if base_url_host_matches(effective_base, "openrouter.ai"):
                     from agent.auxiliary_client import build_or_headers
@@ -1761,6 +1765,11 @@ class AIAgent:
             disabled_toolsets=disabled_toolsets,
             quiet_mode=self.quiet_mode,
         )
+
+        # Codex CLI provider is text-in/text-out MVP — Hermes tools are disabled
+        # because Codex handles its own tool calling internally via `codex exec`.
+        if self.provider == "codex-cli":
+            self.tools = []
         
         # Show tool configuration and store valid tool names for validation
         self.valid_tool_names = set()
@@ -5954,6 +5963,17 @@ class AIAgent:
             client = CopilotACPClient(**client_kwargs)
             logger.info(
                 "Copilot ACP client created (%s, shared=%s) %s",
+                reason,
+                shared,
+                self._client_log_context(),
+            )
+            return client
+        if self.provider == "codex-cli" or str(client_kwargs.get("base_url", "")).startswith("codex-cli://"):
+            from agent.codex_cli_client import CodexCLIClient
+
+            client = CodexCLIClient(**client_kwargs)
+            logger.info(
+                "Codex CLI client created (%s, shared=%s) %s",
                 reason,
                 shared,
                 self._client_log_context(),
@@ -11809,8 +11829,10 @@ class AIAgent:
                     # API upgrade (lines ~1083-1085).
                     elif (
                         self.provider == "copilot-acp"
+                        or self.provider == "codex-cli"
                         or str(self.base_url or "").lower().startswith("acp://copilot")
                         or str(self.base_url or "").lower().startswith("acp+tcp://")
+                        or str(self.base_url or "").lower().startswith("codex-cli://")
                     ):
                         _use_streaming = False
                     elif not self._has_stream_consumers():
