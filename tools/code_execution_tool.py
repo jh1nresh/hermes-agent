@@ -621,6 +621,8 @@ def _get_or_create_env(task_id: str):
                 "vercel_runtime": config.get("vercel_runtime", ""),
                 "docker_volumes": config.get("docker_volumes", []),
                 "docker_run_as_host_user": config.get("docker_run_as_host_user", False),
+                "docker_network": config.get("docker_network"),
+                "docker_exec_user": config.get("docker_exec_user"),
             }
 
         ssh_config = None
