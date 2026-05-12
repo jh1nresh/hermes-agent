@@ -157,6 +157,8 @@ class TestHandleVisionAnalyzeFastPath:
         with (
             patch("agent.auxiliary_client._read_main_provider", return_value="openrouter"),
             patch("agent.auxiliary_client._read_main_model", return_value="anthropic/claude-opus-4.6"),
+            patch("agent.image_routing.decide_image_input_mode", return_value="native"),
+            patch("tools.vision_tools._supports_media_in_tool_results", return_value=True),
         ):
             coro = _handle_vision_analyze({"image_url": str(img), "question": "?"})
             result = asyncio.get_event_loop().run_until_complete(coro)

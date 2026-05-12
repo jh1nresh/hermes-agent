@@ -26,6 +26,9 @@ permissions:
   contents: read
   pull-requests: write # needed to post/update PR comments
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: lint-${{ github.ref }}
   cancel-in-progress: true

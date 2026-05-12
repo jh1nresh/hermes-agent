@@ -16,6 +16,9 @@ permissions:
   pull-requests: write
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # Narrow, high-signal scanner. Only fires on critical indicators of supply
 # chain attacks (e.g. the litellm-style payloads). Low-signal heuristics
 # (plain base64, plain exec/eval, dependency/Dockerfile/workflow edits,

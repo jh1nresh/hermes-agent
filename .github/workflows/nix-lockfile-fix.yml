@@ -21,6 +21,9 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: nix-lockfile-fix-${{ github.event.issue.number || github.event.inputs.pr_number || github.ref }}
   cancel-in-progress: false
