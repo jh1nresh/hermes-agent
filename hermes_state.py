@@ -1743,14 +1743,11 @@ class SessionDB:
         window_min_id = window_rows[0]["id"]
         window_max_id = window_rows[-1]["id"]
 
-        # Fetch bookends only if there's space outside the window. The SQL
-        # filters by id range + role + non-empty content so we don't pull
-        # tool blobs we'd just drop, and so tool-call-only assistant turns
-        # (content='' with tool_calls populated) don't crowd out the actual
-        # prose openings/closings. Bookends exist to surface the session's
-        # spoken goal + resolution; "let me check..."-shaped assistant
-        # messages without content carry signal in tool_calls but aren't
-        # useful here. ``bookend=0`` short-circuits both queries.
+        # Fetch bookends only if there's space outside the window. SQL filters
+        # by id range, role, and non-empty content — tool-call-only assistant
+        # turns (content='' with tool_calls populated) are excluded so they
+        # don't crowd out the actual prose openings/closings. ``bookend=0``
+        # short-circuits both queries.
         bookend_start_rows: List[Any] = []
         bookend_end_rows: List[Any] = []
         if bookend > 0:
@@ -2111,9 +2108,8 @@ class SessionDB:
         else:
             sort_norm = None
 
-        # Build the ORDER BY clause shared by both FTS5 paths (main + trigram).
-        # When sort is set, timestamp is primary and rank is the tiebreaker;
-        # otherwise rank alone (current behaviour).
+        # ORDER BY shared by both FTS5 paths. With sort set, timestamp is
+        # primary and rank is the tiebreaker; otherwise rank alone.
         if sort_norm == "newest":
             order_by_sql = "ORDER BY m.timestamp DESC, rank"
         elif sort_norm == "oldest":
@@ -2267,10 +2263,8 @@ class SessionDB:
                 if role_filter:
                     like_where.append(f"m.role IN ({','.join('?' for _ in role_filter)})")
                     like_params.extend(role_filter)
-                # LIKE fallback has no FTS5 rank to combine with, so the
-                # ordering options collapse to just timestamp direction.
-                # Default and "newest" both produce DESC (preserving prior
-                # behaviour); "oldest" flips to ASC.
+                # LIKE fallback has no rank to combine with — just timestamp
+                # direction. Default/"newest" → DESC; "oldest" → ASC.
                 like_order_sql = (
                     "ORDER BY m.timestamp ASC"
                     if sort_norm == "oldest"

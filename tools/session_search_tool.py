@@ -25,15 +25,10 @@ from agent.auxiliary_client import async_call_llm, extract_content_or_reasoning
 MAX_SESSION_CHARS = 100_000
 
 
-# Default mode is fast unless the user opts into a different one via
-# ``auxiliary.session_search.default_mode`` in ~/.hermes/config.yaml. Lives
-# alongside the other session_search-scoped knobs (provider, model,
-# max_concurrency) — "auxiliary" started as aux-LLM routing but in practice
-# groups per-tool config by tool name. Only ``fast`` and ``summary`` are
-# valid defaults — guided requires anchors and can't be used standalone.
-# Wrapped in lru_cache so the YAML read happens at most once per process;
-# the CLI / TUI is the typical caller and config changes need a restart
-# anyway.
+# Default mode is fast unless the user sets ``auxiliary.session_search.default_mode``
+# in ~/.hermes/config.yaml. Only ``fast`` and ``summary`` are valid — guided
+# requires anchors. Resolver is lru_cache-wrapped so the YAML read happens at
+# most once per process; restart to pick up config changes.
 _VALID_DEFAULT_MODES = ("fast", "summary")
 _FALLBACK_DEFAULT_MODE = "fast"
 
@@ -833,10 +828,9 @@ def session_search(
     if mode not in ("fast", "summary", "guided"):
         mode = _resolve_user_default_mode()
 
-    # Normalise sort. Only "newest" / "oldest" are accepted; anything else
-    # (including None) collapses to None = FTS5 rank-only ordering, which is
-    # the historical default. sort only affects fast mode — log and ignore
-    # in summary / guided / recent so misuse is visible but non-fatal.
+    # Normalise sort — only "newest"/"oldest" are accepted; anything else
+    # collapses to None (FTS5 rank-only). Sort affects fast mode only; logged
+    # and ignored elsewhere so misuse is visible but non-fatal.
     sort_norm: Optional[str] = None
     if isinstance(sort, str):
         candidate = sort.strip().lower()
@@ -880,11 +874,9 @@ def session_search(
     query = query.strip()
 
     try:
-        # Parse role filter. When caller didn't pass one, default to
-        # user+assistant — tool messages are usually noisy (serialised tool
-        # calls, large outputs) and rarely the signal someone is searching
-        # for. Callers can opt back in by passing role_filter='user,assistant,tool'
-        # or just 'tool' when debugging tool output.
+        # Parse role filter. Defaults to user+assistant; tool messages are
+        # usually noisy and rarely the signal. Caller opts back in via
+        # role_filter='user,assistant,tool' or 'tool'.
         role_list = None
         if role_filter and role_filter.strip():
             role_list = [r.strip() for r in role_filter.split(",") if r.strip()]
@@ -947,15 +939,12 @@ def session_search(
         # session lineage. Compression and delegation create child sessions
         # that still belong to the same active conversation.
         #
-        # IMPORTANT: we group BY parent (so the user sees one entry per
-        # conversation lineage), but we preserve the raw FTS5 session_id on
-        # the surviving result. The raw sid is the only sid that pairs
-        # validly with ``match_message_id``; rewriting it to the parent
-        # produces a "{parent_sid, child_message_id}" handle that guided
-        # mode cannot resolve (#regression introduced by the original
-        # match_message_id rollout). See the parent_session_id field in
-        # fast-mode output for the lineage-root link the user expects to
-        # see.
+        # IMPORTANT: group BY parent (one entry per conversation lineage), but
+        # preserve the raw FTS5 session_id on the surviving result. Only the
+        # raw sid pairs validly with ``match_message_id``; rewriting it to the
+        # parent produces a {parent_sid, child_message_id} handle that guided
+        # mode cannot resolve. ``parent_session_id`` is exposed separately for
+        # the lineage-root link the user expects to see.
         seen_sessions = {}
         for result in raw_results:
             raw_sid = result["session_id"]
@@ -979,14 +968,9 @@ def session_search(
         if mode == "fast":
             results = []
             for lineage_root, match_info in seen_sessions.items():
-                # ``lineage_root`` is the dict key (resolved parent — used for
-                # dedup grouping). ``match_info["session_id"]`` is the raw FTS5
-                # row's session — the only sid that pairs with
-                # ``match_info["id"]`` (the message id). Emit the pair (raw sid +
-                # match_message_id) so the agent's follow-up
-                # mode='guided' call has a valid {session_id, around_message_id}
-                # handle. ``parent_session_id`` (if different) tells the agent
-                # which conversation lineage this fragment belongs to.
+                # Emit (raw_sid + match_message_id) so the agent's follow-up
+                # guided call has a valid {session_id, around_message_id}.
+                # ``parent_session_id`` (if different) carries the lineage root.
                 hit_sid = match_info.get("session_id") or lineage_root
                 try:
                     session_meta = db.get_session(lineage_root) or {}
