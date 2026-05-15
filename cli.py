@@ -1300,7 +1300,8 @@ def _query_osc11_background() -> str | None:
     """Ask the terminal for its background color via OSC 11.
 
     Most modern terminals reply with \x1b]11;rgb:RRRR/GGGG/BBBB\x1b\\
-    within ~50ms.  Returns "#RRGGBB" or None on timeout / non-tty.
+    within a few ms.  We wait up to 100ms total before giving up.
+    Returns "#RRGGBB" or None on timeout / non-tty.
     """
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         return None
@@ -1467,15 +1468,15 @@ _LIGHT_MODE_REMAP_UPPER = {k.upper(): v for k, v in _LIGHT_MODE_REMAP.items()}
 
 
 def _install_skin_light_mode_hook() -> None:
-    """Wrap Skin.get_color at import time so EVERY skin color read goes
+    """Wrap SkinConfig.get_color at import time so EVERY skin color read goes
     through the light-mode remap.  Idempotent."""
     try:
-        from hermes_cli.skin_engine import Skin  # type: ignore[import]
+        from hermes_cli.skin_engine import SkinConfig  # type: ignore[import]
     except Exception:
         return
-    if getattr(Skin, "_hermes_light_mode_hook_installed", False):
+    if getattr(SkinConfig, "_hermes_light_mode_hook_installed", False):
         return
-    _orig_get_color = Skin.get_color
+    _orig_get_color = SkinConfig.get_color
 
     def _wrapped_get_color(self, key, fallback=""):
         value = _orig_get_color(self, key, fallback)
@@ -1484,8 +1485,8 @@ def _install_skin_light_mode_hook() -> None:
         except Exception:
             return value
 
-    Skin.get_color = _wrapped_get_color  # type: ignore[method-assign]
-    Skin._hermes_light_mode_hook_installed = True  # type: ignore[attr-defined]
+    SkinConfig.get_color = _wrapped_get_color  # type: ignore[method-assign]
+    SkinConfig._hermes_light_mode_hook_installed = True  # type: ignore[attr-defined]
 
 
 _install_skin_light_mode_hook()
@@ -11410,18 +11411,29 @@ class HermesCLI:
         # style string like "bg:#1a1a2e #C0C0C0 bold" — split on space,
         # rewrite any "#XXX" tokens (including "bg:#XXX") through the
         # light-mode remap, rejoin.
+        #
+        # CRITICAL: skip the remap entirely when a style string already
+        # specifies its own bg (e.g. status-bar / completion-menu styles
+        # with `bg:#1a1a2e ...`).  Those colors were tuned for that
+        # specific dark bg and remapping the FG to a dark equivalent
+        # would produce dark-on-dark (invisible).  The terminal's BG
+        # mode is irrelevant — what matters is the bg the style itself
+        # paints.
         try:
             if _detect_light_mode():
-                def _remap_token(tok: str) -> str:
-                    if tok.startswith("bg:#"):
-                        return "bg:" + _maybe_remap_for_light_mode(tok[3:])
-                    if tok.startswith("#"):
-                        return _maybe_remap_for_light_mode(tok)
-                    return tok
-                style_dict = {
-                    k: " ".join(_remap_token(t) for t in (v or "").split())
-                    for k, v in style_dict.items()
-                }
+                def _remap_value(v: str) -> str:
+                    if not v:
+                        return v
+                    tokens = v.split()
+                    has_explicit_bg = any(t.startswith("bg:") for t in tokens)
+                    if has_explicit_bg:
+                        # The style paints its own bg — leave its fg alone.
+                        return v
+                    return " ".join(
+                        _maybe_remap_for_light_mode(t) if t.startswith("#") else t
+                        for t in tokens
+                    )
+                style_dict = {k: _remap_value(v or "") for k, v in style_dict.items()}
         except Exception:
             pass
         return style_dict
@@ -13347,46 +13359,29 @@ class HermesCLI:
         self._app = app  # Store reference for clarify_callback
 
         # ── Fix ghost status-bar lines on terminal resize ──────────────
-        # When the terminal shrinks (e.g. un-maximize), the emulator reflows
-        # the previously-rendered full-width rows (status bar, input rules)
-        # into multiple narrower rows.  prompt_toolkit's _on_resize handler
-        # only cursor_up()s by the stored layout height, missing the extra
-        # rows created by reflow — leaving ghost duplicates visible.
-        #
-        # It's not just column-shrink: widening, row-shrinking, and
-        # multiplexer-driven SIGWINCH-less redraws (cmux / tmux tab switch)
-        # all produce the same class of drift, where the renderer's tracked
-        # _cursor_pos.y no longer matches terminal reality. The only reliable
-        # recovery is a full screen-clear (\x1b[2J\x1b[H) before the next
-        # redraw, so we force one on every resize rather than trying to
-        # compute the exact drift.
         # Resize handling: monkey-patch prompt_toolkit's _output_screen_diff
         # to suppress the deliberate "reserve vertical space" scroll-up.
         #
-        # Root cause (verified by reading pt/renderer.py):
-        # _output_screen_diff (renderer.py line 232-242) explicitly moves
-        # the cursor to the bottom of the canvas after painting "to make
-        # sure the terminal scrolls up, even when the lower lines of the
-        # canvas just contain whitespace".  In non-fullscreen mode this
-        # scrolls chrome content into terminal scrollback EVERY render —
-        # not just on resize.  Same wall as pt issues #29 (2014), #1675,
-        # #1933.  Aider/xonsh/ipython gave up.
+        # Background: prompt_toolkit's renderer (renderer.py L232-242)
+        # explicitly moves the cursor to the bottom of the canvas after
+        # painting "to make sure the terminal scrolls up, even when the
+        # lower lines of the canvas just contain whitespace".  In
+        # non-fullscreen mode this scrolls chrome content (status bar,
+        # input rules) into terminal scrollback on every render.  When
+        # the terminal column-shrinks, the emulator reflows the previously
+        # rendered full-width rows into multiple narrower rows that get
+        # pushed up — leaving ghost duplicates AND polluting scrollback.
+        # Same issue as pt #29 (open since 2014), #1675, #1933.
         #
-        # Fix: monkey-patch the module-level function to skip the
-        # reserve-vertical-space cursor move.  This is the surgical
-        # change.  Without scroll-to-reserve, pt only moves the cursor
-        # within the layout's actual rows, and \r\n inside the layout
-        # body never reaches the bottom of the viewport (because the
-        # cursor walks up to layout-top first, then back down only as
-        # far as needed for each row).
+        # Surgical fix: wrap _output_screen_diff so that when its internal
+        # `if current_height > previous_screen.height` branch fires (the
+        # one that does the bottom-cursor-move), we make it fall through
+        # by inflating previous_screen.height first.
         try:
             import prompt_toolkit.renderer as _pt_renderer
             from prompt_toolkit.renderer import _output_screen_diff as _orig_osd
 
             if not getattr(_pt_renderer, "_hermes_osd_patched", False):
-                from prompt_toolkit.data_structures import Point
-                from prompt_toolkit.layout.screen import Screen
-
                 def _patched_output_screen_diff(
                     app, output, screen, current_pos, color_depth,
                     previous_screen, last_style, is_done, full_screen,
