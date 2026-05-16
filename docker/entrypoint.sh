@@ -54,6 +54,22 @@ if [ "$(id -u)" = "0" ]; then
         chmod 640 "$HERMES_HOME/config.yaml" 2>/dev/null || true
     fi
 
+    # Ensure pairing data is readable by the hermes runtime user. Without this,
+    # `docker exec <container> hermes pairing approve …` (which defaults to
+    # uid=0) writes 0600 root-owned files that the post-gosu gateway process
+    # cannot read, silently leaving the approved user unauthorized (#10270).
+    # The top-level recursive chown above is skipped on warm boots when
+    # /opt/data is already hermes-owned, so the platforms/pairing/ subtree
+    # has to be fixed unconditionally on every start. It's tiny — a handful
+    # of small JSON files — so the cost is negligible.
+    if [ -d "$HERMES_HOME/platforms/pairing" ]; then
+        chown -R hermes:hermes "$HERMES_HOME/platforms/pairing" 2>/dev/null || true
+    fi
+    # Legacy location (pre-consolidated layout).
+    if [ -d "$HERMES_HOME/pairing" ]; then
+        chown -R hermes:hermes "$HERMES_HOME/pairing" 2>/dev/null || true
+    fi
+
     echo "Dropping root privileges"
     exec gosu hermes "$0" "$@"
 fi
