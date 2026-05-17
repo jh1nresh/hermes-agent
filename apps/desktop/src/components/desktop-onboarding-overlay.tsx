@@ -177,7 +177,7 @@ function Preparing({ boot }: { boot: DesktopBootState }) {
     <div className="grid gap-3" role="status">
       <p className="text-sm text-muted-foreground">
         {installing
-          ? 'Hermes is finishing install. This usually takes under a minute on first run.'
+          ? 'Hermes is setting up the local agent runtime. First launch can take a few minutes.'
           : 'Starting Hermes…'}
       </p>
       <div className="h-2 overflow-hidden rounded-full bg-muted">
