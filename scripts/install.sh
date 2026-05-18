@@ -1512,6 +1512,18 @@ find_system_browser() {
         fi
     done
 
+    # macOS app-bundle locations (not on PATH but launchable)
+    if [ "$(uname -s)" = "Darwin" ]; then
+        for candidate in \
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+            "/Applications/Chromium.app/Contents/MacOS/Chromium" ; do
+            if [ -x "$candidate" ]; then
+                echo "$candidate"
+                return 0
+            fi
+        done
+    fi
+
     return 1
 }
 
@@ -1534,9 +1546,13 @@ configure_browser_env_from_system_browser() {
         browser_path="$(find_system_browser 2>/dev/null || true)"
     fi
 
-    if [ -z "$browser_path" ] || [ ! -f "$env_file" ]; then
+    if [ -z "$browser_path" ]; then
         return 0
     fi
+
+    # Create .env if it doesn't exist (pip/registry users may not have run setup yet)
+    mkdir -p "$HERMES_HOME"
+    touch "$env_file"
 
     if grep -q '^AGENT_BROWSER_EXECUTABLE_PATH=' "$env_file" 2>/dev/null; then
         log_info "AGENT_BROWSER_EXECUTABLE_PATH already configured"
@@ -1888,6 +1904,104 @@ print_success() {
     fi
 }
 
+ensure_browser() {
+    # Ensure Node is available first (browser tools need npm/npx).
+    check_node
+    if [ "$HAS_NODE" != true ]; then
+        log_warn "Node.js not available — cannot install browser tools."
+        return 1
+    fi
+
+    local npm_bin
+    npm_bin="$(command -v npm 2>/dev/null || echo "")"
+    if [ -z "$npm_bin" ]; then
+        log_warn "npm not found — cannot install browser tools."
+        return 1
+    fi
+
+    # ── Step 1: Install agent-browser + camofox-browser ──
+    # Check if already installed in Hermes-managed prefix or on PATH.
+    if [ -x "$HERMES_HOME/node/bin/agent-browser" ] || command -v agent-browser >/dev/null 2>&1; then
+        log_success "agent-browser already installed"
+    else
+        mkdir -p "$HERMES_HOME/node"
+        log_info "Installing agent-browser (npm, prefix=$HERMES_HOME/node)..."
+        if ! "$npm_bin" install -g --prefix "$HERMES_HOME/node" --silent \
+                agent-browser@^0.26.0 \
+                "@askjo/camofox-browser@^1.5.2" 2>/dev/null; then
+            log_warn "npm install agent-browser failed"
+        else
+            export PATH="$HERMES_HOME/node/bin:$PATH"
+            log_success "agent-browser installed to $HERMES_HOME/node/bin/"
+        fi
+    fi
+
+    # ── Step 2: Playwright Chromium (skip if system browser found) ──
+    DETECTED_BROWSER_EXECUTABLE="$(find_system_browser 2>/dev/null || true)"
+    if [ -n "$DETECTED_BROWSER_EXECUTABLE" ]; then
+        log_success "System browser found: $DETECTED_BROWSER_EXECUTABLE"
+        log_info "Skipping Playwright Chromium download; agent-browser will use it."
+        configure_browser_env_from_system_browser
+        return 0
+    fi
+
+    if [ "$SKIP_BROWSER" = true ]; then
+        log_info "Skipping Chromium install (--skip-browser)"
+        return 0
+    fi
+
+    local npx_bin
+    npx_bin="$(command -v npx 2>/dev/null || echo "")"
+    if [ -z "$npx_bin" ]; then
+        log_warn "npx not found — cannot install Playwright Chromium"
+        return 1
+    fi
+
+    log_info "Installing Playwright Chromium..."
+    local installed=false
+
+    if [ "$OS" = "linux" ]; then
+        case "$DISTRO" in
+            ubuntu|debian|raspbian|pop|linuxmint|elementary|zorin|kali|parrot)
+                if [ "$(id -u)" -eq 0 ] || (command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null); then
+                    log_info "Installing with system deps (--with-deps, sudo available)"
+                    if "$npx_bin" --yes playwright install --with-deps chromium 2>/dev/null; then
+                        installed=true
+                    fi
+                else
+                    log_warn "sudo not available — installing Chromium without system deps."
+                    log_info "If browser tools fail, an administrator should run:"
+                    log_info "  sudo npx playwright install-deps chromium"
+                fi
+                ;;
+            arch|manjaro|cachyos|endeavouros|garuda)
+                log_info "Arch-family: system deps not auto-installed."
+                log_info "If launch fails: sudo pacman -S nss atk at-spi2-core cups libdrm libxkbcommon mesa pango cairo alsa-lib"
+                ;;
+            fedora|rhel|centos|rocky|alma)
+                log_info "Fedora/RHEL: system deps not auto-installed."
+                log_info "If launch fails: sudo dnf install nss atk at-spi2-core cups-libs libdrm libxkbcommon mesa-libgbm pango cairo alsa-lib"
+                ;;
+            opensuse*|sles)
+                log_info "openSUSE: system deps not auto-installed."
+                ;;
+        esac
+    fi
+
+    if [ "$installed" = false ]; then
+        if "$npx_bin" --yes playwright install chromium 2>/dev/null; then
+            installed=true
+        fi
+    fi
+
+    if [ "$installed" = true ]; then
+        log_success "Playwright Chromium installed"
+    else
+        log_warn "Playwright Chromium install failed"
+        log_info "Try later: npx --yes playwright install chromium"
+    fi
+}
+
 ensure_mode() {
     detect_os
 
@@ -1899,22 +2013,7 @@ ensure_mode() {
                 check_node
                 ;;
             browser)
-                check_node
-                if [ "$HAS_NODE" = true ]; then
-                    DETECTED_BROWSER_EXECUTABLE="$(find_system_browser 2>/dev/null || true)"
-                    if [ -z "$DETECTED_BROWSER_EXECUTABLE" ]; then
-                        log_info "Installing agent-browser + Chromium..."
-                        npm_bin="$(command -v npm 2>/dev/null || echo "")"
-                        if [ -n "$npm_bin" ]; then
-                            local agent_browser_dir="$HERMES_HOME/node_modules"
-                            mkdir -p "$agent_browser_dir"
-                            "$npm_bin" install --prefix "$HERMES_HOME" agent-browser 2>/dev/null || true
-                            npx playwright install chromium 2>/dev/null || true
-                        fi
-                    else
-                        log_success "System browser found: $DETECTED_BROWSER_EXECUTABLE"
-                    fi
-                fi
+                ensure_browser
                 ;;
             ripgrep)
                 if ! command -v rg &>/dev/null; then
@@ -1947,18 +2046,7 @@ postinstall_mode() {
     check_network_prerequisites
     install_system_packages
 
-    if [ "$HAS_NODE" = true ] && [ "$SKIP_BROWSER" = false ]; then
-        DETECTED_BROWSER_EXECUTABLE="$(find_system_browser 2>/dev/null || true)"
-        if [ -z "$DETECTED_BROWSER_EXECUTABLE" ]; then
-            log_info "Installing browser engine..."
-            npm_bin="$(command -v npm 2>/dev/null || echo "")"
-            if [ -n "$npm_bin" ]; then
-                npx playwright install chromium 2>/dev/null || true
-            fi
-        else
-            log_success "System browser found: $DETECTED_BROWSER_EXECUTABLE"
-        fi
-    fi
+    ensure_browser
 
     HERMES_CMD="$(command -v hermes 2>/dev/null || echo "")"
     if [ -n "$HERMES_CMD" ]; then
@@ -1994,6 +2082,9 @@ main() {
     copy_config_templates
     run_setup_wizard
     maybe_start_gateway
+
+    # Stamp install method for detect_install_method()
+    echo "git" > "${HERMES_HOME:=$HOME/.hermes}/.install_method" 2>/dev/null || true
 
     print_success
 }

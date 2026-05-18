@@ -28,7 +28,14 @@ param(
     [string]$Stage,
     [switch]$ProtocolVersion,
     [switch]$NonInteractive,
-    [switch]$Json
+    [switch]$Json,
+
+    # --- Ensure / PostInstall (called by dep_ensure.py) --------------------
+    # dep_ensure.py invokes install.ps1 -Ensure <dep> to lazily install
+    # non-Python runtime deps on Windows (mirrors install.sh --ensure).
+    # -PostInstall runs the full post-pip-install bootstrap.
+    [string]$Ensure = "",
+    [switch]$PostInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,6 +113,122 @@ function Write-Warn {
 function Write-Err {
     param([string]$Message)
     Write-Host "[X] $Message" -ForegroundColor Red
+}
+
+# ============================================================================
+# npm / browser helpers  (used by -Ensure browser and -PostInstall)
+# ============================================================================
+
+function Resolve-NpmCmd {
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npmCmd) { return $null }
+    $npmExe = $npmCmd.Source
+    if ($npmExe -like "*.ps1") {
+        $npmCmdSibling = Join-Path (Split-Path $npmExe -Parent) "npm.cmd"
+        if (Test-Path $npmCmdSibling) { return $npmCmdSibling }
+    }
+    return $npmExe
+}
+
+function Resolve-NpxCmd {
+    param([string]$NpmExe)
+    if (-not $NpmExe) { return $null }
+    $npmDir = Split-Path $NpmExe -Parent
+    foreach ($cand in @("npx.cmd", "npx.exe", "npx")) {
+        $try = Join-Path $npmDir $cand
+        if (Test-Path $try) { return $try }
+    }
+    $npxCmd = Get-Command npx -ErrorAction SilentlyContinue
+    if ($npxCmd) { return $npxCmd.Source }
+    return $null
+}
+
+function Find-SystemBrowser {
+    $candidates = @(
+        "C:\Program Files\Google\Chrome\Application\chrome.exe",
+        "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        "C:\Program Files\Chromium\Application\chromium.exe",
+        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
+        "$env:LOCALAPPDATA\Chromium\Application\chromium.exe",
+        "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+    )
+    foreach ($path in $candidates) {
+        if (Test-Path $path) { return $path }
+    }
+    return $null
+}
+
+function Write-BrowserEnv {
+    param([string]$BrowserPath)
+    $envFile = "$HermesHome\.env"
+    if (-not (Test-Path $HermesHome)) {
+        New-Item -ItemType Directory -Force -Path $HermesHome | Out-Null
+    }
+    if (-not (Test-Path $envFile)) {
+        New-Item -ItemType File -Force -Path $envFile | Out-Null
+    }
+    $content = Get-Content $envFile -Raw -ErrorAction SilentlyContinue
+    if ($content -and $content -match "AGENT_BROWSER_EXECUTABLE_PATH=") {
+        Write-Info "AGENT_BROWSER_EXECUTABLE_PATH already configured"
+        return
+    }
+    Add-Content -Path $envFile -Value "`n# Hermes Agent browser tools -- use the system browser.`nAGENT_BROWSER_EXECUTABLE_PATH=$BrowserPath"
+    Write-Success "Configured browser tools to use $BrowserPath"
+}
+
+function Install-AgentBrowser {
+    param([string]$BrowserDir, [string]$NpmExe, [string]$LogPrefix, [switch]$SkipPlaywright)
+
+    if (-not (Test-Path $BrowserDir)) {
+        New-Item -ItemType Directory -Force -Path $BrowserDir | Out-Null
+    }
+    $pkgJson = "$BrowserDir\package.json"
+    if (-not (Test-Path $pkgJson)) {
+        '{"name":"hermes-browser-deps","version":"1.0.0","dependencies":{"agent-browser":"^0.26.0","@askjo/camofox-browser":"^1.5.2"}}' | Out-File -FilePath $pkgJson -Encoding utf8 -NoNewline
+    }
+
+    Write-Info "Installing agent-browser to $BrowserDir..."
+    $browserLog = "$env:TEMP\hermes-$LogPrefix-browser-$(Get-Random).log"
+    Push-Location $BrowserDir
+    try {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & $NpmExe install --silent *> $browserLog
+        $npmExit = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        if ($npmExit -eq 0) {
+            Write-Success "agent-browser installed"
+            Remove-Item -Force $browserLog -ErrorAction SilentlyContinue
+        } else {
+            Write-Warn "agent-browser npm install failed (exit $npmExit) -- see $browserLog"
+        }
+
+        if (-not $SkipPlaywright) {
+            $npxExe = Resolve-NpxCmd -NpmExe $NpmExe
+            if ($npxExe) {
+                Write-Info "Installing Playwright Chromium..."
+                $pwLog = "$env:TEMP\hermes-$LogPrefix-playwright-$(Get-Random).log"
+                $ErrorActionPreference = "Continue"
+                & $npxExe playwright install --yes chromium *> $pwLog
+                $pwExit = $LASTEXITCODE
+                $ErrorActionPreference = $prevEAP
+                if ($pwExit -eq 0) {
+                    Write-Success "Playwright Chromium installed"
+                    Remove-Item -Force $pwLog -ErrorAction SilentlyContinue
+                } else {
+                    Write-Warn "Playwright Chromium install failed (exit $pwExit) -- see $pwLog"
+                }
+            } else {
+                Write-Warn "npx not found -- skipping Playwright Chromium install."
+                Write-Info "Run manually: npx playwright install chromium"
+            }
+        }
+    } catch {
+        Write-Warn "browser install error: $_"
+    } finally {
+        Pop-Location
+    }
 }
 
 # ============================================================================
@@ -2035,6 +2158,108 @@ function Invoke-Stage {
 # ============================================================================
 # Main
 # ============================================================================
+# Ensure / PostInstall modes  (called by dep_ensure.py)
+# ============================================================================
+
+function Invoke-EnsureMode {
+    param([string]$Deps)
+
+    $depList = $Deps -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+
+    foreach ($dep in $depList) {
+        switch ($dep) {
+            "node" {
+                [void](Test-Node)
+            }
+            "browser" {
+                [void](Test-Node)
+                if ($script:HasNode) {
+                    $systemBrowser = Find-SystemBrowser
+                    $skipPw = $false
+                    if ($systemBrowser) {
+                        Write-Success "System browser found: $systemBrowser"
+                        Write-Info "Skipping Playwright Chromium download."
+                        Write-BrowserEnv -BrowserPath $systemBrowser
+                        $skipPw = $true
+                    }
+
+                    $npmExe = Resolve-NpmCmd
+                    if (-not $npmExe) {
+                        Write-Warn "npm not found -- cannot install browser deps."
+                        break
+                    }
+
+                    if ($skipPw) {
+                        Install-AgentBrowser -BrowserDir "$HermesHome\agent-browser" -NpmExe $npmExe -LogPrefix "ensure" -SkipPlaywright
+                    } else {
+                        Install-AgentBrowser -BrowserDir "$HermesHome\agent-browser" -NpmExe $npmExe -LogPrefix "ensure"
+                    }
+                }
+            }
+            "ripgrep" {
+                if (Get-Command rg -ErrorAction SilentlyContinue) {
+                    Write-Success "ripgrep already installed"
+                } else {
+                    Install-SystemPackages
+                }
+            }
+            "ffmpeg" {
+                if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+                    Write-Success "ffmpeg already installed"
+                } else {
+                    Install-SystemPackages
+                }
+            }
+            default {
+                Write-Warn "Unknown dep '$dep' -- skipping. Known deps: node, browser, ripgrep, ffmpeg"
+            }
+        }
+    }
+}
+
+function Invoke-PostInstallMode {
+    Write-Banner
+
+    [void](Test-Node)
+    Install-SystemPackages
+
+    if ($script:HasNode) {
+        $systemBrowser = Find-SystemBrowser
+        $skipPw = $false
+        if ($systemBrowser) {
+            Write-Success "System browser found: $systemBrowser"
+            Write-Info "Skipping Playwright Chromium download."
+            Write-BrowserEnv -BrowserPath $systemBrowser
+            $skipPw = $true
+        }
+
+        $npmExe = Resolve-NpmCmd
+        if ($npmExe) {
+            if ($skipPw) {
+                Install-AgentBrowser -BrowserDir "$HermesHome\agent-browser" -NpmExe $npmExe -LogPrefix "postinstall" -SkipPlaywright
+            } else {
+                Install-AgentBrowser -BrowserDir "$HermesHome\agent-browser" -NpmExe $npmExe -LogPrefix "postinstall"
+            }
+        } else {
+            Write-Warn "npm not found -- skipping browser tools install."
+        }
+    }
+
+    $hermesCmd = Get-Command hermes -ErrorAction SilentlyContinue
+    if ($hermesCmd) {
+        Write-Info "Running hermes setup..."
+        try {
+            & $hermesCmd.Source setup
+        } catch {
+            Write-Warn "hermes setup failed: $_"
+        }
+    } else {
+        Write-Info "hermes not found on PATH."
+        Write-Info "Run setup manually: python -m hermes_cli.main setup"
+    }
+}
+
+# ============================================================================
 
 function Invoke-AllStages {
     Step-OutOfInstallDir
@@ -2062,6 +2287,21 @@ function Main {
 # structured JSON error frame instead of a bare exception.
 
 try {
+    # ---- Ensure / PostInstall mode (dep_ensure.py entry point) -------------
+    if ($Ensure -ne "") {
+        if ($PSBoundParameters.ContainsKey("Stage")) {
+            Write-Err "Cannot use -Ensure and -Stage simultaneously"
+            exit 1
+        }
+        Invoke-EnsureMode -Deps $Ensure
+        exit 0
+    }
+    if ($PostInstall) {
+        Invoke-PostInstallMode
+        exit 0
+    }
+
+    # ---- Stage protocol queries --------------------------------------------
     if ($ProtocolVersion) {
         Write-Output $InstallStageProtocolVersion
         exit 0
