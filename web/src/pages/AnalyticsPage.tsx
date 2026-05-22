@@ -430,11 +430,23 @@ export default function AnalyticsPage() {
     const periodLabel =
       PERIODS.find((p) => p.days === days)?.label ?? `${days}d`;
     setAfterTitle(
-      <span className="flex items-center gap-2">
-        {loading && <Spinner className="shrink-0 text-base text-primary" />}
+      <span className="flex items-center gap-1.5">
         <Badge tone="secondary" className="text-xs">
           {periodLabel}
         </Badge>
+        {showTokens !== false && (
+          <Button
+            type="button"
+            ghost
+            size="icon"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={load}
+            disabled={loading}
+            aria-label={t.common.refresh}
+          >
+            {loading ? <Spinner /> : <RefreshCw />}
+          </Button>
+        )}
       </span>,
     );
     setEnd(
@@ -453,16 +465,6 @@ export default function AnalyticsPage() {
               </Button>
             ))}
           </div>
-          <Button
-            type="button"
-            size="sm"
-            outlined
-            onClick={load}
-            disabled={loading}
-            prefix={loading ? <Spinner /> : <RefreshCw />}
-          >
-            {t.common.refresh}
-          </Button>
         </div>
       ),
     );

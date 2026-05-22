@@ -43,8 +43,10 @@ const LINE_COLORS: Record<string, string> = {
   debug: "text-text-tertiary",
 };
 
+const formatFilterLabel = (value: string) => value.toUpperCase();
+
 const toSegmentOptions = <T extends string>(values: readonly T[]) =>
-  values.map((v) => ({ value: v, label: v.toUpperCase() }));
+  values.map((v) => ({ value: v, label: formatFilterLabel(v) }));
 
 const filterGroupClass =
   "flex min-w-0 w-full flex-col items-start gap-1.5 sm:w-auto sm:max-w-full sm:flex-row sm:items-center";
@@ -85,24 +87,35 @@ export default function LogsPage() {
 
   useLayoutEffect(() => {
     setAfterTitle(
-      <span className="flex items-center gap-2">
-        {loading && <Spinner className="shrink-0 text-base text-primary" />}
+      <span className="flex items-center gap-1.5">
         <Badge tone="secondary" className="text-xs">
-          {file} · {level} · {component}
+          {formatFilterLabel(file)} · {formatFilterLabel(level)} ·{" "}
+          {formatFilterLabel(component)}
         </Badge>
+        <Button
+          type="button"
+          ghost
+          size="icon"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={fetchLogs}
+          disabled={loading}
+          aria-label={t.common.refresh}
+        >
+          {loading ? <Spinner /> : <RefreshCw />}
+        </Button>
       </span>,
     );
     setEnd(
       <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end sm:gap-3">
         <div className="flex items-center gap-2">
+          <Label htmlFor="logs-auto-refresh" className="text-xs cursor-pointer">
+            {t.logs.autoRefresh}
+          </Label>
           <Switch
             checked={autoRefresh}
             onCheckedChange={setAutoRefresh}
             id="logs-auto-refresh"
           />
-          <Label htmlFor="logs-auto-refresh" className="text-xs cursor-pointer">
-            {t.logs.autoRefresh}
-          </Label>
           {autoRefresh && (
             <Badge tone="success" className="text-xs">
               <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
@@ -110,16 +123,6 @@ export default function LogsPage() {
             </Badge>
           )}
         </div>
-        <Button
-          type="button"
-          size="sm"
-          outlined
-          onClick={fetchLogs}
-          disabled={loading}
-          prefix={loading ? <Spinner /> : <RefreshCw />}
-        >
-          {t.common.refresh}
-        </Button>
       </div>,
     );
     return () => {

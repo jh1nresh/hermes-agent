@@ -8,7 +8,6 @@ import {
 import {
   ChevronDown,
   Pencil,
-  Plus,
   Terminal,
   Trash2,
   Users,
@@ -232,8 +231,11 @@ export default function ProfilesPage() {
   // Put "Create" button in page header
   useLayoutEffect(() => {
     setEnd(
-      <Button size="sm" onClick={() => setCreateModalOpen(true)}>
-        <Plus className="h-3 w-3" />
+      <Button
+        className="uppercase"
+        size="sm"
+        onClick={() => setCreateModalOpen(true)}
+      >
         {t.common.create}
       </Button>,
     );
@@ -345,8 +347,12 @@ export default function ProfilesPage() {
               </div>
 
               <div className="flex justify-end">
-                <Button size="sm" onClick={handleCreate} disabled={creating}>
-                  <Plus className="h-3 w-3" />
+                <Button
+                  className="uppercase"
+                  size="sm"
+                  onClick={handleCreate}
+                  disabled={creating}
+                >
                   {creating ? t.common.creating : t.common.create}
                 </Button>
               </div>
@@ -535,10 +541,11 @@ export default function ProfilesPage() {
                   <div>
                     <Button
                       size="sm"
+                      className="uppercase"
                       onClick={() => handleSaveSoul(p.name)}
                       disabled={soulSaving}
                     >
-                      {soulSaving ? t.common.saving : t.profiles.saveSoul}
+                      {soulSaving ? t.common.saving : t.common.save}
                     </Button>
                   </div>
                 </div>

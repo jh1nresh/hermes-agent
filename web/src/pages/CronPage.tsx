@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { Clock, Pause, Play, Plus, Trash2, X, Zap } from "lucide-react";
+import { Clock, Pause, Play, Trash2, X, Zap } from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Select, SelectOption } from "@nous-research/ui/ui/components/select";
@@ -229,10 +229,10 @@ export default function CronPage() {
   useLayoutEffect(() => {
     setEnd(
       <Button
+        className="uppercase"
         size="sm"
         onClick={() => setCreateModalOpen(true)}
       >
-        <Plus className="h-3 w-3" />
         {t.common.create}
       </Button>,
     );
@@ -380,10 +380,11 @@ export default function CronPage() {
 
               <div className="flex justify-end">
                 <Button
+                  className="uppercase"
                   size="sm"
                   onClick={handleCreate}
                   disabled={creating}
-                  prefix={creating ? <Spinner /> : <Plus />}
+                  prefix={creating ? <Spinner /> : undefined}
                 >
                   {creating ? t.common.creating : t.common.create}
                 </Button>

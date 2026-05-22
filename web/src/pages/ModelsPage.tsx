@@ -237,7 +237,7 @@ function UseAsMenu({
         outlined
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
-        className="text-xs h-6 px-2"
+        className="h-6 px-2 text-xs uppercase"
         prefix={busy ? <Spinner /> : null}
       >
         Use as <ChevronDown className="h-3 w-3" />
@@ -248,7 +248,7 @@ function UseAsMenu({
             type="button"
             onClick={() => assign("main", "")}
             disabled={busy}
-            className="flex w-full items-center justify-between px-3 py-2 text-xs hover:bg-muted/50 disabled:opacity-40"
+            className="flex w-full items-center justify-between px-3 py-2 text-xs uppercase hover:bg-muted/50 disabled:opacity-40"
           >
             <span className="flex items-center gap-2">
               <Star className="h-3 w-3" />
@@ -269,7 +269,7 @@ function UseAsMenu({
             type="button"
             onClick={() => assign("auxiliary", "")}
             disabled={busy}
-            className="flex w-full items-center justify-between px-3 py-1.5 text-xs hover:bg-muted/50 disabled:opacity-40"
+            className="flex w-full items-center justify-between px-3 py-1.5 text-xs uppercase hover:bg-muted/50 disabled:opacity-40"
           >
             <span>All auxiliary tasks</span>
           </button>
@@ -280,7 +280,7 @@ function UseAsMenu({
               type="button"
               onClick={() => assign("auxiliary", t.key)}
               disabled={busy}
-              className="flex w-full items-center justify-between px-3 py-1.5 text-xs hover:bg-muted/50 disabled:opacity-40"
+              className="flex w-full items-center justify-between px-3 py-1.5 text-xs uppercase hover:bg-muted/50 disabled:opacity-40"
             >
               <span>{t.label}</span>
               {mainAuxTask === t.key && (
@@ -548,7 +548,7 @@ function AuxiliaryTasksModal({
               outlined
               onClick={() => setConfirmReset(true)}
               disabled={resetBusy}
-              className="text-xs h-6"
+              className="h-6 text-xs uppercase"
               prefix={resetBusy ? <Spinner /> : null}
             >
               Reset all to auto
@@ -589,7 +589,7 @@ function AuxiliaryTasksModal({
                   size="sm"
                   outlined
                   onClick={() => setPicker({ kind: "aux", task: t.key })}
-                  className="text-xs h-6"
+                  className="h-6 text-xs uppercase"
                 >
                   Change
                 </Button>
@@ -700,7 +700,7 @@ function ModelSettingsPanel({
           <Button
             size="sm"
             onClick={() => setPicker({ kind: "main" })}
-            className="shrink-0 self-start text-xs sm:self-center"
+            className="shrink-0 self-start text-xs uppercase sm:self-center"
           >
             Change
           </Button>
@@ -725,7 +725,7 @@ function ModelSettingsPanel({
             size="sm"
             outlined
             onClick={() => setAuxModalOpen(true)}
-            className="shrink-0 self-start text-xs sm:self-center"
+            className="shrink-0 self-start text-xs uppercase sm:self-center"
           >
             Configure
           </Button>
@@ -821,11 +821,21 @@ export default function ModelsPage() {
     const periodLabel =
       PERIODS.find((p) => p.days === days)?.label ?? `${days}d`;
     setAfterTitle(
-      <span className="flex items-center gap-2">
-        {loading && <Spinner className="shrink-0 text-base text-primary" />}
+      <span className="flex items-center gap-1.5">
         <Badge tone="secondary" className="text-xs">
           {periodLabel}
         </Badge>
+        <Button
+          type="button"
+          ghost
+          size="icon"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={load}
+          disabled={loading}
+          aria-label={t.common.refresh}
+        >
+          {loading ? <Spinner /> : <RefreshCw />}
+        </Button>
       </span>,
     );
     setEnd(
@@ -838,21 +848,12 @@ export default function ModelsPage() {
               size="sm"
               outlined={days !== p.days}
               onClick={() => setDays(p.days)}
+              className="uppercase"
             >
               {p.label}
             </Button>
           ))}
         </div>
-        <Button
-          type="button"
-          size="sm"
-          outlined
-          onClick={load}
-          disabled={loading}
-          prefix={loading ? <Spinner /> : <RefreshCw />}
-        >
-          {t.common.refresh}
-        </Button>
       </div>,
     );
     return () => {

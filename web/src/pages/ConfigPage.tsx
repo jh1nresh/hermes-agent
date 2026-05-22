@@ -4,7 +4,6 @@ import {
   Download,
   FormInput,
   RotateCcw,
-  Save,
   Search,
   Upload,
   X,
@@ -486,18 +485,18 @@ export default function ConfigPage() {
           {yamlMode ? (
             <Button
               size="sm"
+              className="uppercase"
               onClick={handleYamlSave}
               disabled={yamlSaving}
-              prefix={<Save />}
             >
               {yamlSaving ? t.common.saving : t.common.save}
             </Button>
           ) : (
             <Button
               size="sm"
+              className="uppercase"
               onClick={handleSave}
               disabled={saving}
-              prefix={<Save />}
             >
               {saving ? t.common.saving : t.common.save}
             </Button>
@@ -556,7 +555,7 @@ export default function ConfigPage() {
                           setSearchQuery("");
                           setActiveCategory(cat);
                         }}
-                        className="rounded-sm whitespace-nowrap px-2 py-1 text-xs"
+                        className="rounded-none whitespace-nowrap px-2 py-1 text-xs"
                       >
                         <CategoryIcon
                           category={cat}

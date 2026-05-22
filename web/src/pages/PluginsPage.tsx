@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, RefreshCw, Puzzle, Trash2, Eye, EyeOff } from "lucide-react";
+import { ExternalLink, RefreshCw, Trash2, Eye, EyeOff } from "lucide-react";
 import type { Translations } from "@/i18n/types";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -39,7 +39,7 @@ export default function PluginsPage() {
 
   const { toast, showToast } = useToast();
   const { t } = useI18n();
-  const { setEnd } = usePageHeader();
+  const { setAfterTitle } = usePageHeader();
 
   const loadHub = useCallback(() => {
     return api
@@ -59,22 +59,20 @@ export default function PluginsPage() {
   }, [loadHub]);
 
   useEffect(() => {
-    setEnd(
-      <div className="flex w-full min-w-0 justify-start sm:justify-end">
-        <Button
-          ghost
-          size="sm"
-          className="w-max max-w-full shrink-0 gap-2"
-          disabled={loading || rescanBusy}
-          onClick={() => void onRescan()}
-        >
-          {rescanBusy ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" />}
-          {t.pluginsPage.refreshDashboard}
-        </Button>
-      </div>,
+    setAfterTitle(
+      <Button
+        ghost
+        size="icon"
+        className="shrink-0 text-muted-foreground hover:text-foreground"
+        disabled={loading || rescanBusy}
+        onClick={() => void onRescan()}
+        aria-label={t.pluginsPage.refreshDashboard}
+      >
+        {rescanBusy ? <Spinner /> : <RefreshCw />}
+      </Button>,
     );
-    return () => setEnd(null);
-  }, [loading, rescanBusy, setEnd, t.pluginsPage.refreshDashboard]);
+    return () => setAfterTitle(null);
+  }, [loading, rescanBusy, setAfterTitle, t.pluginsPage.refreshDashboard]);
 
   const onInstall = async () => {
     const id = installId.trim();
@@ -212,13 +210,13 @@ export default function PluginsPage() {
               </div>
 
               <Button
-                className="w-fit gap-2"
+                className="w-fit uppercase"
                 size="sm"
                 disabled={providerBusy}
                 onClick={() => void onSaveProviders()}
+                prefix={providerBusy ? <Spinner /> : undefined}
               >
-                {providerBusy ? <Spinner /> : null}
-                {t.pluginsPage.saveProviders}
+                {t.common.save}
               </Button>
             </CardContent>
           </Card>
@@ -272,12 +270,12 @@ export default function PluginsPage() {
             </div>
 
             <Button
-              className="w-fit gap-2"
+              className="w-fit uppercase"
               size="sm"
               disabled={installBusy}
               onClick={() => void onInstall()}
+              prefix={installBusy ? <Spinner /> : undefined}
             >
-              {installBusy ? <Spinner /> : <Puzzle className="h-3.5 w-3.5" />}
               {t.pluginsPage.installBtn}
             </Button>
 
@@ -433,36 +431,35 @@ function PluginRowCard(props: PluginRowCardProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-
-
-            <Button
-              disabled={busy || row.runtime_status === "enabled"}
-              ghost
-              size="sm"
-              onClick={() => {
-                void setRuntimeLoading(row.name, async () => {
-                  await api.enableAgentPlugin(row.name);
-                  showToast(t.pluginsPage.enableRuntime, "success");
-                });
-              }}
-            >
-              {t.pluginsPage.enableRuntime}
-            </Button>
-
-
-            <Button
-              disabled={busy || row.runtime_status === "disabled"}
-              ghost
-              size="sm"
-              onClick={() => {
-                void setRuntimeLoading(row.name, async () => {
-                  await api.disableAgentPlugin(row.name);
-                  showToast(t.pluginsPage.disableRuntime, "success");
-                });
-              }}
-            >
-              {t.pluginsPage.disableRuntime}
-            </Button>
+            {row.runtime_status === "enabled" ? (
+              <Button
+                disabled={busy}
+                ghost
+                size="sm"
+                onClick={() => {
+                  void setRuntimeLoading(row.name, async () => {
+                    await api.disableAgentPlugin(row.name);
+                    showToast(t.pluginsPage.disableRuntime, "success");
+                  });
+                }}
+              >
+                {t.pluginsPage.disableRuntime}
+              </Button>
+            ) : (
+              <Button
+                disabled={busy}
+                ghost
+                size="sm"
+                onClick={() => {
+                  void setRuntimeLoading(row.name, async () => {
+                    await api.enableAgentPlugin(row.name);
+                    showToast(t.pluginsPage.enableRuntime, "success");
+                  });
+                }}
+              >
+                {t.pluginsPage.enableRuntime}
+              </Button>
+            )}
 
             {tabPath ? (
 

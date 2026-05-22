@@ -797,80 +797,36 @@ export default function EnvPage() {
         </CardContent>
       </Card>
 
-      {nonProviderGrouped.map(
-        ({
-          label,
-          icon: Icon,
-          setEntries,
-          unsetEntries,
-          totalEntries,
-          category,
-        }) => {
-          if (totalEntries === 0) return null;
+      {nonProviderGrouped.map((section) => {
+        if (section.totalEntries === 0) return null;
 
-          return (
-            <Card key={category} id={`section-${category}`}>
-              <CardHeader className="border-b border-border bg-card">
-                <div className="flex items-center gap-2">
-                  <Icon className="h-5 w-5 text-muted-foreground" />
-                  <CardTitle className="text-base">{label}</CardTitle>
-                </div>
-                <CardDescription>
-                  {setEntries.length} {t.common.of} {totalEntries}{" "}
-                  {t.common.configured}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-3 pt-4 overflow-hidden">
-                {setEntries.map(([key, info]) => (
-                  <EnvVarRow
-                    key={key}
-                    varKey={key}
-                    info={info}
-                    edits={edits}
-                    setEdits={setEdits}
-                    revealed={revealed}
-                    saving={saving}
-                    onSave={handleSave}
-                    onClear={keyClear.requestDelete}
-                    onReveal={handleReveal}
-                    onCancelEdit={cancelEdit}
-                    clearDialogOpen={keyClear.isOpen}
-                  />
-                ))}
-
-                {unsetEntries.length > 0 && (
-                  <CollapsibleUnset
-                    category={category}
-                    unsetEntries={unsetEntries}
-                    edits={edits}
-                    setEdits={setEdits}
-                    revealed={revealed}
-                    saving={saving}
-                    onSave={handleSave}
-                    onClear={keyClear.requestDelete}
-                    onReveal={handleReveal}
-                    onCancelEdit={cancelEdit}
-                    clearDialogOpen={keyClear.isOpen}
-                  />
-                )}
-              </CardContent>
-            </Card>
-          );
-        },
-      )}
+        return (
+          <EnvCategoryCard
+            key={section.category}
+            section={section}
+            edits={edits}
+            setEdits={setEdits}
+            revealed={revealed}
+            saving={saving}
+            onSave={handleSave}
+            onClear={keyClear.requestDelete}
+            onReveal={handleReveal}
+            onCancelEdit={cancelEdit}
+            clearDialogOpen={keyClear.isOpen}
+          />
+        );
+      })}
       <PluginSlot name="env:bottom" />
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  CollapsibleUnset — for non-provider categories                     */
+/*  EnvCategoryCard — keys / messaging / settings sections             */
 /* ------------------------------------------------------------------ */
 
-function CollapsibleUnset({
-  category: _category,
-  unsetEntries,
+function EnvCategoryCard({
+  section,
   edits,
   setEdits,
   revealed,
@@ -881,8 +837,14 @@ function CollapsibleUnset({
   onCancelEdit,
   clearDialogOpen = false,
 }: {
-  category: string;
-  unsetEntries: [string, EnvVarInfo][];
+  section: {
+    category: string;
+    icon: React.ComponentType<{ className?: string }>;
+    label: string;
+    setEntries: [string, EnvVarInfo][];
+    totalEntries: number;
+    unsetEntries: [string, EnvVarInfo][];
+  };
   edits: Record<string, string>;
   setEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   revealed: Record<string, string>;
@@ -893,39 +855,64 @@ function CollapsibleUnset({
   onCancelEdit: (key: string) => void;
   clearDialogOpen?: boolean;
 }) {
-  const [collapsed, setCollapsed] = useState(true);
+  const noneConfigured = section.setEntries.length === 0;
+  const [showAll, setShowAll] = useState(noneConfigured);
   const { t } = useI18n();
+  const Icon = section.icon;
+  const hasContent = section.setEntries.length > 0 || showAll;
+  const rowProps = {
+    edits,
+    setEdits,
+    revealed,
+    saving,
+    onSave,
+    onClear,
+    onReveal,
+    onCancelEdit,
+    clearDialogOpen,
+  };
 
   return (
-    <>
-      <Button
-        ghost
-        size="sm"
-        prefix={collapsed ? <ChevronRight /> : <ChevronDown />}
-        onClick={() => setCollapsed(!collapsed)}
-        aria-expanded={!collapsed}
-        className="self-start mt-1 normal-case tracking-normal text-xs text-text-secondary hover:text-foreground"
+    <Card id={`section-${section.category}`}>
+      <CardHeader
+        className={`bg-card${hasContent ? " border-b border-border" : ""}`}
       >
-        {t.env.notConfigured.replace("{count}", String(unsetEntries.length))}
-      </Button>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Icon className="h-5 w-5 shrink-0 text-muted-foreground" />
+            <CardTitle className="text-base">{section.label}</CardTitle>
+          </div>
 
-      {!collapsed &&
-        unsetEntries.map(([key, info]) => (
-          <EnvVarRow
-            key={key}
-            varKey={key}
-            info={info}
-            edits={edits}
-            setEdits={setEdits}
-            revealed={revealed}
-            saving={saving}
-            onSave={onSave}
-            onClear={onClear}
-            onReveal={onReveal}
-            onCancelEdit={onCancelEdit}
-            clearDialogOpen={clearDialogOpen}
-          />
-        ))}
-    </>
+          {section.unsetEntries.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll((open) => !open)}
+              aria-expanded={showAll}
+              className="shrink-0 cursor-pointer border-0 bg-transparent p-0 font-mondwest text-xs tracking-[0.08em] text-text-secondary transition-colors hover:text-foreground"
+            >
+              {showAll ? t.env.showLess : t.env.showMore}
+            </button>
+          )}
+        </div>
+
+        <CardDescription>
+          {section.setEntries.length} {t.common.of} {section.totalEntries}{" "}
+          {t.common.configured}
+        </CardDescription>
+      </CardHeader>
+
+      {hasContent && (
+        <CardContent className="grid gap-3 overflow-hidden pt-4">
+          {section.setEntries.map(([key, info]) => (
+            <EnvVarRow key={key} varKey={key} info={info} {...rowProps} />
+          ))}
+
+          {showAll &&
+            section.unsetEntries.map(([key, info]) => (
+              <EnvVarRow key={key} varKey={key} info={info} {...rowProps} />
+            ))}
+        </CardContent>
+      )}
+    </Card>
   );
 }
