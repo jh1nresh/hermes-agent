@@ -1,10 +1,10 @@
 """App integration tools — 500+ external apps via the Nous tool gateway.
 
 Four meta tools that let the LLM discover, authenticate, and execute
-real app tools at runtime through a managed Composio-backed gateway.
+real app tools at runtime through the Nous managed tool gateway.
 
 Architecture:
-  Hermes → POST JSON → tools-gateway.nousresearch.com/v1/* → Composio
+  Hermes → POST JSON → tools-gateway.nousresearch.com/v1/* → External APIs
   Auth:   Bearer <nous_user_token> (subscription-gated)
   Vendor: "tools" in the managed gateway infra (build_vendor_gateway_url)
 """
@@ -123,13 +123,11 @@ def _gateway_post(
             }
         }
 
-    url = f"{gateway.resolved_origin}{path}"
+    url = f"{gateway.gateway_origin.rstrip('/')}{path}"
     headers = {
         "Authorization": f"Bearer {gateway.nous_user_token}",
         "Content-Type": "application/json",
     }
-    if gateway.gateway_host_header:
-        headers["Host"] = gateway.gateway_host_header
 
     try:
         client = _get_http_client(url.split("/v1/")[0])
@@ -222,7 +220,7 @@ def handle_app_execute_tools(args: dict, **kw) -> str:
     if session_id is not None:
         payload["session_id"] = session_id
 
-    # Strip Composio-specific params that are meaningless in Hermes
+    # Strip gateway-internal params that are meaningless in Hermes
     # (sync_response_to_workbench, thought, current_step, current_step_metric)
     # They never enter the payload — we only pick the fields we need.
 
