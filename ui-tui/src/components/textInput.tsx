@@ -122,6 +122,34 @@ export function applyPrintableInsert(
 
 export const shouldRouteMultiCharInputAsPaste = (text: string): boolean => text.includes('\n')
 
+/**
+ * Resolve what an Enter keypress should do given the current value, cursor
+ * position, and whether a newline-modifier (Shift/Ctrl/Alt/Cmd) is held.
+ *
+ * - `submit`     — commit the value (no modifier, no inline continuation).
+ * - `newline`    — insert '\n' at the cursor (modifier held).
+ * - `continuation` — backslash is consumed, '\n' inserted in its place.
+ *
+ * The continuation case mirrors Claude Code's PromptInput behaviour and
+ * gives a universally available newline on terminals where Shift/Alt/
+ * Ctrl+Enter all collapse onto plain Enter (Windows, WSL2, Apple Terminal
+ * without setup).
+ */
+export function resolveReturn(value: string, cursor: number, modifier: boolean):
+  | { kind: 'continuation'; cursor: number; value: string }
+  | { kind: 'newline'; cursor: number; value: string }
+  | { kind: 'submit' } {
+  if (cursor > 0 && value.charAt(cursor - 1) === '\\') {
+    return { kind: 'continuation', value: value.slice(0, cursor - 1) + '\n' + value.slice(cursor), cursor }
+  }
+
+  if (modifier) {
+    return { kind: 'newline', value: value.slice(0, cursor) + '\n' + value.slice(cursor), cursor: cursor + 1 }
+  }
+
+  return { kind: 'submit' }
+}
+
 function prevPos(s: string, p: number) {
   const pos = snapPos(s, p)
   let prev = 0
@@ -943,10 +971,14 @@ export function TextInput({
       if (k.return) {
         flushKeyBurst()
 
-        if (k.shift || k.ctrl || (isMac ? isActionMod(k) : k.meta)) {
-          commit(ins(vRef.current, curRef.current, '\n'), curRef.current + 1)
+        const v = vRef.current
+        const modifier = k.shift || k.ctrl || (isMac ? isActionMod(k) : k.meta)
+        const next = resolveReturn(v, curRef.current, modifier)
+
+        if (next.kind === 'submit') {
+          cbSubmit.current?.(v)
         } else {
-          cbSubmit.current?.(vRef.current)
+          commit(next.value, next.cursor)
         }
 
         return

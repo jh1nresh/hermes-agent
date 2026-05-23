@@ -134,3 +134,29 @@ describe('fragmented SGR mouse recovery', () => {
     expect(key).toMatchObject({ kind: 'key', sequence: '1234;56;78M9;10;11M' })
   })
 })
+
+describe('return family modifier decoding', () => {
+  it('parses CR as plain return with no modifiers', () => {
+    const [[key]] = parseMultipleKeypresses(INITIAL_STATE, '\r')
+
+    expect(key).toMatchObject({ name: 'return', ctrl: false, meta: false, shift: false })
+  })
+
+  it('parses LF as Ctrl+J (ctrl+return) — portable newline key', () => {
+    const [[key]] = parseMultipleKeypresses(INITIAL_STATE, '\n')
+
+    expect(key).toMatchObject({ name: 'return', ctrl: true, meta: false, shift: false })
+  })
+
+  it('parses ESC+CR as Alt+Enter (meta+return) for terminals lacking kitty/modifyOtherKeys', () => {
+    const [[key]] = parseMultipleKeypresses(INITIAL_STATE, '\x1b\r')
+
+    expect(key).toMatchObject({ name: 'return', ctrl: false, meta: true, shift: false })
+  })
+
+  it('parses ESC+LF as Alt+Ctrl+Enter', () => {
+    const [[key]] = parseMultipleKeypresses(INITIAL_STATE, '\x1b\n')
+
+    expect(key).toMatchObject({ name: 'return', ctrl: true, meta: true, shift: false })
+  })
+})

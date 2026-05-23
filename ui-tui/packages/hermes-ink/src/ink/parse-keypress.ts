@@ -804,9 +804,21 @@ function parseKeypress(s: string = ''): ParsedKey {
     return createNavKey(s, 'mouse', false)
   }
 
-  if (s === '\r' || s === '\n') {
+  // Enter family. Modern terminals deliver Shift/Ctrl/Alt+Enter via the
+  // kitty keyboard or modifyOtherKeys protocols; this branch covers the
+  // legacy single/two-byte encodings that Windows/WSL2/SSH-without-extended-
+  // keys/Apple-Terminal-without-setup actually send. Recognising them here
+  // gives every downstream consumer a portable newline binding without any
+  // terminal capability detection:
+  //   '\r'         Enter
+  //   '\n'         Ctrl+J  (Ctrl+M would also be '\r')
+  //   '\x1b\r'     Alt+Enter
+  //   '\x1b\n'     Alt+Ctrl+J
+  if (s === '\r' || s === '\n' || s === '\x1b\r' || s === '\x1b\n') {
     key.raw = undefined
     key.name = 'return'
+    key.meta = s.startsWith('\x1b')
+    key.ctrl = s.endsWith('\n')
   } else if (s === '\t') {
     key.name = 'tab'
   } else if (s === '\b' || s === '\x1b\b') {
