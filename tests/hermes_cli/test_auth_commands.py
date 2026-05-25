@@ -1611,6 +1611,22 @@ def test_auth_remove_copilot_suppresses_all_variants(tmp_path, monkeypatch):
     from hermes_cli.auth import is_source_suppressed
     from hermes_cli.auth_commands import auth_remove_command
 
+    # PR #31416 prunes "borrowed" pool entries whose source isn't currently
+    # active.  In production the copilot gh_cli entry is kept alive each
+    # load by `resolve_copilot_token()` returning the live `gh auth token`
+    # output.  In tests there's no `gh` CLI, so stub the resolver so the
+    # seeded entry survives the load → resolve_target round trip.
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.resolve_copilot_token",
+        lambda: ("ghp_fake", "gh"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "hermes_cli.copilot_auth.get_copilot_api_token",
+        lambda token: token,
+        raising=False,
+    )
+
     auth_remove_command(SimpleNamespace(provider="copilot", target="1"))
 
     assert is_source_suppressed("copilot", "gh_cli")
