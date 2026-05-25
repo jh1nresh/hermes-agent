@@ -118,6 +118,92 @@ def test_detect_concurrent_is_noop_off_windows(_winp, tmp_path):
     assert cli_main._detect_concurrent_hermes_instances(tmp_path) == []
 
 
+@patch.object(cli_main, "_is_windows", return_value=True)
+def test_detect_concurrent_excludes_parent_shim(_winp, tmp_path):
+    """Regression test: when ``cmd_update`` runs inside the Python child
+    spawned by the uv-generated ``hermes.exe`` shim, the parent shim must
+    NOT be reported as "another running instance" — that was the false
+    positive that caused ``hermes update`` to bail out with a fresh PID
+    on every invocation.
+
+    Setup:
+      - Our PID is C (the python child running cmd_update).
+      - C's parent is P (hermes.exe shim) — should be excluded.
+      - There's also an unrelated O (genuinely another hermes.exe) —
+        should still be reported.
+    """
+    scripts_dir = tmp_path
+    shim = scripts_dir / "hermes.exe"
+    shim.write_bytes(b"")
+
+    my_pid = 27700
+    parent_pid = 4176
+    other_pid = 9999
+
+    # Fake psutil.Process(my_pid).parents() chain
+    parent_proc = MagicMock()
+    parent_proc.pid = parent_pid
+    parent_proc.exe.return_value = str(shim)
+
+    self_proc = MagicMock()
+    self_proc.parents.return_value = [parent_proc]
+
+    def fake_process_ctor(pid):
+        assert pid == my_pid
+        return self_proc
+
+    procs = [
+        _make_proc(parent_pid, str(shim), "hermes.exe"),  # parent shim — exclude
+        _make_proc(my_pid, str(shim), "hermes.exe"),  # self — exclude
+        _make_proc(other_pid, str(shim), "hermes.exe"),  # genuine other instance
+    ]
+    fake_psutil = types.SimpleNamespace(
+        process_iter=lambda attrs: iter(procs),
+        Process=fake_process_ctor,
+    )
+    with patch.dict(sys.modules, {"psutil": fake_psutil}):
+        result = cli_main._detect_concurrent_hermes_instances(
+            scripts_dir, exclude_pid=my_pid
+        )
+
+    assert result == [(other_pid, "hermes.exe")]
+
+
+@patch.object(cli_main, "_is_windows", return_value=True)
+def test_detect_concurrent_handles_ancestor_enum_failure(_winp, tmp_path):
+    """If psutil can't enumerate ancestors (AccessDenied, NoSuchProcess,
+    or even a bare stub without ``Process``), we degrade gracefully and
+    still exclude at least the caller PID."""
+    scripts_dir = tmp_path
+    shim = scripts_dir / "hermes.exe"
+    shim.write_bytes(b"")
+
+    my_pid = 12345
+    other_pid = 67890
+    procs = [
+        _make_proc(my_pid, str(shim), "hermes.exe"),  # self — exclude
+        _make_proc(other_pid, str(shim), "hermes.exe"),  # genuine other
+    ]
+
+    # Stub psutil that *raises* on Process() lookup — simulates the test
+    # environment in the rest of this file, where psutil is duck-typed
+    # to only provide process_iter.
+    def raising_process(_pid):
+        raise RuntimeError("simulated psutil failure")
+
+    fake_psutil = types.SimpleNamespace(
+        process_iter=lambda attrs: iter(procs),
+        Process=raising_process,
+    )
+    with patch.dict(sys.modules, {"psutil": fake_psutil}):
+        result = cli_main._detect_concurrent_hermes_instances(
+            scripts_dir, exclude_pid=my_pid
+        )
+
+    # Self is still excluded; the other process is still reported.
+    assert result == [(other_pid, "hermes.exe")]
+
+
 # ---------------------------------------------------------------------------
 # _format_concurrent_instances_message
 # ---------------------------------------------------------------------------

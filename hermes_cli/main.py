@@ -7666,9 +7666,6 @@ def _detect_concurrent_hermes_instances(
     except Exception:
         return []
 
-    if exclude_pid is None:
-        exclude_pid = os.getpid()
-
     # Resolve every shim path to its canonical form once for cheap comparison.
     shim_paths: set[str] = set()
     for shim in _hermes_exe_shims(scripts_dir):
@@ -7678,6 +7675,45 @@ def _detect_concurrent_hermes_instances(
             shim_paths.add(str(shim).lower())
     if not shim_paths:
         return []
+
+    # Build the exclusion set: our own PID plus every ancestor PID whose
+    # executable is one of our shims.
+    #
+    # The uv-generated ``hermes.exe`` is a launcher that spawns ``python.exe``
+    # as a child and waits for it.  ``cmd_update`` runs inside the Python
+    # child, so ``os.getpid()`` is the child's PID — but the parent
+    # ``hermes.exe`` shim is alive the whole time and would otherwise be
+    # reported as "another running instance" with a fresh PID on every
+    # invocation (issue raised by Jeffrey: "hermes update fails saying it
+    # detects a running instance — gives me a new pid every time").
+    #
+    # Walking ancestors instead of just excluding the immediate parent is
+    # belt-and-suspenders for shells that may wrap hermes.exe through an
+    # extra layer (e.g. cmd /c hermes.exe inside a script).
+    if exclude_pid is None:
+        exclude_pid = os.getpid()
+    exclude_pids: set[int] = {int(exclude_pid)}
+    try:
+        proc = psutil.Process(int(exclude_pid))
+        ancestors = proc.parents()
+    except Exception:
+        ancestors = []
+    for ancestor in ancestors:
+        try:
+            anc_exe = ancestor.exe()
+        except Exception:
+            continue
+        if not anc_exe:
+            continue
+        try:
+            anc_norm = str(Path(anc_exe).resolve()).lower()
+        except (OSError, ValueError):
+            anc_norm = str(anc_exe).lower()
+        if anc_norm in shim_paths:
+            try:
+                exclude_pids.add(int(ancestor.pid))
+            except Exception:
+                continue
 
     matches: list[tuple[int, str]] = []
     try:
@@ -7692,7 +7728,7 @@ def _detect_concurrent_hermes_instances(
             continue
         pid = info.get("pid")
         exe = info.get("exe")
-        if not exe or pid is None or pid == exclude_pid:
+        if not exe or pid is None or int(pid) in exclude_pids:
             continue
         try:
             exe_norm = str(Path(exe).resolve()).lower()
