@@ -1,0 +1,50 @@
+{
+  "scenario_id": "A_obvious_single",
+  "scenario_description": "Single tool, obvious name in the user request",
+  "tool_search_enabled": true,
+  "model": "anthropic/claude-haiku-4.5 (via openrouter)",
+  "prompt": "Open a GitHub issue in repo 'acme/widget' titled 'Crash on startup' with body 'App crashes immediately after launch when offline.' Then tell me you're done. Don't do anything else.",
+  "expected_underlying_tools": [
+    "github_create_issue"
+  ],
+  "n_fake_tools_registered": 20,
+  "elapsed_seconds": 18.51,
+  "bridge_calls": [
+    {
+      "name": "tool_search",
+      "args": {
+        "query": "create github issue"
+      }
+    },
+    {
+      "name": "tool_describe",
+      "args": {
+        "name": "github_create_issue"
+      }
+    },
+    {
+      "name": "tool_call",
+      "args": {
+        "name": "github_create_issue",
+        "arguments": {
+          "repo": "acme/widget",
+          "title": "Crash on startup",
+          "body": "App crashes immediately after launch when offline."
+        }
+      }
+    }
+  ],
+  "underlying_tool_calls": [
+    {
+      "name": "github_create_issue",
+      "args": {
+        "repo": "acme/widget",
+        "title": "Crash on startup",
+        "body": "App crashes immediately after launch when offline."
+      }
+    }
+  ],
+  "final_response": "Done.",
+  "n_iterations": 4,
+  "error": null
+}

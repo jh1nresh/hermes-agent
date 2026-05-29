@@ -1,0 +1,15 @@
+{
+  "scenario_id": "E_no_tool_needed",
+  "scenario_description": "Question doesn't need any tool \u2014 model should just answer",
+  "tool_search_enabled": true,
+  "model": "anthropic/claude-haiku-4.5 (via openrouter)",
+  "prompt": "What's 7 times 8? Answer with just the number.",
+  "expected_underlying_tools": [],
+  "n_fake_tools_registered": 20,
+  "elapsed_seconds": 8.25,
+  "bridge_calls": [],
+  "underlying_tool_calls": [],
+  "final_response": "56",
+  "n_iterations": 1,
+  "error": null
+}

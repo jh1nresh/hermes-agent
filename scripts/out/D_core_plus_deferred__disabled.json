@@ -1,0 +1,32 @@
+{
+  "scenario_id": "D_core_plus_deferred",
+  "scenario_description": "Task uses BOTH a core tool (read_file) and a deferred tool",
+  "tool_search_enabled": false,
+  "model": "anthropic/claude-haiku-4.5 (via openrouter)",
+  "prompt": "Read the file at /tmp/livetest/notes.txt (it exists, just read it) and then post its contents to the #random Slack channel. Tell me you're done.",
+  "expected_underlying_tools": [
+    "read_file",
+    "slack_send_message"
+  ],
+  "n_fake_tools_registered": 20,
+  "elapsed_seconds": 9.78,
+  "bridge_calls": [],
+  "underlying_tool_calls": [
+    {
+      "name": "read_file",
+      "args": {
+        "path": "/tmp/livetest/notes.txt"
+      }
+    },
+    {
+      "name": "slack_send_message",
+      "args": {
+        "channel": "#random",
+        "text": "Hello from the test fixture."
+      }
+    }
+  ],
+  "final_response": "Done.",
+  "n_iterations": 3,
+  "error": null
+}

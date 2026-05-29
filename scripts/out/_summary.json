@@ -1,0 +1,142 @@
+[
+  {
+    "scenario": "A_obvious_single",
+    "enabled": true,
+    "n_bridge": 3,
+    "n_underlying": 1,
+    "elapsed": 18.51,
+    "error": false,
+    "underlying_tools_called": [
+      "github_create_issue"
+    ],
+    "expected": [
+      "github_create_issue"
+    ]
+  },
+  {
+    "scenario": "A_obvious_single",
+    "enabled": false,
+    "n_bridge": 0,
+    "n_underlying": 1,
+    "elapsed": 9.67,
+    "error": false,
+    "underlying_tools_called": [
+      "github_create_issue"
+    ],
+    "expected": [
+      "github_create_issue"
+    ]
+  },
+  {
+    "scenario": "B_vague_paraphrased",
+    "enabled": true,
+    "n_bridge": 3,
+    "n_underlying": 1,
+    "elapsed": 15.57,
+    "error": false,
+    "underlying_tools_called": [
+      "evt_create"
+    ],
+    "expected": [
+      "evt_create"
+    ]
+  },
+  {
+    "scenario": "B_vague_paraphrased",
+    "enabled": false,
+    "n_bridge": 0,
+    "n_underlying": 1,
+    "elapsed": 11.26,
+    "error": false,
+    "underlying_tools_called": [
+      "evt_create"
+    ],
+    "expected": [
+      "evt_create"
+    ]
+  },
+  {
+    "scenario": "C_multi_tool_chain",
+    "enabled": true,
+    "n_bridge": 4,
+    "n_underlying": 2,
+    "elapsed": 20.3,
+    "error": false,
+    "underlying_tools_called": [
+      "github_list_pulls",
+      "slack_send_message"
+    ],
+    "expected": [
+      "github_list_pulls",
+      "slack_send_message"
+    ]
+  },
+  {
+    "scenario": "C_multi_tool_chain",
+    "enabled": false,
+    "n_bridge": 0,
+    "n_underlying": 2,
+    "elapsed": 14.11,
+    "error": false,
+    "underlying_tools_called": [
+      "github_list_pulls",
+      "slack_send_message"
+    ],
+    "expected": [
+      "github_list_pulls",
+      "slack_send_message"
+    ]
+  },
+  {
+    "scenario": "D_core_plus_deferred",
+    "enabled": true,
+    "n_bridge": 3,
+    "n_underlying": 2,
+    "elapsed": 33.13,
+    "error": false,
+    "underlying_tools_called": [
+      "read_file",
+      "slack_send_message"
+    ],
+    "expected": [
+      "read_file",
+      "slack_send_message"
+    ]
+  },
+  {
+    "scenario": "D_core_plus_deferred",
+    "enabled": false,
+    "n_bridge": 0,
+    "n_underlying": 2,
+    "elapsed": 9.78,
+    "error": false,
+    "underlying_tools_called": [
+      "read_file",
+      "slack_send_message"
+    ],
+    "expected": [
+      "read_file",
+      "slack_send_message"
+    ]
+  },
+  {
+    "scenario": "E_no_tool_needed",
+    "enabled": true,
+    "n_bridge": 0,
+    "n_underlying": 0,
+    "elapsed": 8.25,
+    "error": false,
+    "underlying_tools_called": [],
+    "expected": []
+  },
+  {
+    "scenario": "E_no_tool_needed",
+    "enabled": false,
+    "n_bridge": 0,
+    "n_underlying": 0,
+    "elapsed": 2.76,
+    "error": false,
+    "underlying_tools_called": [],
+    "expected": []
+  }
+]

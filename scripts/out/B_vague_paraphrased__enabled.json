@@ -1,0 +1,50 @@
+{
+  "scenario_id": "B_vague_paraphrased",
+  "scenario_description": "Single tool, paraphrased intent (tests retrieval quality)",
+  "tool_search_enabled": true,
+  "model": "anthropic/claude-haiku-4.5 (via openrouter)",
+  "prompt": "Add a meeting to my schedule for tomorrow morning at 10am called 'Design review', 30 minutes long. Then tell me you're done. Don't do anything else.",
+  "expected_underlying_tools": [
+    "evt_create"
+  ],
+  "n_fake_tools_registered": 20,
+  "elapsed_seconds": 15.57,
+  "bridge_calls": [
+    {
+      "name": "tool_search",
+      "args": {
+        "query": "calendar schedule meeting"
+      }
+    },
+    {
+      "name": "tool_describe",
+      "args": {
+        "name": "evt_create"
+      }
+    },
+    {
+      "name": "tool_call",
+      "args": {
+        "name": "evt_create",
+        "arguments": {
+          "title": "Design review",
+          "start": "2026-05-29T10:00:00",
+          "duration_min": 30
+        }
+      }
+    }
+  ],
+  "underlying_tool_calls": [
+    {
+      "name": "evt_create",
+      "args": {
+        "title": "Design review",
+        "start": "2026-05-29T10:00:00",
+        "duration_min": 30
+      }
+    }
+  ],
+  "final_response": "Done.",
+  "n_iterations": 4,
+  "error": null
+}

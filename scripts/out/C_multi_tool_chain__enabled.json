@@ -1,0 +1,64 @@
+{
+  "scenario_id": "C_multi_tool_chain",
+  "scenario_description": "Multi-step task requiring 2-3 deferred tools",
+  "tool_search_enabled": true,
+  "model": "anthropic/claude-haiku-4.5 (via openrouter)",
+  "prompt": "Find the open pull requests on repo 'acme/widget', then post a summary of how many there are to the #engineering Slack channel. Then tell me you're done.",
+  "expected_underlying_tools": [
+    "github_list_pulls",
+    "slack_send_message"
+  ],
+  "n_fake_tools_registered": 20,
+  "elapsed_seconds": 20.3,
+  "bridge_calls": [
+    {
+      "name": "tool_search",
+      "args": {
+        "query": "GitHub pull requests"
+      }
+    },
+    {
+      "name": "tool_search",
+      "args": {
+        "query": "Slack post message channel"
+      }
+    },
+    {
+      "name": "tool_call",
+      "args": {
+        "name": "github_list_pulls",
+        "arguments": {
+          "repo": "acme/widget"
+        }
+      }
+    },
+    {
+      "name": "tool_call",
+      "args": {
+        "arguments": {
+          "channel": "#engineering",
+          "message": "Open PR Summary for acme/widget: 1 open pull request\n\n\u2022 PR #31163: feat(tools): tool search"
+        },
+        "name": "slack_send_message"
+      }
+    }
+  ],
+  "underlying_tool_calls": [
+    {
+      "name": "github_list_pulls",
+      "args": {
+        "repo": "acme/widget"
+      }
+    },
+    {
+      "name": "slack_send_message",
+      "args": {
+        "channel": "#engineering",
+        "message": "Open PR Summary for acme/widget: 1 open pull request\n\n\u2022 PR #31163: feat(tools): tool search"
+      }
+    }
+  ],
+  "final_response": "Done. Found 1 open pull request in acme/widget (PR #31163: feat(tools): tool search) and posted a summary to #engineering.",
+  "n_iterations": 4,
+  "error": null
+}

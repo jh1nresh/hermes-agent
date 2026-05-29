@@ -1,0 +1,32 @@
+{
+  "scenario_id": "C_multi_tool_chain",
+  "scenario_description": "Multi-step task requiring 2-3 deferred tools",
+  "tool_search_enabled": false,
+  "model": "anthropic/claude-haiku-4.5 (via openrouter)",
+  "prompt": "Find the open pull requests on repo 'acme/widget', then post a summary of how many there are to the #engineering Slack channel. Then tell me you're done.",
+  "expected_underlying_tools": [
+    "github_list_pulls",
+    "slack_send_message"
+  ],
+  "n_fake_tools_registered": 20,
+  "elapsed_seconds": 14.11,
+  "bridge_calls": [],
+  "underlying_tool_calls": [
+    {
+      "name": "github_list_pulls",
+      "args": {
+        "repo": "acme/widget"
+      }
+    },
+    {
+      "name": "slack_send_message",
+      "args": {
+        "channel": "#engineering",
+        "text": "Open pull requests summary for acme/widget: 1 open PR\n\n- #31163: feat(tools): tool search"
+      }
+    }
+  ],
+  "final_response": "Done.",
+  "n_iterations": 3,
+  "error": null
+}
