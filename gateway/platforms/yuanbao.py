@@ -2269,6 +2269,27 @@ class MediaResolveMiddleware(InboundMiddleware):
                 cls._resource_cache.pop(k, None)
         cls._resource_cache[resource_id] = (local_path, mime, time.time())
 
+    @classmethod
+    def _append_cached_resource(
+        cls,
+        adapter,
+        resource_id: str,
+        media_paths: List[str],
+        mimes: List[str],
+    ) -> bool:
+        """Append a cached resource to output lists when available."""
+        hit = cls._get_cached_resource(resource_id)
+        if hit is None:
+            return False
+        local_path, mime = hit
+        logger.debug(
+            "[%s] resource cache hit: rid=%s path=%s",
+            adapter.name, resource_id, local_path,
+        )
+        media_paths.append(local_path)
+        mimes.append(mime)
+        return True
+
     @staticmethod
     def _guess_image_ext_from_url(url: str) -> str:
         """Guess image extension from URL path."""
@@ -2451,6 +2472,8 @@ class MediaResolveMiddleware(InboundMiddleware):
 
             # Extract resourceId from the placeholder URL for cache dedup.
             rid = ExtractContentMiddleware._parse_resource_id(url)
+            if rid and cls._append_cached_resource(adapter, rid, media_urls, media_types):
+                continue
 
             try:
                 fetch_url = await cls._resolve_download_url(adapter, url)
@@ -2526,6 +2549,8 @@ class MediaResolveMiddleware(InboundMiddleware):
         media_paths: List[str] = []
         mimes: List[str] = []
         for rid, kind, filename in order:
+            if cls._append_cached_resource(adapter, rid, media_paths, mimes):
+                continue
             try:
                 fresh_url = await cls._resolve_by_resource_id(adapter, rid)
             except Exception as exc:
@@ -2609,6 +2634,10 @@ class DispatchMiddleware(InboundMiddleware):
                 # User quoted a message — resolve only media from the quote
                 for rid, kind, filename in ctx.quote_media_refs:
                     if kind not in _RESOLVABLE_MEDIA_KINDS:
+                        continue
+                    if MediaResolveMiddleware._append_cached_resource(
+                        adapter, rid, media_urls, media_types
+                    ):
                         continue
                     try:
                         fresh_url = await MediaResolveMiddleware._resolve_by_resource_id(adapter, rid)
