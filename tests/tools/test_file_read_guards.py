@@ -107,6 +107,10 @@ class TestDevicePathBlocking(unittest.TestCase):
             "/proc/99/smaps_rollup",
             "/proc/self/numa_maps",
             "/proc/1/numa_maps",
+            "/proc/self/auxv",
+            "/proc/12345/auxv",
+            "/proc/self/pagemap",
+            "/proc/99/pagemap",
             "/proc/self/mem",
             "/proc/12345/mem",
         ):
