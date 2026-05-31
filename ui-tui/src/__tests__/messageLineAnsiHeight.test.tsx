@@ -69,6 +69,7 @@ describe('MessageLine render height ↔ estimator parity (ANSI history)', () => 
       { length: 6 },
       (_, i) => `line ${i}: some highlighted code tokens that should wrap predictably here`
     ).join('\n')
+
     const msg: Msg = { role: 'assistant', text: colorize(visible) }
 
     const rendered = renderHeight(
@@ -89,12 +90,14 @@ describe('MessageLine render height ↔ estimator parity (ANSI history)', () => 
       { length: 6 },
       (_, i) => `line ${i}: some highlighted code tokens that should wrap predictably here`
     ).join('\n')
+
     const ansiMsg: Msg = { role: 'assistant', text: colorize(visible) }
     const plainMsg: Msg = { role: 'assistant', text: visible }
 
     const ansiRendered = renderHeight(
       React.createElement(Box, { width: cols }, React.createElement(MessageLine, { cols, msg: ansiMsg, t: DEFAULT_THEME }))
     )
+
     const plainRendered = renderHeight(
       React.createElement(Box, { width: cols }, React.createElement(MessageLine, { cols, msg: plainMsg, t: DEFAULT_THEME }))
     )

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { estimatedMsgHeight, messageHeightKey, wrappedLines } from '../lib/virtualHeights.js'
 import { stripAnsi } from '../lib/text.js'
+import { estimatedMsgHeight, messageHeightKey, wrappedLines } from '../lib/virtualHeights.js'
 import type { Msg } from '../types.js'
 
 const ESC = String.fromCharCode(27)
@@ -34,6 +34,7 @@ describe('ANSI message height estimation parity (regression for resume desync)',
     const lines = Array.from({ length: 20 }, (_, i) =>
       colorize(`line ${i} with several colored words that wrap when measured by raw byte length only`)
     )
+
     const ansiMsg: Msg = { role: 'assistant', text: lines.join('\n') }
     const visibleMsg: Msg = { role: 'assistant', text: stripAnsi(lines.join('\n')) }
 
@@ -53,9 +54,11 @@ describe('ANSI message height estimation parity (regression for resume desync)',
 
     for (let turn = 0; turn < 120; turn++) {
       const user: Msg = { role: 'user', text: `question ${turn} about the codebase` }
+
       const codeLines = Array.from({ length: 12 }, (_, i) =>
         colorize(`  const result_${i} = doSomething(${i}, "a fairly long argument string here")`)
       )
+
       const assistant: Msg = { role: 'assistant', text: `Here is turn ${turn}:\n\n${codeLines.join('\n')}` }
       items.push({ key: messageHeightKey(user), msg: user })
       items.push({ key: messageHeightKey(assistant), msg: assistant })
