@@ -7480,7 +7480,9 @@ def _update_via_zip(args):
     print("→ Updating Python dependencies...")
 
     pip_cmd = [sys.executable, "-m", "pip"]
-    uv_bin = shutil.which("uv") or _ensure_uv_for_termux(pip_cmd)
+    from hermes_cli.managed_uv import ensure_uv
+
+    uv_bin = ensure_uv() or _ensure_uv_for_termux(pip_cmd)
     if uv_bin:
         uv_env = {**os.environ, "VIRTUAL_ENV": str(PROJECT_ROOT / "venv")}
         if _is_termux_env(uv_env):
@@ -8581,7 +8583,9 @@ def _install_psutil_android_compat(
 
 def _ensure_uv_for_termux(pip_cmd: list[str]) -> str | None:
     """Best-effort uv bootstrap on Termux for faster update installs."""
-    uv_bin = shutil.which("uv")
+    from hermes_cli.managed_uv import resolve_uv
+
+    uv_bin = resolve_uv()
     if uv_bin or not _is_termux_env():
         return uv_bin
     try:
@@ -8589,7 +8593,7 @@ def _ensure_uv_for_termux(pip_cmd: list[str]) -> str | None:
         subprocess.run(pip_cmd + ["install", "uv"], cwd=PROJECT_ROOT, check=False)
     except Exception:
         pass
-    return shutil.which("uv")
+    return resolve_uv()
 
 
 def _update_node_dependencies() -> None:
@@ -9649,7 +9653,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # individually so update does not silently strip working capabilities.
         print("→ Updating Python dependencies...")
         pip_cmd = [sys.executable, "-m", "pip"]
-        uv_bin = shutil.which("uv") or _ensure_uv_for_termux(pip_cmd)
+        from hermes_cli.managed_uv import ensure_uv
+
+        uv_bin = ensure_uv() or _ensure_uv_for_termux(pip_cmd)
         install_group = "all"
 
         if uv_bin:
