@@ -435,16 +435,31 @@ function Resolve-UvCmd {
         }
     }
 
-    # Refresh PATH from registry in case the current process started before
-    # Install-Uv updated User PATH (each stage runs in its own process), then
-    # accept a PATH uv only when it isn't conda/Anaconda-managed.
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
+    # Try the current process PATH *before* mutating it, so a session-only
+    # trusted uv (prepended for this shell but not persisted to the registry)
+    # is still honored. Accept it only when it isn't conda/Anaconda-managed.
     $pathUv = Get-Command uv -ErrorAction SilentlyContinue
     if ($pathUv -and -not (Test-UvUntrusted $pathUv.Source)) {
         $script:UvCmd = "uv"
         return
     }
 
+    # Nothing trusted on the current PATH -- refresh from the registry in case
+    # this process started before Install-Uv updated User PATH (each stage runs
+    # in its own process), then re-check for a trusted uv.
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $registryUv = Get-Command uv -ErrorAction SilentlyContinue
+    if ($registryUv -and -not (Test-UvUntrusted $registryUv.Source)) {
+        $script:UvCmd = "uv"
+        return
+    }
+
+    # Be explicit about *why* resolution failed: a uv that exists but was
+    # rejected as conda/Anaconda-managed is a different fix than no uv at all.
+    $rejected = if ($registryUv) { $registryUv.Source } elseif ($pathUv) { $pathUv.Source } else { $null }
+    if ($rejected) {
+        throw "Only a conda/Anaconda-managed uv was found ($rejected); refusing to use it for the Hermes venv. Run install.ps1 -Stage uv to install a standalone uv."
+    }
     throw "uv is not installed or not on PATH. Run install.ps1 -Stage uv first."
 }
 
