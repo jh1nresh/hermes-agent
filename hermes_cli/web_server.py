@@ -3717,31 +3717,23 @@ def _codex_full_login_worker(session_id: str) -> None:
         if not access_token:
             raise RuntimeError("token exchange did not return access_token")
 
-        # Persist via credential pool — same shape as auth_commands.add_command
-        from agent.credential_pool import (
-            PooledCredential,
-            load_pool,
-            AUTH_TYPE_OAUTH,
-            SOURCE_MANUAL,
-        )
-        import uuid as _uuid
-        pool = load_pool("openai-codex")
-        base_url = (
-            os.getenv("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
-            or DEFAULT_CODEX_BASE_URL
-        )
-        entry = PooledCredential(
-            provider="openai-codex",
-            id=_uuid.uuid4().hex[:6],
-            label="dashboard device_code",
-            auth_type=AUTH_TYPE_OAUTH,
-            priority=0,
-            source=f"{SOURCE_MANUAL}:dashboard_device_code",
-            access_token=access_token,
-            refresh_token=refresh_token,
-            base_url=base_url,
-        )
-        pool.add_entry(entry)
+        # Persist via the canonical Codex token store. _save_codex_tokens writes
+        # the providers.openai-codex singleton (which sets active_provider via
+        # _save_provider_state) AND syncs the credential pool. The previous
+        # hand-rolled pool.add_entry() only seeded credential_pool.openai-codex,
+        # leaving active_provider=None — so on a fresh install the immediately-
+        # following setup.runtime_check resolved provider "auto", couldn't detect
+        # the Codex OAuth session, and raised "No inference provider configured"
+        # while setup.status (which sniffs the pool) reported configured. That
+        # divergence produced the desktop onboarding "Connected, but Hermes still
+        # cannot resolve a usable provider" error. This mirrors the CLI's
+        # `hermes auth add openai-codex` path and the Nous/MiniMax dashboard
+        # workers, which all use their canonical save helpers.
+        from hermes_cli.auth import _save_codex_tokens
+        _save_codex_tokens({
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        })
         with _oauth_sessions_lock:
             sess["status"] = "approved"
         _log.info("oauth/device: openai-codex login completed (session=%s)", session_id)
