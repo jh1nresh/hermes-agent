@@ -142,9 +142,15 @@ Advanced/rarely-used keys are hidden by default behind a toggle.
 Browse and inspect all agent sessions. Each row shows the session title, source platform icon (CLI, Telegram, Discord, Slack, cron), model name, message count, tool call count, and how long ago it was active. Live sessions are marked with a pulsing badge.
 
 - **Search** — full-text search across all message content using FTS5. Results show highlighted snippets and auto-scroll to the first matching message when expanded.
+- **Stats** — a summary bar shows total sessions, how many are active in the store, archived count, total messages, and a per-source breakdown.
 - **Expand** — click a session to load its full message history. Messages are color-coded by role (user, assistant, system, tool) and rendered as Markdown with syntax highlighting.
 - **Tool calls** — assistant messages with tool calls show collapsible blocks with the function name and JSON arguments.
+- **Rename** — set or clear a session's title inline (pencil icon).
+- **Export** — download a session (metadata + full message history) as JSON (download icon).
+- **Prune** — the header "Prune old sessions" button deletes ended sessions older than N days.
 - **Delete** — remove a session and its message history with the trash icon.
+
+![Sessions admin page — stats bar, prune, and per-row rename / export / delete](/img/dashboard/admin-sessions.png)
 
 ### Logs
 
@@ -173,17 +179,21 @@ Create and manage scheduled cron jobs that run agent prompts on a recurring sche
 - **Create** — fill in a name (optional), prompt, cron expression (e.g. `0 9 * * *`), and delivery target (local, Telegram, Discord, Slack, or email)
 - **Job list** — each job shows its name, prompt preview, schedule expression, state badge (enabled/paused/error), delivery target, last run time, and next run time
 - **Pause / Resume** — toggle a job between active and paused states
+- **Edit** — open a pre-filled modal to change a job's prompt, schedule, name, or delivery target
 - **Trigger now** — immediately execute a job outside its normal schedule
 - **Delete** — permanently remove a cron job
 
 ### Skills
 
-Browse, search, and toggle skills and toolsets. Skills are loaded from `~/.hermes/skills/` and grouped by category.
+Browse, search, and toggle installed skills and toolsets, and install new ones from the hub. Skills are loaded from `~/.hermes/skills/` and grouped by category.
 
-- **Search** — filter skills and toolsets by name, description, or category
+- **Search** — filter installed skills and toolsets by name, description, or category
 - **Category filter** — click category pills to narrow the list (e.g. MLOps, MCP, Red Teaming, AI)
 - **Toggle** — enable or disable individual skills with a switch. Changes take effect on the next session.
-- **Toolsets** — a separate section shows built-in toolsets (file operations, web browsing, etc.) with their active/inactive status, setup requirements, and list of included tools
+- **Toolsets** — a separate view shows built-in toolsets (file operations, web browsing, etc.) with their active/inactive status, setup requirements, and list of included tools
+- **Browse hub** — a third view searches the skill hub across all sources (the same as `hermes skills search`), installs any result by identifier with a live install log, and offers an "Update all" button to refresh installed skills.
+
+![Skills admin page — the Browse hub view: search, install, and update](/img/dashboard/admin-skills-hub.png)
 
 ### MCP
 
@@ -407,6 +417,12 @@ same auth gate as the rest of `/api/`.
 | `POST /api/ops/prompt-size` · `/dump` · `/config-migrate` | Diagnostics (backgrounded) |
 | `PUT /api/webhooks/{name}/enabled` | Enable / disable a webhook route |
 | `POST /api/skills/hub/install` · `/uninstall` · `/update` | Skills hub actions (backgrounded) |
+| `GET /api/skills/hub/search` | Search the skill hub across all sources |
+| `GET /api/sessions/stats` | Session-store statistics |
+| `PATCH /api/sessions/{id}` | Rename / archive a session |
+| `GET /api/sessions/{id}/export` | Export a session (metadata + messages) as JSON |
+| `POST /api/sessions/prune` | Delete ended sessions older than N days |
+| `PUT /api/cron/jobs/{id}` | Edit a cron job's prompt / schedule / name / deliver |
 
 ## OAuth Authentication (gated mode)
 
