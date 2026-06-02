@@ -6961,7 +6961,7 @@ def cmd_gui(args):
         if not npm:
             print("Desktop GUI requires Node.js/npm to build from this checkout, but npm was not found on PATH.")
             print("Install Node.js, then run:  hermes desktop")
-            print("Or download a prebuilt desktop installer from: https://github.com/NousResearch/hermes-agent/releases")
+            print("Or download Hermes Desktop from: https://hermes-agent.nousresearch.com/desktop")
             sys.exit(1)
     else:
         npm = None
@@ -14734,8 +14734,8 @@ Examples:
             "Launch the Hermes Electron desktop app from this checkout. By default "
             "this installs workspace Node dependencies, builds the current OS's "
             "unpacked Electron app with electron-builder --dir, then launches that "
-            "artifact. It does not download or run the release installers; use "
-            "GitHub Releases for .dmg/.exe/.AppImage packages."
+            "artifact. It does not download Hermes Desktop; use "
+            "https://hermes-agent.nousresearch.com/desktop for that."
         ),
     )
     gui_parser.add_argument(
