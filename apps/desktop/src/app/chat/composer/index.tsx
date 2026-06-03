@@ -65,7 +65,7 @@ import {
 } from './rich-editor'
 import { SkinSlashPopover } from './skin-slash-popover'
 import { detectTrigger, extractClipboardImageBlobs, textBeforeCaret, type TriggerState } from './text-utils'
-import { ComposerTriggerPopover } from './trigger-popover'
+import { ComposerTriggerPopover, type ComposerTriggerPopoverHandle } from './trigger-popover'
 import type { ChatBarProps } from './types'
 import { UrlDialog } from './url-dialog'
 import { VoiceActivity, VoicePlaybackActivity } from './voice-activity'
@@ -125,6 +125,7 @@ export function ChatBar({
   const previousBusyRef = useRef(busy)
   const drainingQueueRef = useRef(false)
   const urlInputRef = useRef<HTMLInputElement | null>(null)
+  const triggerPopoverRef = useRef<ComposerTriggerPopoverHandle>(null)
 
   const [urlOpen, setUrlOpen] = useState(false)
   const [urlValue, setUrlValue] = useState('')
@@ -441,8 +442,19 @@ export function ChatBar({
     const before = textBeforeCaret(editor)
     const detected = detectTrigger(before ?? composerPlainText(editor))
 
+    // Only reset the active index when the trigger state actually changed
+    // (new trigger opened, trigger closed, or query text changed). When the
+    // kind + query are the same (e.g. the user just pressed ArrowUp/Down),
+    // preserve the selection so keyboard navigation isn't wiped out by the
+    // keyup→refreshTrigger round-trip.
+    const queryChanged =
+      trigger?.kind !== detected?.kind || trigger?.query !== detected?.query
+
     setTrigger(detected)
-    setTriggerActive(0)
+
+    if (queryChanged) {
+      setTriggerActive(0)
+    }
   }, [trigger])
 
   const handleEditorInput = (event: FormEvent<HTMLDivElement>) => {
@@ -559,6 +571,7 @@ export function ChatBar({
       if (event.key === 'ArrowDown') {
         event.preventDefault()
         setTriggerActive(idx => (idx + 1) % triggerItems.length)
+        requestAnimationFrame(() => triggerPopoverRef.current?.scrollActiveIntoView())
 
         return
       }
@@ -566,6 +579,7 @@ export function ChatBar({
       if (event.key === 'ArrowUp') {
         event.preventDefault()
         setTriggerActive(idx => (idx - 1 + triggerItems.length) % triggerItems.length)
+        requestAnimationFrame(() => triggerPopoverRef.current?.scrollActiveIntoView())
 
         return
       }
@@ -1092,6 +1106,7 @@ export function ChatBar({
           {showHelpHint && <HelpHint />}
           {trigger && (
             <ComposerTriggerPopover
+              ref={triggerPopoverRef}
               activeIndex={triggerActive}
               items={triggerItems}
               kind={trigger.kind}

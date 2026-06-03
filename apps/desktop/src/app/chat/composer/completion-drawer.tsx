@@ -24,7 +24,12 @@ export const COMPLETION_DRAWER_BELOW_CLASS = [
 
 export const COMPLETION_DRAWER_ROW_CLASS = [
   'relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1',
-  'w-full min-w-0 text-left text-xs outline-hidden transition-colors',
+  'w-full min-w-0 text-left text-xs outline-hidden',
+  // Keyboard selection (data-highlighted / activeIndex) should feel instant —
+  // no transition on background so the highlight snaps to the new row.
+  // Mouse hover keeps a smooth 200ms color transition for that buttery feel.
+  'transition-[color,border-color,text-decoration-color] duration-0',
+  'hover:transition-colors hover:duration-200',
   'hover:bg-(--ui-bg-tertiary)',
   'data-[highlighted]:bg-(--ui-bg-tertiary) data-[highlighted]:text-foreground'
 ].join(' ')

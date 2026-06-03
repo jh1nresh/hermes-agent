@@ -1,4 +1,5 @@
 import type { Unstable_TriggerItem } from '@assistant-ui/core'
+import { forwardRef, useImperativeHandle, useRef } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
 import { cn } from '@/lib/utils'
@@ -51,21 +52,47 @@ interface ComposerTriggerPopoverProps {
   placement?: 'bottom' | 'top'
 }
 
-export function ComposerTriggerPopover({
-  activeIndex,
-  items,
-  kind,
-  loading,
-  onHover,
-  onPick,
-  placement = 'top'
-}: ComposerTriggerPopoverProps) {
+export interface ComposerTriggerPopoverHandle {
+  scrollActiveIntoView: () => void
+}
+
+export const ComposerTriggerPopover = forwardRef<
+  ComposerTriggerPopoverHandle,
+  ComposerTriggerPopoverProps
+>(function ComposerTriggerPopover(
+  { activeIndex, items, kind, loading, onHover, onPick, placement = 'top' },
+  ref
+) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  // Expose scrollActiveIntoView so the keyboard handler in the parent can
+  // trigger a scroll only on arrow-key events — mouse hover never calls this.
+  useImperativeHandle(ref, () => ({
+    scrollActiveIntoView() {
+      const container = containerRef.current
+      if (!container) return
+
+      const highlighted = container.querySelector<HTMLElement>('[data-highlighted]')
+      if (!highlighted) return
+
+      const buttonRect = highlighted.getBoundingClientRect()
+      const containerRect = container.getBoundingClientRect()
+
+      if (buttonRect.top < containerRect.top) {
+        container.scrollTop -= containerRect.top - buttonRect.top
+      } else if (buttonRect.bottom > containerRect.bottom) {
+        container.scrollTop += buttonRect.bottom - containerRect.bottom
+      }
+    }
+  }))
+
   return (
     <div
       className={placement === 'bottom' ? COMPLETION_DRAWER_BELOW_CLASS : COMPLETION_DRAWER_CLASS}
       data-slot="composer-completion-drawer"
       data-state="open"
       onMouseDown={event => event.preventDefault()}
+      ref={containerRef}
       role="listbox"
     >
       {items.length === 0 ? (
@@ -86,11 +113,12 @@ export function ComposerTriggerPopover({
           const meta = item.metadata as { display?: string; meta?: string } | undefined
           const display = meta?.display ?? (kind === '/' ? `/${item.label}` : item.label)
           const description = meta?.meta || item.description
+          const isActive = index === activeIndex
 
           return (
             <button
-              className={cn(COMPLETION_DRAWER_ROW_CLASS, index === activeIndex && 'bg-(--ui-bg-tertiary)')}
-              data-highlighted={index === activeIndex ? '' : undefined}
+              className={cn(COMPLETION_DRAWER_ROW_CLASS, isActive && 'bg-(--ui-bg-tertiary)')}
+              data-highlighted={isActive ? '' : undefined}
               key={item.id}
               onClick={() => onPick(item)}
               onMouseEnter={() => onHover(index)}
@@ -109,4 +137,4 @@ export function ComposerTriggerPopover({
       )}
     </div>
   )
-}
+})
