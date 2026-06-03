@@ -449,6 +449,77 @@ describe('assistant-ui streaming renderer', () => {
     expect(viewport.scrollTop).toBe(420)
   })
 
+  it('holds the viewport at bottom when content transiently shrinks while armed', async () => {
+    const { container } = render(<StreamingHarness />)
+
+    const content = container.querySelector('[data-slot="aui_thread-content"]') as HTMLDivElement
+    const viewport = content.parentElement as HTMLDivElement
+
+    // Model a real browser: the scroller's scrollHeight is the LARGER of the
+    // measured content height and any reserved min-height the hook pins on the
+    // content; scrollTop clamps into [0, scrollHeight - clientHeight] whenever
+    // scrollHeight changes (this clamp-on-shrink is what yanked the viewport up
+    // in headless Chromium, independent of any pin).
+    let measured = 2_000
+    const minHeightOf = () => {
+      const raw = content.style.minHeight
+      return raw.endsWith('px') ? Number.parseFloat(raw) : 0
+    }
+    const effectiveHeight = () => Math.max(measured, minHeightOf())
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 600 })
+    // Both the content box and the scroller honor the reserved min-height, so
+    // their measured height is max(real content, min-height) — exactly how a
+    // real browser sizes a block with `min-height` set. The hook reads
+    // content.scrollHeight to build its high-water-mark.
+    Object.defineProperty(content, 'scrollHeight', {
+      configurable: true,
+      get: effectiveHeight
+    })
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      get: effectiveHeight
+    })
+    let rawTop = 0
+    const clamp = () => {
+      const max = Math.max(0, effectiveHeight() - 600)
+      rawTop = Math.max(0, Math.min(rawTop, max))
+    }
+    Object.defineProperty(viewport, 'scrollTop', {
+      configurable: true,
+      get: () => rawTop,
+      set: (value: number) => {
+        rawTop = value
+        clamp()
+      }
+    })
+
+    // Park armed at the bottom; the initial RO pass records the high-water-mark.
+    await act(async () => {
+      for (const observer of resizeObservers) {
+        observer.trigger(2_000)
+      }
+    })
+    await wait(0)
+    viewport.scrollTop = viewport.scrollHeight
+    await wait(0)
+    expect(viewport.scrollTop).toBe(1_400)
+
+    // A code block gets highlighted: measured content shrinks one frame. The RO
+    // fires; the hook must reserve min-height = high-water-mark FIRST so the
+    // scroller does not shrink and the browser never clamps scrollTop upward.
+    measured = 1_700
+    await act(async () => {
+      clamp() // browser would clamp here if scrollHeight actually dropped
+      for (const observer of resizeObservers) {
+        observer.trigger(1_700)
+      }
+    })
+    await wait(0)
+
+    expect(content.style.minHeight).toBe('2000px')
+    expect(viewport.scrollTop).toBe(1_400)
+  })
+
   it('renders reasoning text without a leading token space', () => {
     const { container } = render(<ReasoningHarness />)
 

@@ -195,6 +195,21 @@ function useThreadScrollAnchor({ enabled, groupCount, scrollerRef, sessionKey, v
   const programmaticScrollPendingRef = useRef(0)
   const prevSessionKeyRef = useRef(sessionKey)
   const prevGroupCountRef = useRef(0)
+  // High-water-mark of the content's scrollHeight within the current turn.
+  // While parked at the bottom, syntax-highlighting a code/patch block
+  // (Streamdown/Shiki) briefly REPLACES laid-out DOM, so for one frame the
+  // content is SHORTER than steady state. The browser clamps scrollTop up the
+  // instant content shrinks below the scroll position (verified in headless
+  // Chromium: 1400 → 1100 with no pin involved), and the next frame's regrow
+  // pin snaps it back down — the at-rest jump-up-then-return bounce users
+  // still saw after the disarm fixes (#38221 follow-up). A pin cannot prevent
+  // it: the clamp happens at layout, before any rAF pin runs. The cure is to
+  // keep the content's height MONOTONIC within a turn by pinning a
+  // `min-height` to the high-water-mark, so a transient shrink never shrinks
+  // the scroller and the browser never clamps. Reset per turn/session in
+  // `jumpToBottom` (and cleared on disarm) so an old tall thread can't pad a
+  // new short one.
+  const contentHwmRef = useRef(0)
 
   const pinToBottom = useCallback(() => {
     const el = scrollerRef.current
@@ -213,6 +228,17 @@ function useThreadScrollAnchor({ enabled, groupCount, scrollerRef, sessionKey, v
   const jumpToBottom = useCallback(() => {
     armedRef.current = true
 
+    // New turn / session / first content: re-establish bottom from scratch, so
+    // drop any reserved min-height from the previous turn (an old tall thread
+    // must not pad a new short one). The RO will rebuild the high-water-mark
+    // from this turn's real content.
+    const content = scrollerRef.current?.firstElementChild as HTMLElement | null
+
+    if (content) {
+      content.style.minHeight = ''
+    }
+    contentHwmRef.current = 0
+
     if (groupCount > 0) {
       virtualizer.scrollToIndex(groupCount - 1, { align: 'end', behavior: 'auto' })
     }
@@ -222,7 +248,7 @@ function useThreadScrollAnchor({ enabled, groupCount, scrollerRef, sessionKey, v
         pinToBottom()
       }
     })
-  }, [groupCount, pinToBottom, virtualizer])
+  }, [groupCount, pinToBottom, scrollerRef, virtualizer])
 
   useEffect(() => () => setThreadScrolledUp(false), [])
 
@@ -238,6 +264,17 @@ function useThreadScrollAnchor({ enabled, groupCount, scrollerRef, sessionKey, v
     const disarm = () => {
       armedRef.current = false
       programmaticScrollPendingRef.current = 0
+
+      // Release the reserved min-height when the user takes over scrolling, so
+      // a finished turn's high-water-mark padding doesn't leave a dead gap at
+      // the bottom of a thread they're reading from the middle. It's rebuilt
+      // on the next jumpToBottom (return to bottom / new turn).
+      const content = el.firstElementChild as HTMLElement | null
+
+      if (content) {
+        content.style.minHeight = ''
+      }
+      contentHwmRef.current = 0
     }
 
     const onScroll = () => {
@@ -340,13 +377,32 @@ function useThreadScrollAnchor({ enabled, groupCount, scrollerRef, sessionKey, v
       })
     }
 
-    const observer = new ResizeObserver(schedulePin)
+    const content = el.firstElementChild as HTMLElement | null
+
+    const observer = new ResizeObserver(() => {
+      // Keep content height monotonic within a turn while armed. Raise the
+      // high-water-mark and reserve it as `min-height` BEFORE scheduling the
+      // pin, so a transient shrink (Shiki re-tokenizing a code block) can't
+      // shrink the scroller and make the browser clamp scrollTop upward. We
+      // only ever GROW the reserved height here; it's reset per turn/session
+      // in jumpToBottom and cleared on user disarm.
+      if (content && armedRef.current) {
+        const measured = content.scrollHeight
+
+        if (measured > contentHwmRef.current) {
+          contentHwmRef.current = measured
+          content.style.minHeight = `${measured}px`
+        }
+      }
+
+      schedulePin()
+    })
 
     // Observe ONLY the content (firstElementChild), not the scroller `el`
     // itself. Resizes of the viewport/scroller (window resize, devtools
     // panel toggle) shouldn't trigger a pin — only content growth should.
-    if (el.firstElementChild) {
-      observer.observe(el.firstElementChild)
+    if (content) {
+      observer.observe(content)
     }
 
     return () => observer.disconnect()
