@@ -38,7 +38,13 @@ def test_tty_passthrough_to_container(built_image: str) -> None:
     assert "NO_TTY" not in output, f"TTY passthrough failed: {output!r}"
     numeric_lines = [s for s in output.split() if s.strip().isdigit()]
     assert numeric_lines, f"No numeric width in output: {output!r}"
-    assert int(numeric_lines[0]) > 0
+    # The container saw a real TTY (``[ -t 1 ]`` was true, so we got a number
+    # rather than ``NO_TTY``) and terminfo resolved ``tput cols``. That is the
+    # passthrough contract this test guards. The reported width itself depends
+    # on the host PTY's window-size ioctl: a ``script(1)``-allocated PTY on a
+    # headless CI runner has a 0x0 window, so ``tput cols`` legitimately prints
+    # ``0`` while still being a TTY. Assert non-negative, not strictly positive.
+    assert int(numeric_lines[0]) >= 0
 
 
 def test_tui_flag_recognized(built_image: str) -> None:
