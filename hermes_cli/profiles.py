@@ -240,8 +240,25 @@ def _get_active_profile_path() -> Path:
 
 
 def _get_wrapper_dir() -> Path:
-    """Return the directory for wrapper scripts."""
-    return Path.home() / ".local" / "bin"
+    """Return the directory for profile-alias wrapper scripts.
+
+    Uses the canonical command-link directory so aliases land wherever the
+    ``hermes`` command itself lives and is therefore on PATH: ``/usr/local/bin``
+    for root FHS installs, ``$PREFIX/bin`` on Termux, ``~/.local/bin`` otherwise
+    (including Windows).  Previously hardcoded ``~/.local/bin``, which left
+    aliases off-PATH on root FHS installs (PR #38889).
+    """
+    from hermes_constants import command_link_dir
+
+    return command_link_dir()
+
+
+def _wrapper_candidate_dirs() -> list[Path]:
+    """All dirs a profile alias may live in, for cleanup that must find links
+    regardless of which layout created them."""
+    from hermes_constants import command_link_candidate_dirs
+
+    return command_link_candidate_dirs()
 
 
 # ---------------------------------------------------------------------------
@@ -399,27 +416,34 @@ def create_wrapper_script(name: str, target: Optional[str] = None) -> Optional[P
 
 
 def remove_wrapper_script(name: str) -> bool:
-    """Remove the wrapper script for a profile. Returns True if removed."""
-    wrapper_dir = _get_wrapper_dir()
+    """Remove the wrapper script for a profile. Returns True if removed.
+
+    Scans all candidate command-link directories (``~/.local/bin``,
+    ``/usr/local/bin``, ``$PREFIX/bin``) so aliases are removable regardless of
+    which layout created them — e.g. an alias written to ``/usr/local/bin`` on a
+    root FHS install, or a legacy one left in ``~/.local/bin``.
+    """
     canon = normalize_profile_name(name)
     is_windows = sys.platform == "win32"
 
-    # Check both the extensionless path (POSIX) and .bat (Windows)
-    candidates = [wrapper_dir / canon]
-    if is_windows:
-        candidates.insert(0, wrapper_dir / f"{canon}.bat")
+    removed = False
+    for wrapper_dir in _wrapper_candidate_dirs():
+        # Check both the extensionless path (POSIX) and .bat (Windows)
+        candidates = [wrapper_dir / canon]
+        if is_windows:
+            candidates.insert(0, wrapper_dir / f"{canon}.bat")
 
-    for wrapper_path in candidates:
-        if wrapper_path.exists():
-            try:
-                # Verify it's our wrapper before removing
-                content = wrapper_path.read_text()
-                if "hermes -p" in content:
-                    wrapper_path.unlink()
-                    return True
-            except Exception:
-                pass
-    return False
+        for wrapper_path in candidates:
+            if wrapper_path.exists():
+                try:
+                    # Verify it's our wrapper before removing
+                    content = wrapper_path.read_text()
+                    if "hermes -p" in content:
+                        wrapper_path.unlink()
+                        removed = True
+                except Exception:
+                    pass
+    return removed
 
 
 # ---------------------------------------------------------------------------

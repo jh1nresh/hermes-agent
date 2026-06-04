@@ -1288,3 +1288,48 @@ class TestEdgeCases:
             delete_profile("coder", yes=True)
 
         assert get_active_profile() == "default"
+
+
+class TestWrapperDirLayoutAware:
+    """Profile-alias wrapper dir follows the canonical command-link layout (#38889)."""
+
+    def test_wrapper_dir_root_fhs(self, monkeypatch):
+        import hermes_cli.profiles as profiles
+        import hermes_constants
+        monkeypatch.setattr(hermes_constants, "is_termux", lambda: False)
+        monkeypatch.setattr(hermes_constants, "_is_root_fhs_layout", lambda: True)
+        assert profiles._get_wrapper_dir() == Path("/usr/local/bin")
+
+    def test_wrapper_dir_nonroot(self, tmp_path, monkeypatch):
+        import hermes_cli.profiles as profiles
+        import hermes_constants
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.setattr(hermes_constants, "is_termux", lambda: False)
+        monkeypatch.setattr(hermes_constants, "_is_root_fhs_layout", lambda: False)
+        assert profiles._get_wrapper_dir() == tmp_path / ".local" / "bin"
+
+    def test_remove_wrapper_scans_all_dirs(self, tmp_path, monkeypatch):
+        """An alias in /usr/local/bin is removed even though _get_wrapper_dir
+        would (in test) point at ~/.local/bin — remove must scan candidates."""
+        import hermes_cli.profiles as profiles
+        fake_usr_local = tmp_path / "usr_local_bin"
+        fake_usr_local.mkdir()
+        alias = fake_usr_local / "myprof"
+        alias.write_text('#!/usr/bin/env bash\nexec hermes -p myprof "$@"\n')
+        alias.chmod(0o755)
+        monkeypatch.setattr(
+            profiles, "_wrapper_candidate_dirs", lambda: [fake_usr_local]
+        )
+        assert profiles.remove_wrapper_script("myprof") is True
+        assert not alias.exists()
+
+    def test_remove_wrapper_leaves_foreign_files(self, tmp_path, monkeypatch):
+        """A file that isn't our wrapper (no 'hermes -p') is left untouched."""
+        import hermes_cli.profiles as profiles
+        d = tmp_path / "bin"
+        d.mkdir()
+        foreign = d / "myprof"
+        foreign.write_text("#!/bin/sh\necho not ours\n")
+        monkeypatch.setattr(profiles, "_wrapper_candidate_dirs", lambda: [d])
+        assert profiles.remove_wrapper_script("myprof") is False
+        assert foreign.exists()

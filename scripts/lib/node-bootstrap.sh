@@ -47,14 +47,58 @@ _nb_is_termux() {
 # Where to symlink node/npm/npx so they land on PATH.
 # Mirrors get_command_link_dir() from install.sh: root FHS → /usr/local/bin,
 # Termux → $PREFIX/bin, otherwise ~/.local/bin.
+#
+# Parity note (#38889): install.sh keys off $ROOT_FHS_LAYOUT, which
+# resolve_install_layout() sets to FALSE for a root user who has a LEGACY
+# install at $HERMES_HOME/hermes-agent/.git (those keep ~/.local/bin).  We
+# mirror that here so the bootstrap path (hermes update) can't diverge from the
+# installer and link node into a different dir than the hermes command.
 _nb_get_link_dir() {
     if _nb_is_termux && [ -n "${PREFIX:-}" ]; then
         echo "$PREFIX/bin"
-    elif [ "$(id -u)" = 0 ] && [ "$(uname -s)" = "Linux" ]; then
-        echo "/usr/local/bin"
-    else
-        echo "$HOME/.local/bin"
+        return
     fi
+    if [ "$(id -u)" = 0 ] && [ "$(uname -s)" = "Linux" ]; then
+        # Root on Linux: FHS layout UNLESS a legacy git install exists, matching
+        # resolve_install_layout() in install.sh.
+        if [ -d "${HERMES_HOME:-$HOME/.hermes}/hermes-agent/.git" ]; then
+            echo "$HOME/.local/bin"
+        else
+            echo "/usr/local/bin"
+        fi
+        return
+    fi
+    echo "$HOME/.local/bin"
+}
+
+# Idempotently (re)create the node/npm/npx PATH symlinks in the canonical link
+# dir, and prune stale ones left in OTHER candidate dirs by an older/broken
+# install (the #38889 migration case: a root box upgraded from the old layout
+# has links only in ~/.local/bin, off-PATH).  Safe to call repeatedly.
+#
+# Pruning rule mirrors hermes_cli/uninstall.remove_node_symlinks: only remove a
+# symlink that still resolves into THIS Hermes home's node dir — never touch a
+# real binary or a link the user repointed at nvm/fnm.
+_nb_link_bundled_node() {
+    local link_dir stale_dir name target
+    link_dir="$(_nb_get_link_dir)"
+    mkdir -p "$link_dir"
+    ln -sf "$HERMES_HOME/node/bin/node" "$link_dir/node"
+    ln -sf "$HERMES_HOME/node/bin/npm"  "$link_dir/npm"
+    ln -sf "$HERMES_HOME/node/bin/npx"  "$link_dir/npx"
+
+    # Prune stale links in the other candidate dirs (so a migrated root install
+    # doesn't keep shadowing copies in ~/.local/bin — #34536 nvm-shadow class).
+    for stale_dir in "$HOME/.local/bin" "/usr/local/bin"; do
+        [ "$stale_dir" = "$link_dir" ] && continue
+        for name in node npm npx; do
+            [ -L "$stale_dir/$name" ] || continue
+            target="$(readlink "$stale_dir/$name" 2>/dev/null || true)"
+            case "$target" in
+                "$HERMES_HOME/node/"*) rm -f "$stale_dir/$name" ;;
+            esac
+        done
+    done
 }
 
 _nb_node_major() {
@@ -200,12 +244,8 @@ _nb_install_bundled_node() {
     mv "$extracted" "$HERMES_HOME/node"
     rm -rf "$tmp"
 
-    local _link_dir
-    _link_dir="$(_nb_get_link_dir)"
-    mkdir -p "$_link_dir"
-    ln -sf "$HERMES_HOME/node/bin/node" "$_link_dir/node"
-    ln -sf "$HERMES_HOME/node/bin/npm"  "$_link_dir/npm"
-    ln -sf "$HERMES_HOME/node/bin/npx"  "$_link_dir/npx"
+    # Create PATH symlinks in the canonical link dir (and prune stale ones).
+    _nb_link_bundled_node
     export PATH="$HERMES_HOME/node/bin:$PATH"
 
     _nb_have_modern_node || return 1
@@ -229,6 +269,12 @@ ensure_node() {
     if [ -x "$HERMES_HOME/node/bin/node" ]; then
         export PATH="$HERMES_HOME/node/bin:$PATH"
         if _nb_have_modern_node; then
+            # Migration repair (#38889): an existing install may have its node
+            # symlinks only in ~/.local/bin (off-PATH on root FHS) or missing
+            # entirely.  Re-create them in the canonical link dir and prune
+            # stale copies, so `hermes update` heals a previously-broken box
+            # instead of silently leaving it broken.
+            _nb_link_bundled_node
             _nb_ok "Node $(node --version) found (Hermes-managed)"
             HERMES_NODE_AVAILABLE=true
             return 0

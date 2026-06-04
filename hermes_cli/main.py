@@ -6817,6 +6817,7 @@ def _run_with_idle_timeout(
     *,
     idle_timeout_seconds: int = 180,
     indent: str = "    ",
+    env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a subprocess that streams output, with an idle-output timeout.
 
@@ -6851,6 +6852,7 @@ def _run_with_idle_timeout(
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            env=env,
         )
     except OSError as exc:
         # E.g. npm not on PATH between the which() check and now.
@@ -6915,6 +6917,7 @@ def _run_npm_install_deterministic(
     *,
     extra_args: tuple[str, ...] = (),
     capture_output: bool = True,
+    env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a deterministic npm install that does not mutate ``package-lock.json``.
 
@@ -6936,6 +6939,7 @@ def _run_npm_install_deterministic(
             encoding="utf-8",
             errors="replace",
             check=False,
+            env=env,
         )
         if ci_result.returncode == 0:
             return ci_result
@@ -6950,6 +6954,7 @@ def _run_npm_install_deterministic(
         encoding="utf-8",
         errors="replace",
         check=False,
+        env=env,
     )
 
 
@@ -6981,12 +6986,44 @@ def _build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
             encoding = getattr(sys.stdout, "encoding", None) or "ascii"
             print(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
+    # Resolve npm with bundled-fallback awareness: on a root FHS install whose
+    # PATH symlink is missing, or any context with a stripped PATH (systemd
+    # service, RHEL non-login shell), shutil.which("npm") returns None even
+    # though the bundled npm exists at <HERMES_HOME>/node/bin/npm.  See #38889.
     npm = shutil.which("npm")
+    if not npm:
+        try:
+            from hermes_constants import find_node_executable
+            npm = find_node_executable("npm")
+        except Exception:
+            npm = None
     if not npm:
         if fatal:
             _say("Web UI frontend not built and npm is not available.")
             _say("Install Node.js, then run:  cd web && npm install && npm run build")
         return not fatal
+
+    # Ensure the bundled node/bin dir is on PATH for the build subprocesses so
+    # the `npm run build` step (which shells out to tsc / vite from
+    # node_modules/.bin, and those re-invoke `node`) can find node even when the
+    # caller's PATH doesn't include it.
+    _build_env = None
+    try:
+        from hermes_constants import bundled_node_bin_dir
+        _node_bin = bundled_node_bin_dir()
+        if _node_bin.is_dir():
+            _build_env = os.environ.copy()
+            _existing = _build_env.get("PATH", "")
+            if str(_node_bin) not in _existing.split(os.pathsep):
+                _build_env["PATH"] = str(_node_bin) + os.pathsep + _existing
+        # Also fold in the resolved npm's own dir (covers system node installs).
+        _npm_dir = str(Path(npm).resolve().parent)
+        if _build_env is None:
+            _build_env = os.environ.copy()
+        if _npm_dir not in _build_env.get("PATH", "").split(os.pathsep):
+            _build_env["PATH"] = _npm_dir + os.pathsep + _build_env.get("PATH", "")
+    except Exception:
+        _build_env = None
     _say("→ Building web UI...")
 
     def _relay(result: "subprocess.CompletedProcess") -> None:
@@ -7008,6 +7045,7 @@ def _build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
         npm,
         _workspace_root(web_dir),
         extra_args=("--silent",),
+        env=_build_env,
     )
     if r1.returncode != 0:
         _say(
@@ -7023,13 +7061,13 @@ def _build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
     # users react by rebooting, which leaves the editable install in a
     # half-state. Streaming + idle-kill makes failures observable AND
     # recoverable (the stale-dist fallback below handles the kill path).
-    r2 = _run_with_idle_timeout([npm, "run", "build"], cwd=web_dir)
+    r2 = _run_with_idle_timeout([npm, "run", "build"], cwd=web_dir, env=_build_env)
     if r2.returncode != 0:
         # Retry once after a short delay — covers boot-time races on Windows
         # (antivirus scanning Node.js binaries, npm cache not ready, transient
         # I/O when launched via Scheduled Task at logon). See issue #23817.
         _time.sleep(3)
-        r2 = _run_with_idle_timeout([npm, "run", "build"], cwd=web_dir)
+        r2 = _run_with_idle_timeout([npm, "run", "build"], cwd=web_dir, env=_build_env)
 
     if r2.returncode != 0:
         # _run_with_idle_timeout merges stderr into stdout; older callers
@@ -11384,11 +11422,12 @@ def cmd_profile(args):
                     if wrapper_path:
                         print(f"Wrapper created: {wrapper_path}")
                         if not _is_wrapper_dir_in_path():
-                            print(f"\n⚠ {_get_wrapper_dir()} is not in your PATH.")
+                            _wd = _get_wrapper_dir()
+                            print(f"\n⚠ {_wd} is not in your PATH.")
                             print(
                                 f"  Add to your shell config (~/.bashrc or ~/.zshrc):"
                             )
-                            print(f'    export PATH="$HOME/.local/bin:$PATH"')
+                            print(f'    export PATH="{_wd}:$PATH"')
 
             # Profile dir for display
             try:

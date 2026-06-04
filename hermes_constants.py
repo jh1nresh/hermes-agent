@@ -414,6 +414,145 @@ def get_env_path() -> Path:
     return get_hermes_home() / ".env"
 
 
+# ─── Command-Link & Bundled-Node Locations ───────────────────────────────────
+#
+# Canonical, single source of truth for *where the installer places executables
+# so they land on PATH*.  This MUST stay in lockstep with the bash helper
+# ``get_command_link_dir()`` in ``scripts/install.sh`` and ``_nb_get_link_dir()``
+# in ``scripts/lib/node-bootstrap.sh``.  Historically this logic was duplicated
+# (and went stale) in doctor.py, profiles.py, uninstall.py and backup.py, which
+# caused root-FHS installs to look for / write the ``hermes`` command and node
+# symlinks in ``~/.local/bin`` even though they actually live in
+# ``/usr/local/bin``.  See PR #38889.
+
+
+def _is_root_fhs_layout() -> bool:
+    """Return True when this is a root install using the Linux FHS layout.
+
+    Mirrors ``resolve_install_layout()`` in ``scripts/install.sh``: root (uid 0)
+    on Linux uses ``/usr/local/lib/hermes-agent`` for code and ``/usr/local/bin``
+    for the command link.  We detect it the same way the installer's own runtime
+    guard does (``_ensure_fhs_path_guard`` in main.py): Linux + uid 0 + a command
+    link present at ``/usr/local/bin/hermes`` OR code at
+    ``/usr/local/lib/hermes-agent``.  Falling back to the uid check alone keeps
+    this correct *during* an install before the symlink exists.
+    """
+    if sys.platform != "linux":
+        return False
+    try:
+        if not hasattr(os, "geteuid") or os.geteuid() != 0:
+            return False
+    except OSError:
+        return False
+    # Confirm it's actually the FHS layout (not a root user who installed into
+    # ~/.local/bin anyway).  A legacy git install at <HERMES_HOME>/hermes-agent
+    # means resolve_install_layout() kept the ~/.local/bin layout — mirror that.
+    if (get_hermes_home() / "hermes-agent" / ".git").exists():
+        return False
+    if Path("/usr/local/bin/hermes").exists():
+        return True
+    if Path("/usr/local/lib/hermes-agent").exists():
+        return True
+    # No markers yet (e.g. mid-install): for a Linux root user the installer
+    # defaults to the FHS layout, so assume FHS.
+    return True
+
+
+def command_link_dir() -> Path:
+    """Return the directory where the ``hermes`` command (and bundled node/npm/
+    npx symlinks, profile-alias wrappers) are placed so they land on PATH.
+
+    Resolution mirrors ``get_command_link_dir()`` in ``scripts/install.sh``:
+
+    * Termux  → ``$PREFIX/bin``
+    * root FHS install on Linux → ``/usr/local/bin``
+    * everything else (the common non-root case, and Windows) → ``~/.local/bin``
+    """
+    if is_termux():
+        prefix = os.environ.get("PREFIX", "").strip()
+        if prefix:
+            return Path(prefix) / "bin"
+    if _is_root_fhs_layout():
+        return Path("/usr/local/bin")
+    return Path.home() / ".local" / "bin"
+
+
+def command_link_display_dir() -> str:
+    """User-friendly display string for :func:`command_link_dir`.
+
+    Uses ``~/.local/bin`` shorthand and ``$PREFIX/bin`` for Termux, matching
+    ``get_command_link_display_dir()`` in ``scripts/install.sh``.
+    """
+    if is_termux() and os.environ.get("PREFIX", "").strip():
+        return "$PREFIX/bin"
+    if _is_root_fhs_layout():
+        return "/usr/local/bin"
+    return "~/.local/bin"
+
+
+def command_link_candidate_dirs() -> list[Path]:
+    """All directories the installer may have placed command links in.
+
+    Used by uninstall and other cleanup paths that must find links regardless
+    of which layout created them (e.g. an old ``~/.local/bin`` install upgraded
+    to FHS, or vice-versa).  Always includes ``~/.local/bin`` plus the
+    layout-specific dirs, de-duplicated and order-preserving.
+    """
+    dirs: list[Path] = [Path.home() / ".local" / "bin"]
+    if sys.platform == "linux":
+        dirs.append(Path("/usr/local/bin"))
+    prefix = os.environ.get("PREFIX", "").strip()
+    if prefix and "com.termux" in prefix:
+        dirs.append(Path(prefix) / "bin")
+    # De-dupe while preserving order.
+    seen: set[str] = set()
+    out: list[Path] = []
+    for d in dirs:
+        key = str(d)
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
+
+
+def bundled_node_bin_dir() -> Path:
+    """Return the bundled Node.js ``bin`` directory: ``<HERMES_HOME>/node/bin``.
+
+    This is where ``install_node()`` / ``node-bootstrap.sh`` extract the
+    Hermes-managed Node runtime.  Profile-aware via :func:`get_hermes_home`.
+    Discovery code that gates a feature on ``node``/``npm``/``npx`` should fall
+    back to this directory when ``shutil.which`` returns nothing, so a misplaced
+    or missing PATH symlink doesn't make an installed runtime invisible.
+    """
+    return get_hermes_home() / "node" / "bin"
+
+
+def find_node_executable(name: str = "node") -> str | None:
+    """Resolve a Node executable (node/npm/npx) with bundled fallback.
+
+    Returns an absolute path string if found on PATH or in the bundled
+    ``<HERMES_HOME>/node/bin`` directory, else ``None``.  Prefer this over a
+    bare ``shutil.which(name)`` anywhere a feature depends on Node, so an
+    off-PATH bundled install still works.
+    """
+    import shutil
+
+    on_path = shutil.which(name)
+    if on_path:
+        return on_path
+    candidate = bundled_node_bin_dir() / name
+    if sys.platform == "win32" and not candidate.suffix:
+        # Windows ships node.exe / npm.cmd; try common suffixes.
+        for suffix in (".exe", ".cmd", ".bat", ""):
+            c = candidate.with_suffix(suffix) if suffix else candidate
+            if c.exists() and os.access(c, os.X_OK):
+                return str(c)
+        return None
+    if candidate.exists() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return None
+
+
 # ─── Network Preferences ─────────────────────────────────────────────────────
 
 

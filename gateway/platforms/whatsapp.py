@@ -197,10 +197,15 @@ def check_whatsapp_requirements() -> bool:
     
     WhatsApp requires a Node.js bridge for most implementations.
     """
-    # Check for Node.js.  Resolve via shutil.which so we respect PATHEXT
-    # (node.exe vs node) and get a meaningful "not installed" signal
-    # instead of spawning a cmd flash on Windows.
-    _node = shutil.which("node")
+    # Check for Node.js.  Resolve with bundled-fallback awareness (PATH first,
+    # then <HERMES_HOME>/node/bin) so a bundled-but-off-PATH install (e.g. a
+    # root FHS install whose symlink is missing, #38889) doesn't make the
+    # WhatsApp bridge silently unavailable.
+    try:
+        from hermes_constants import find_node_executable
+        _node = find_node_executable("node")
+    except Exception:
+        _node = shutil.which("node")
     if not _node:
         return False
     try:
@@ -592,8 +597,16 @@ class WhatsAppAdapter(BasePlatformAdapter):
                 print(f"[{self.name}] Installing WhatsApp bridge dependencies...")
                 # Resolve npm path so Windows can execute the .cmd shim.
                 # shutil.which honours PATHEXT; on POSIX it returns the
-                # plain executable path.
-                _npm_bin = shutil.which("npm") or "npm"
+                # plain executable path.  Fall back to the bundled npm at
+                # <HERMES_HOME>/node/bin when off-PATH (#38889).
+                _npm_bin = shutil.which("npm")
+                if not _npm_bin:
+                    try:
+                        from hermes_constants import find_node_executable
+                        _npm_bin = find_node_executable("npm")
+                    except Exception:
+                        _npm_bin = None
+                _npm_bin = _npm_bin or "npm"
                 try:
                     # Read timeout from environment variable, default to 300 seconds (5 minutes)
                     # to accommodate slower systems like Unraid NAS

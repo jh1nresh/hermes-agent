@@ -246,6 +246,14 @@ def _install_npm(
     """
     npm = shutil.which("npm")
     if npm is None:
+        # Fall back to the bundled npm at <HERMES_HOME>/node/bin when off-PATH
+        # (e.g. root FHS install whose symlink is missing, #38889).
+        try:
+            from hermes_constants import find_node_executable
+            npm = find_node_executable("npm")
+        except Exception:
+            npm = None
+    if npm is None:
         logger.info("[install] cannot install %s: npm not on PATH", pkg)
         return None
     staging = hermes_lsp_bin_dir().parent  # <HERMES_HOME>/lsp/

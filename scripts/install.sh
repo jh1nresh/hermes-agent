@@ -731,6 +731,12 @@ check_node() {
     # Prefer a Hermes-managed Node from a previous run over a too-old system one.
     if [ -x "$HERMES_HOME/node/bin/node" ] && node_satisfies_build "$("$HERMES_HOME/node/bin/node" --version)"; then
         export PATH="$HERMES_HOME/node/bin:$PATH"
+        # Migration repair (#38889): a previously-broken install may have its
+        # node symlinks only in ~/.local/bin (off-PATH on root FHS) or missing.
+        # Re-link into the canonical dir + prune stale copies so re-running the
+        # installer (or `hermes update`) heals the box instead of leaving it
+        # broken.
+        link_bundled_node
         log_success "Node.js $("$HERMES_HOME/node/bin/node" --version) found (Hermes-managed)"
         HAS_NODE=true
         return 0
@@ -744,6 +750,31 @@ check_node() {
         log_info "Node.js not found — installing Node.js $NODE_VERSION LTS..."
     fi
     install_node
+}
+
+# Idempotently (re)create node/npm/npx PATH symlinks in the command-link dir
+# and prune stale ones in the other candidate dirs.  Shared by install_node
+# (fresh install) and check_node (migration repair of an existing broken box,
+# #38889).  Pruning only removes symlinks that resolve into THIS Hermes home's
+# node dir — never a real binary or a user's nvm/fnm link.
+link_bundled_node() {
+    local node_link_dir stale_dir name target
+    node_link_dir="$(get_command_link_dir)"
+    mkdir -p "$node_link_dir"
+    ln -sf "$HERMES_HOME/node/bin/node" "$node_link_dir/node"
+    ln -sf "$HERMES_HOME/node/bin/npm"  "$node_link_dir/npm"
+    ln -sf "$HERMES_HOME/node/bin/npx"  "$node_link_dir/npx"
+
+    for stale_dir in "$HOME/.local/bin" "/usr/local/bin"; do
+        [ "$stale_dir" = "$node_link_dir" ] && continue
+        for name in node npm npx; do
+            [ -L "$stale_dir/$name" ] || continue
+            target="$(readlink "$stale_dir/$name" 2>/dev/null || true)"
+            case "$target" in
+                "$HERMES_HOME/node/"*) rm -f "$stale_dir/$name" ;;
+            esac
+        done
+    done
 }
 
 install_node() {
@@ -844,12 +875,7 @@ install_node() {
     mv "$extracted_dir" "$HERMES_HOME/node"
     rm -rf "$tmp_dir"
 
-    local node_link_dir
-    node_link_dir="$(get_command_link_dir)"
-    mkdir -p "$node_link_dir"
-    ln -sf "$HERMES_HOME/node/bin/node" "$node_link_dir/node"
-    ln -sf "$HERMES_HOME/node/bin/npm"  "$node_link_dir/npm"
-    ln -sf "$HERMES_HOME/node/bin/npx"  "$node_link_dir/npx"
+    link_bundled_node
 
     export PATH="$HERMES_HOME/node/bin:$PATH"
 

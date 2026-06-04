@@ -298,3 +298,66 @@ class TestSecureParentDir:
         assert len(called_with) == 1
         assert called_with[0] == (str(real_dir), 0o700)
 
+
+
+class TestCommandLinkDir:
+    """Tests for the canonical command-link / bundled-node helpers (#38889)."""
+
+    def test_nonroot_returns_local_bin(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.delenv("PREFIX", raising=False)
+        monkeypatch.setattr(hermes_constants, "is_termux", lambda: False)
+        monkeypatch.setattr(hermes_constants, "_is_root_fhs_layout", lambda: False)
+        assert hermes_constants.command_link_dir() == tmp_path / ".local" / "bin"
+        assert hermes_constants.command_link_display_dir() == "~/.local/bin"
+
+    def test_root_fhs_returns_usr_local_bin(self, monkeypatch):
+        monkeypatch.setattr(hermes_constants, "is_termux", lambda: False)
+        monkeypatch.setattr(hermes_constants, "_is_root_fhs_layout", lambda: True)
+        assert hermes_constants.command_link_dir() == Path("/usr/local/bin")
+        assert hermes_constants.command_link_display_dir() == "/usr/local/bin"
+
+    def test_termux_returns_prefix_bin(self, monkeypatch):
+        monkeypatch.setattr(hermes_constants, "is_termux", lambda: True)
+        monkeypatch.setenv("PREFIX", "/data/data/com.termux/files/usr")
+        assert hermes_constants.command_link_dir() == Path(
+            "/data/data/com.termux/files/usr/bin"
+        )
+        assert hermes_constants.command_link_display_dir() == "$PREFIX/bin"
+
+    def test_candidate_dirs_includes_both_on_linux(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.setattr(hermes_constants.sys, "platform", "linux")
+        monkeypatch.delenv("PREFIX", raising=False)
+        dirs = hermes_constants.command_link_candidate_dirs()
+        assert tmp_path / ".local" / "bin" in dirs
+        assert Path("/usr/local/bin") in dirs
+
+    def test_candidate_dirs_deduped(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.setattr(hermes_constants.sys, "platform", "linux")
+        monkeypatch.delenv("PREFIX", raising=False)
+        dirs = hermes_constants.command_link_candidate_dirs()
+        assert len(dirs) == len({str(d) for d in dirs})
+
+    def test_bundled_node_bin_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        assert hermes_constants.bundled_node_bin_dir() == tmp_path / "node" / "bin"
+
+    def test_find_node_prefers_path(self, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda n: "/usr/bin/" + n)
+        assert hermes_constants.find_node_executable("node") == "/usr/bin/node"
+
+    def test_find_node_falls_back_to_bundled(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr("shutil.which", lambda n: None)
+        node_bin = tmp_path / "node" / "bin"
+        node_bin.mkdir(parents=True)
+        (node_bin / "npm").write_text("#!/bin/sh\n")
+        (node_bin / "npm").chmod(0o755)
+        assert hermes_constants.find_node_executable("npm") == str(node_bin / "npm")
+
+    def test_find_node_returns_none_when_absent(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr("shutil.which", lambda n: None)
+        assert hermes_constants.find_node_executable("node") is None

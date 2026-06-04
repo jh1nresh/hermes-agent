@@ -13,6 +13,11 @@ from pathlib import Path
 from hermes_cli.config import get_project_root, get_hermes_home, get_env_path
 from hermes_cli.env_loader import load_hermes_dotenv
 from hermes_constants import display_hermes_home
+from hermes_constants import (
+    command_link_dir as _command_link_dir,
+    command_link_display_dir as _command_link_display_dir,
+    bundled_node_bin_dir as _bundled_node_bin_dir,
+)
 
 PROJECT_ROOT = get_project_root()
 HERMES_HOME = get_hermes_home()
@@ -196,6 +201,75 @@ def _section(title: str) -> None:
     """Print a doctor section banner: blank line + bold cyan ◆ title."""
     print()
     print(color(f"◆ {title}", Colors.CYAN, Colors.BOLD))
+
+
+def _resolve_node_for_doctor(issues: list) -> str | None:
+    """Resolve Node.js with bundled-fallback awareness and diagnose off-PATH.
+
+    Returns the resolved ``node`` binary path if node is usable from *some*
+    known location, else ``None``.  Emits the appropriate check_ok/check_warn/
+    check_info lines and appends a fix to ``issues`` when node is installed but
+    unreachable via PATH (the PR #38889 class of regression: bundled node lives
+    at ``<HERMES_HOME>/node/bin`` but its PATH symlink is missing or off-PATH).
+
+    Discovery mirrors tools/browser_tool._browser_candidate_path_dirs and
+    hermes_cli/main._ensure_tui_node so doctor's verdict matches what actually
+    runs.  As a side effect, when a bundled node is found off-PATH it is
+    prepended to ``os.environ["PATH"]`` for the remainder of this doctor run so
+    downstream npm/agent-browser checks don't cascade into false negatives.
+    """
+    on_path = _safe_which("node")
+    if on_path:
+        check_ok("Node.js", f"({on_path})")
+        return on_path
+
+    # Not on PATH — is it installed at the bundled location?
+    bundled = _bundled_node_bin_dir() / "node"
+    if bundled.exists() and os.access(bundled, os.X_OK):
+        bin_dir = bundled.parent
+        check_warn(
+            "Node.js installed but not on PATH",
+            f"(found {bundled}, but `node` is not resolvable via PATH)",
+        )
+        # Root FHS installs are supposed to symlink node into /usr/local/bin.
+        # Verify that canonical symlink so doctor catches the exact PR #38889
+        # breakage rather than only the generic PATH miss.
+        try:
+            is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+        except OSError:
+            is_root = False
+        if is_root and sys.platform == "linux":
+            fhs_link = Path("/usr/local/bin/node")
+            if not fhs_link.exists():
+                check_info(
+                    "Root FHS install: node should be linked into /usr/local/bin."
+                )
+                check_info(f"Fix: ln -sf {bundled} /usr/local/bin/node "
+                           f"(and the same for npm, npx)")
+                issues.append(
+                    "Bundled Node.js is off-PATH on a root FHS install — run: "
+                    f"ln -sf {bundled} /usr/local/bin/node "
+                    "(repeat for npm, npx), or re-run the installer"
+                )
+            elif fhs_link.resolve() != bundled.resolve():
+                check_warn(
+                    "/usr/local/bin/node points to the wrong target",
+                    f"(→ {fhs_link.resolve()}, expected {bundled})",
+                )
+                issues.append(
+                    f"Fix stale node symlink: ln -sf {bundled} /usr/local/bin/node"
+                )
+        else:
+            check_info(f"Bundled Node.js exists at {bin_dir} but isn't on PATH.")
+            check_info(f'Fix: export PATH="{bin_dir}:$PATH"  (add to your shell rc)')
+            issues.append(f"Node.js is installed but off-PATH — add {bin_dir} to PATH")
+
+        # Make the rest of the doctor run see this node so npm/agent-browser
+        # checks succeed instead of reporting more false negatives.
+        os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+        return str(bundled)
+
+    return None
 
 
 def _fail_and_issue(text: str, detail: str, fix: str, issues: list[str]) -> None:
@@ -1185,15 +1259,11 @@ def run_doctor(args):
                 _venv_bin = _candidate
                 break
 
-        # Determine the expected command link directory (mirrors install.sh logic)
-        _prefix = os.environ.get("PREFIX", "")
-        _is_termux_env = bool(os.environ.get("TERMUX_VERSION")) or "com.termux/files/usr" in _prefix
-        if _is_termux_env and _prefix:
-            _cmd_link_dir = Path(_prefix) / "bin"
-            _cmd_link_display = "$PREFIX/bin"
-        else:
-            _cmd_link_dir = Path.home() / ".local" / "bin"
-            _cmd_link_display = "~/.local/bin"
+        # Determine the expected command link directory (canonical helper —
+        # single source of truth shared with scripts/install.sh, so root FHS
+        # installs correctly resolve to /usr/local/bin instead of ~/.local/bin).
+        _cmd_link_dir = _command_link_dir()
+        _cmd_link_display = _command_link_display_dir()
         _cmd_link = _cmd_link_dir / "hermes"
 
         if _venv_bin is None:
@@ -1244,7 +1314,7 @@ def run_doctor(args):
                     if str(_cmd_link_dir) not in _path_dirs:
                         check_warn(
                             f"{_cmd_link_display} is not on your PATH",
-                            "(add it to your shell config: export PATH=\"$HOME/.local/bin:$PATH\")"
+                            f'(add it to your shell config: export PATH="{_cmd_link_dir}:$PATH")'
                         )
                         manual_issues.append(f"Add {_cmd_link_display} to your PATH")
                 else:
@@ -1373,8 +1443,10 @@ def run_doctor(args):
             )
 
     # Node.js + agent-browser (for browser automation tools)
-    if _safe_which("node"):
-        check_ok("Node.js")
+    # Resolve with bundled-fallback awareness so an off-PATH bundled install
+    # is diagnosed as "installed but not on PATH" instead of "not found".
+    _node_resolved = _resolve_node_for_doctor(issues)
+    if _node_resolved:
         # Check if agent-browser is installed
         agent_browser_path = PROJECT_ROOT / "node_modules" / "agent-browser"
         agent_browser_ok = False
@@ -1451,8 +1523,15 @@ def run_doctor(args):
     else:
         check_warn("Node.js not found", "(optional, needed for browser tools)")
     
-    # npm audit for all Node.js packages
+    # npm audit for all Node.js packages.  Use bundled-fallback resolution so a
+    # bundled-but-off-PATH npm is still found (the _resolve_node_for_doctor call
+    # above already prepended the bundled bin dir to PATH for this run, so plain
+    # which usually works now; the explicit fallback is belt-and-suspenders).
     _npm_bin = _safe_which("npm")
+    if not _npm_bin:
+        _bundled_npm = _bundled_node_bin_dir() / "npm"
+        if _bundled_npm.exists() and os.access(_bundled_npm, os.X_OK):
+            _npm_bin = str(_bundled_npm)
     if _npm_bin:
         npm_dirs = [
             (PROJECT_ROOT, "Browser tools (agent-browser)"),
