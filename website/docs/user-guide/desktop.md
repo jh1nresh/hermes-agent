@@ -165,6 +165,24 @@ For the same setup from the web-dashboard angle, see [Web Dashboard → Connecti
 
 ## Troubleshooting
 
+### macOS won't open the app / asks about the "developer"
+
+You do **not** need an Apple Developer account, an Apple Developer Program membership, or any "developer password" to install or run Hermes Desktop. The official builds from [our download page](https://hermes-agent.nousresearch.com/desktop) are code-signed and notarized by Apple, so a normal install just works.
+
+If macOS still shows a dialog like *"Hermes can't be opened because Apple cannot check it for malicious software"* or *"…from an unidentified developer"*, that's **Gatekeeper**, not an account requirement. It usually means the download's quarantine attribute is in an odd state, or you built the app locally with `hermes desktop` (which produces an unsigned build from your own source). It is asking you to confirm you trust the app — there is no developer account or password involved.
+
+To open it anyway:
+
+1. **Right-click (or Control-click) the app** in Finder and choose **Open**, then click **Open** in the dialog. macOS remembers this choice, so you only do it once.
+2. If there's no **Open** option, go to **System Settings → Privacy & Security**, scroll to the **Security** section, and click **Open Anyway** next to the Hermes entry. (The macOS *login* password it may ask for here is your own Mac password to change a security setting — not a "developer" password.)
+
+If you'd rather not deal with Gatekeeper at all, the CLI install needs no signing prompts:
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+hermes desktop   # launches the desktop app, building it locally
+```
+
 Boot logs land in `HERMES_HOME/logs/desktop.log` (it includes backend output and recent Python tracebacks) — check it first if the app reports a boot failure. You can also tail it from the CLI:
 
 ```bash

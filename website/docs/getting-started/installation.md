@@ -12,6 +12,10 @@ Get Hermes Agent up and running in under two minutes!
 ### With the Hermes Desktop installer on macOS or Windows (recommended)
 To easily install the command-line and desktop applications, [download the Hermes Desktop installer](https://hermes-agent.nousresearch.com/desktop) from our website and run it.
 
+:::note macOS: no Apple Developer account needed
+The macOS builds are code-signed and notarized, so a normal install just works — you do **not** need an Apple Developer account or any "developer password." If macOS Gatekeeper ever blocks first launch with an *"unidentified developer"* dialog, right-click the app and choose **Open**. See [Desktop App → Troubleshooting](../user-guide/desktop.md#macos-wont-open-the-app-asks-about-the-developer).
+:::
+
 ### Without Hermes Desktop:
 For a command-line only install without Hermes Desktop, run:
 
