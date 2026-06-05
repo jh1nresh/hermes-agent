@@ -6676,6 +6676,146 @@ def _capture_head_sha(git_cmd, cwd) -> str | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Post-pull stamp
+# ---------------------------------------------------------------------------
+# After ``hermes update`` pulls new code and runs the post-pull phase
+# (dependency install, skills sync, config migration, ...), it writes the
+# install dir's current commit into a stamp file. Every subsequent launch
+# (CLI, TUI, gateway — anything routed through ``main()``) compares the stamp
+# against the live commit. If they don't match (a raw ``git pull`` / checkout
+# happened without the post-pull steps, or the stamp is missing entirely),
+# we run the post-pull steps and exit, asking the user to re-run their
+# command under the freshly-installed code. The exit is required because the
+# running interpreter holds stale ``sys.modules`` from before the post-pull
+# install.
+_POST_PULL_STAMP_NAME = ".post_pull_stamp"
+
+
+def _post_pull_stamp_path() -> Path:
+    """Path to the post-pull stamp file in the Hermes install dir."""
+    return PROJECT_ROOT / _POST_PULL_STAMP_NAME
+
+
+def _current_install_commit() -> str | None:
+    """Return the install dir's current HEAD SHA, or None if unavailable."""
+    git_cmd = ["git"]
+    if sys.platform == "win32":
+        git_cmd = ["git", "-c", "windows.appendAtomically=false"]
+    return _capture_head_sha(git_cmd, PROJECT_ROOT)
+
+
+def _write_post_pull_stamp(commit: str | None = None) -> bool:
+    """Write ``commit`` (default: live HEAD) to the post-pull stamp.
+
+    Returns True on success. Best-effort: a failure here just means the next
+    launch will re-run post-pull, which is annoying but not dangerous.
+    """
+    if commit is None:
+        commit = _current_install_commit()
+    if not commit:
+        return False
+    try:
+        _post_pull_stamp_path().write_text(commit.strip() + "\n", encoding="utf-8")
+        return True
+    except OSError as exc:
+        logger.debug("Failed to write post-pull stamp: %s", exc)
+        return False
+
+
+def _read_post_pull_stamp() -> str | None:
+    """Return the commit SHA recorded in the stamp, or None if absent/unreadable."""
+    try:
+        text = _post_pull_stamp_path().read_text(encoding="utf-8").strip()
+    except (OSError, ValueError):
+        return None
+    return text or None
+
+
+def _post_pull_stamp_is_current() -> bool:
+    """True iff the stamp exists AND records the install dir's current commit."""
+    commit = _current_install_commit()
+    if not commit:
+        # Can't resolve the live commit (not a git checkout, git missing, ...).
+        # Treat as current so we never block launches we can't reason about.
+        return True
+    return _read_post_pull_stamp() == commit.strip()
+
+
+def _is_git_source_install() -> bool:
+    """True iff Hermes is a self-updatable git source checkout.
+
+    Managed installs (docker / nixos / homebrew / pip) update through their
+    own package manager and never run ``hermes update``, so the stamp gate
+    must not fire for them.
+    """
+    try:
+        from hermes_cli.config import detect_install_method
+
+        return detect_install_method(PROJECT_ROOT) == "git"
+    except Exception:
+        # Fall back to the raw marker so a config import hiccup doesn't
+        # accidentally gate (or un-gate) every launch.
+        return (PROJECT_ROOT / ".git").exists()
+
+
+def _ensure_post_pull_current(args) -> None:
+    """Gate every launch on a current post-pull stamp.
+
+    Called from ``main()`` after argparse, before any command runs. If the
+    install dir's commit changed without the post-pull steps running (stamp
+    missing or stale), run them now and exit, asking the user to re-run the
+    command they just typed. The exit is mandatory: the current process
+    imported its modules before the post-pull dependency install, so it
+    can't safely continue under the new code.
+
+    Skipped when:
+    - the command IS ``update`` (the updater owns the stamp; gating it would
+      recurse), or
+    - this is not a self-updatable git source install.
+    """
+    # Never gate the updater itself — it writes the stamp. This also covers
+    # the ``hermes update --post-pull`` re-exec child.
+    if getattr(args, "command", None) == "update":
+        return
+    # Escape hatch for the post-pull child and for emergencies.
+    if os.environ.get("HERMES_SKIP_POST_PULL_GATE"):
+        return
+    if not _is_git_source_install():
+        return
+    if _post_pull_stamp_is_current():
+        return
+
+    print("→ Hermes code changed since the last post-pull step. Finishing the")
+    print("  update (dependencies, skills, config migration) before launch...")
+    print()
+
+    # Run the post-pull phase under this interpreter. It's running stale code,
+    # but the steps it performs (pip/uv install, skills sync, config migration)
+    # only mutate disk + config — they don't depend on the new in-memory code
+    # being loaded. The mandatory re-run below picks up the fresh code.
+    class _PostPullArgs:
+        yes = True
+        pre_update_snapshot = None
+
+    try:
+        _cmd_update_post_pull(_PostPullArgs(), gateway_mode=False)
+    except SystemExit:
+        # _cmd_update_post_pull may sys.exit on a fatal precondition (e.g.
+        # unsupported Python). Let that propagate — re-running won't help.
+        raise
+    except Exception as exc:
+        print(f"✗ Post-pull step failed: {exc}")
+        print("  Run `hermes update` manually to recover.")
+        sys.exit(1)
+
+    print()
+    print("✓ Post-pull step complete. Please re-run your command:")
+    cmd = " ".join(["hermes", *sys.argv[1:]]) if sys.argv[1:] else "hermes"
+    print(f"    {cmd}")
+    sys.exit(0)
+
+
 def _validate_critical_files_syntax(root) -> tuple[bool, str | None, str | None]:
     """Compile each file in ``_UPDATE_CRITICAL_FILES`` to catch SyntaxErrors.
 
@@ -10836,6 +10976,18 @@ def _cmd_update_post_pull(args, gateway_mode: bool):
     print()
     print("✓ Update complete!")
 
+    # Stamp the install dir with the commit we just finished post-pull for.
+    # MUST happen here — after all disk-mutating work (deps, skills, config
+    # migration, cron) but BEFORE the gateway restart below, which can
+    # SIGKILL this process (KillMode=mixed in the systemd cgroup) before we
+    # reach the end of the function. Same rationale as the .update_exit_code
+    # marker written above. Every subsequent launch (CLI/TUI/gateway) gates
+    # on this stamp matching the live commit; see _ensure_post_pull_current.
+    try:
+        _write_post_pull_stamp()
+    except Exception as exc:
+        logger.debug("Failed to write post-pull stamp during update: %s", exc)
+
     # Curator first-run heads-up. Only prints when curator is enabled AND
     # has never run — i.e. the window where the ticker would otherwise
     # have fired against a fresh skill library. Kept silent on steady
@@ -12520,6 +12672,12 @@ def _try_termux_fast_cli_launch() -> bool:
         _print_version_info(check_updates=False)
         return True
 
+    # Post-pull stamp gate (see _ensure_post_pull_current). The full main()
+    # gate is bypassed on this Termux fast path, so enforce it here — after
+    # the version short-circuit (introspection is allowed on a stale tree)
+    # and before any oneshot/chat launch.
+    _ensure_post_pull_current(args)
+
     if getattr(args, "oneshot", None):
         _prepare_agent_startup(args)
         from hermes_cli.oneshot import run_oneshot
@@ -12591,6 +12749,10 @@ def _try_termux_fast_tui_launch() -> bool:
         return False
     if not _resolve_use_tui(args):
         return False
+
+    # Post-pull stamp gate (see _ensure_post_pull_current). The full main()
+    # gate is bypassed on this Termux fast path, so enforce it here too.
+    _ensure_post_pull_current(args)
 
     cmd_chat(args)
     return True
@@ -15796,6 +15958,15 @@ Examples:
     if args.version:
         cmd_version(args)
         return
+
+    # Gate every launch on a current post-pull stamp. If the install dir's
+    # commit changed without ``hermes update``'s post-pull steps running
+    # (e.g. a raw ``git pull``), finish those steps now and exit asking the
+    # user to re-run their command under the freshly-installed code. No-op
+    # on managed installs, on ``hermes update``, and when the stamp matches.
+    # This runs before EVERY command — CLI, TUI, gateway, oneshot — because
+    # they all route through this single ``main()`` entry point.
+    _ensure_post_pull_current(args)
 
     # Discover Python plugins and register shell hooks once, before any
     # command that can fire lifecycle hooks.  Both are idempotent; gated

@@ -117,3 +117,9 @@ scripts/out/
 # stores the published notes. They are not a build artifact and must never be
 # committed to the repo root. See the hermes-release skill.
 RELEASE_v*.md
+
+# Post-pull stamp written by `hermes update`'s post-pull phase into the install
+# dir (the repo root for source checkouts). Records the commit the post-pull
+# steps last ran for; the per-launch gate compares it against live HEAD. Local
+# runtime state, never a repo artifact.
+.post_pull_stamp
