@@ -426,24 +426,29 @@ export function useSessionActions({
 
       for (const profile of $profiles.get()) {
         const key = normalizeProfileKey(profile.name)
+        let runtimeId: null | string = null
+        let stored: null | string = null
 
         try {
           const created = await requestGatewayForProfile<SessionCreateResponse>(key, 'session.create', { cols: 96 })
-          const stored = created.stored_session_id ?? null
-          ensureSessionState(created.session_id, stored)
+          runtimeId = created.session_id
+          stored = created.stored_session_id ?? null
+          ensureSessionState(runtimeId, stored)
 
           if (stored) {
             upsertOptimisticSession(created, stored, null, body, key)
           }
 
-          updateSessionState(
-            created.session_id,
-            state => ({ ...state, awaitingResponse: true, busy: true }),
-            stored
-          )
-          await requestGatewayForProfile(key, 'prompt.submit', { session_id: created.session_id, text: body })
+          updateSessionState(runtimeId, state => ({ ...state, awaitingResponse: true, busy: true }), stored)
+          await requestGatewayForProfile(key, 'prompt.submit', { session_id: runtimeId, text: body })
           sent += 1
         } catch {
+          // If create landed but submit didn't, drop the busy flag so the row
+          // doesn't spin forever waiting on a turn that never started.
+          if (runtimeId) {
+            updateSessionState(runtimeId, state => ({ ...state, awaitingResponse: false, busy: false }), stored)
+          }
+
           failed += 1
         }
       }
