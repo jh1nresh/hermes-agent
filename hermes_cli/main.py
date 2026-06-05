@@ -10131,55 +10131,60 @@ def _cmd_update_pip(args):
     print("✓ Update complete! Restart hermes to use the new version.")
 
 
-def _should_reexec_after_pull(finalize_only: bool) -> bool:
-    """Whether to re-exec into the freshly-pulled code to finish the update.
+def _should_handoff_after_pull(finalize_only: bool) -> bool:
+    """Whether to hand the post-pull steps off to a fresh subprocess on new
+    code.
 
     Returns False (finish in-process) when:
-      - this IS already the finalize re-exec (avoid an infinite loop),
-      - on Windows, where ``os.exec*`` spawns a *new* PID and would break the
-        desktop installer's exit-code wait on the original process,
-      - under pytest, so the test runner's interpreter is never replaced
-        mid-suite,
-      - the ``HERMES_UPDATE_NO_REEXEC`` escape hatch is set.
+      - this IS already the finalize subprocess (avoid an infinite loop),
+      - under pytest, so the test runner's interpreter never spawns a real
+        recursive update mid-suite,
+      - the ``HERMES_UPDATE_NO_HANDOFF`` escape hatch is set.
+
+    Cross-platform: unlike an ``os.exec*`` replacement (which on Windows
+    spawns a *new* PID and breaks the desktop installer's exit-code wait on
+    the original process), a child subprocess + exit-code forwarding keeps the
+    parent PID intact everywhere, so this stays on for Windows too.
     """
     if finalize_only or os.environ.get("HERMES_UPDATE_FINALIZE") == "1":
         return False
-    if os.environ.get("HERMES_UPDATE_NO_REEXEC") == "1":
-        return False
-    if sys.platform == "win32":
+    if os.environ.get("HERMES_UPDATE_NO_HANDOFF") == "1":
         return False
     if "pytest" in sys.modules:
         return False
     return True
 
 
-def _reexec_into_updated_code() -> None:
-    """Replace this process with a fresh ``hermes update`` running new code.
+def _handoff_update_to_refreshed_code():
+    """Finish the update in a fresh subprocess running the just-pulled code.
 
-    Called after a successful git pull + dependency install. POSIX ``execve``
-    keeps the same PID and file descriptors, so a parent streaming our
-    stdout/stderr and waiting on our exit code (the desktop installer's
-    ``run_streamed``, or the gateway's bash exit-code wrapper) is unaffected.
-    The replacement run sees ``HERMES_UPDATE_FINALIZE=1`` and runs only the
-    post-pull finalize steps.
+    Called after a successful git pull + dependency install (so the new source
+    AND its deps are on disk). Spawns ``hermes update`` again with
+    ``HERMES_UPDATE_FINALIZE=1`` set; that child skips the fetch/pull/snapshot
+    work and this hand-off, and runs only the post-pull finalize steps with
+    new code. stdin/stdout/stderr are inherited, so interactive prompts and a
+    parent streaming our output both keep working.
 
-    Returns (without re-execing) if ``execve`` raises, so the caller can fall
-    back to finishing the update in-process — the historical behavior.
+    Returns the child's exit code, or ``None`` if the subprocess could not be
+    launched at all — in which case the caller finishes the update in-process,
+    the historical behavior.
     """
     try:
         env = dict(os.environ)
         env["HERMES_UPDATE_FINALIZE"] = "1"
-        argv = [sys.executable, "-m", "hermes_cli.main", *sys.argv[1:]]
-        print("→ Re-launching updater with refreshed code...")
+        cmd = [sys.executable, "-m", "hermes_cli.main", *sys.argv[1:]]
+        print("→ Finishing update with refreshed code...")
         sys.stdout.flush()
         sys.stderr.flush()
-        os.execve(sys.executable, argv, env)
-    except Exception as exc:  # pragma: no cover - execve almost never fails
+        result = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env)
+        return result.returncode
+    except Exception as exc:  # pragma: no cover - spawn almost never fails
         logger.warning(
-            "update: could not re-exec into refreshed code (%s); "
+            "update: could not hand off to refreshed code (%s); "
             "finishing in-process",
             exc,
         )
+        return None
 
 
 def _cmd_update_impl(args, gateway_mode: bool):
@@ -10660,11 +10665,18 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # process imported at startup — so a bug fixed in the pulled version
         # still crashed here, forcing users to run ``hermes update`` twice. The
         # git pull AND dependency install are done, so the new source and its
-        # deps are on disk; re-exec now finishes the update with new code. On
-        # the finalize pass (or Windows / under pytest / opt-out) we skip the
-        # re-exec and finish in-process — see _should_reexec_after_pull.
-        if _should_reexec_after_pull(finalize_only):
-            _reexec_into_updated_code()
+        # deps are on disk; finish in a fresh subprocess running new code and
+        # forward its exit code. On the finalize pass (or under pytest /
+        # opt-out) we skip the hand-off and finish in-process — see
+        # _should_handoff_after_pull.
+        if _should_handoff_after_pull(finalize_only):
+            handoff_rc = _handoff_update_to_refreshed_code()
+            if handoff_rc is not None:
+                # The child ran every remaining post-pull step on new code;
+                # forward its result and stop (cmd_update's finally still
+                # restores stdio on the way out).
+                sys.exit(handoff_rc)
+            # else: spawning the child failed — fall through and finish here.
 
         _update_node_dependencies()
         _build_web_ui(PROJECT_ROOT / "web")
