@@ -8549,3 +8549,48 @@ def _(rid, params: dict) -> dict:
             "output": output,
         },
     )
+
+
+@method("gateway.restart")
+def _(rid, params: dict) -> dict:
+    """Re-exec the backend host so freshly-pulled code is actually loaded.
+
+    `update.start` only rewrites the checkout on disk — the running process is
+    still executing the old code. For a LOCAL backend the desktop's Electron
+    updater handles the relaunch; for a REMOTE backend nothing else can, so the
+    gateway restarts itself. We re-exec in place (`os.execv`, same PID) after a
+    short delay so this RPC's response flushes before the socket drops; the
+    desktop rides the disconnect out via its reconnect loop and re-polls
+    `update.status`.
+
+    Deployment-agnostic by design: in-place re-exec needs no external
+    supervisor (systemd, pm2, …) — it works for a bare `hermes` process just as
+    well as a supervised one. Refused for managed installs, which own their own
+    lifecycle.
+    """
+    try:
+        from hermes_cli.config import is_managed
+
+        if is_managed():
+            return _err(rid, 4033, "This managed install can't restart itself.")
+    except Exception:
+        pass
+
+    def _reexec() -> None:
+        # Let the JSON-RPC reply (and any in-flight event) flush before the
+        # transport dies under us.
+        time.sleep(0.4)
+        argv = [sys.executable, *sys.argv]
+        try:
+            if sys.platform == "win32":
+                # The console-script shim isn't a real Win32 exe, so os.execv
+                # can't replace it in place — spawn a fresh process, then exit.
+                subprocess.Popen(argv)
+                os._exit(0)
+            else:
+                os.execv(sys.executable, argv)
+        except Exception:
+            logger.exception("gateway.restart: re-exec failed")
+
+    threading.Thread(target=_reexec, name="gateway-restart", daemon=True).start()
+    return _ok(rid, {"restarting": True})

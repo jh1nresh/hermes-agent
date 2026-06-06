@@ -2,15 +2,24 @@
  * Remote backend self-update. When a desktop window drives a backend on
  * another host, the Electron native updater can't reach it — only the remote
  * gateway can update its own box. This kicks off `update.start` on the gateway,
- * then polls `update.status` across the inevitable disconnect/reconnect,
- * surfacing a lightweight status pill (a persistent notification) throughout.
+ * polls `update.status` until the checkout is rewritten, then asks the gateway
+ * to re-exec itself (`gateway.restart`) so the new code actually loads — riding
+ * out the disconnect and surfacing a lightweight status pill (a persistent
+ * notification) throughout.
  */
 
 import { atom } from 'nanostores'
 
 import { dismissNotification, notify } from '@/store/notifications'
 
-export type RemoteUpdatePhase = 'idle' | 'starting' | 'running' | 'reconnecting' | 'done' | 'error'
+export type RemoteUpdatePhase =
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'restarting'
+  | 'reconnecting'
+  | 'done'
+  | 'error'
 
 export interface RemoteUpdateState {
   phase: RemoteUpdatePhase
@@ -29,8 +38,17 @@ type RequestGateway = <T>(method: string, params?: Record<string, unknown>) => P
 const TOAST_ID = 'remote-backend-update'
 const POLL_INTERVAL_MS = 2_000
 const POLL_TIMEOUT_MS = 30 * 60 * 1_000
+// The backend drops while it re-execs; give it generous room to come back
+// before we stop driving the pill (the gateway keeps reconnecting regardless).
+const RESTART_TIMEOUT_MS = 3 * 60 * 1_000
 const IDLE: RemoteUpdateState = { phase: 'idle', message: '' }
-const ACTIVE_PHASES: ReadonlySet<RemoteUpdatePhase> = new Set(['starting', 'running', 'reconnecting'])
+
+const ACTIVE_PHASES: ReadonlySet<RemoteUpdatePhase> = new Set([
+  'starting',
+  'running',
+  'restarting',
+  'reconnecting'
+])
 
 export const $remoteUpdate = atom<RemoteUpdateState>(IDLE)
 
@@ -57,6 +75,13 @@ export function resetRemoteUpdate(): void {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+// A dropped transport (the backend re-execing) vs. an RPC-level error (e.g. an
+// older backend that doesn't know `gateway.restart`). Only the former means a
+// restart is actually underway.
+function isConnectionError(error: unknown): boolean {
+  return /not connected|connection closed|could not connect|timed out|timeout/i.test(errorText(error))
 }
 
 function tail(output: string, lines = 4): string {
@@ -108,7 +133,7 @@ async function pollRemoteUpdate(requestGateway: RequestGateway): Promise<void> {
 
     if (status.finished) {
       if ((status.exit_code ?? 1) === 0) {
-        setPhase('done', 'Backend updated. Restart it to load the new version.')
+        await restartRemoteBackend(requestGateway)
       } else {
         setPhase('error', tail(status.output) || 'Backend update failed.')
       }
@@ -118,4 +143,49 @@ async function pollRemoteUpdate(requestGateway: RequestGateway): Promise<void> {
   }
 
   setPhase('error', 'Backend update timed out.')
+}
+
+// The checkout is updated but the process is still running old code. Ask the
+// gateway to re-exec itself, then ride out the disconnect until it answers
+// again. Best-effort: a backend that can't restart (managed install, or an
+// older build without the RPC) just tells the user to restart it by hand.
+async function restartRemoteBackend(requestGateway: RequestGateway): Promise<void> {
+  setPhase('restarting', 'Restarting backend to load the update…')
+
+  let restarting = true
+
+  try {
+    await requestGateway('gateway.restart')
+  } catch (error) {
+    // A dropped transport is the success signal — the backend re-execed before
+    // (or while) replying. Any other error means the restart never happened.
+    restarting = isConnectionError(error)
+
+    if (!restarting) {
+      setPhase('done', 'Backend updated. Restart it to load the new version.')
+
+      return
+    }
+  }
+
+  await waitForReconnect(requestGateway)
+}
+
+async function waitForReconnect(requestGateway: RequestGateway): Promise<void> {
+  const deadline = Date.now() + RESTART_TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    await delay(POLL_INTERVAL_MS)
+
+    try {
+      await requestGateway<RemoteUpdateStatus>('update.status')
+      setPhase('done', 'Backend updated and restarted.')
+
+      return
+    } catch {
+      setPhase('reconnecting', 'Reconnecting to backend…')
+    }
+  }
+
+  setPhase('done', 'Backend updated. Reconnect once the backend is back.')
 }

@@ -99,3 +99,44 @@ def test_start_blocked_on_managed_install(server):
 
     assert "error" in resp
     assert "managed" in resp["error"]["message"].lower()
+
+
+# ── gateway.restart ──────────────────────────────────────────────────────
+
+
+def test_restart_schedules_reexec_thread(server):
+    with patch.object(server.threading, "Thread") as thread:
+        result = _call(server, "gateway.restart")["result"]
+
+    assert result["restarting"] is True
+    thread.assert_called_once()
+    assert thread.call_args.kwargs.get("daemon") is True
+
+
+def test_restart_reexecs_in_place_on_posix(server):
+    captured: dict = {}
+
+    class _FakeThread:
+        def __init__(self, target=None, **_kw):
+            captured["target"] = target
+
+        def start(self):  # noqa: D401 - thread shim
+            pass
+
+    with patch.object(server.threading, "Thread", _FakeThread):
+        _call(server, "gateway.restart")
+
+    with patch.object(server.time, "sleep"), patch.object(
+        server.os, "execv"
+    ) as execv, patch.object(server.sys, "platform", "linux"):
+        captured["target"]()
+
+    execv.assert_called_once()
+
+
+def test_restart_blocked_on_managed_install(server):
+    with patch("hermes_cli.config.is_managed", return_value=True):
+        resp = _call(server, "gateway.restart")
+
+    assert "error" in resp
+    assert "managed" in resp["error"]["message"].lower()
