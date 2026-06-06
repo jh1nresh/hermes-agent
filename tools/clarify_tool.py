@@ -12,12 +12,26 @@ a thin dispatcher that delegates to a platform-provided callback.
 """
 
 import json
+import re
 from typing import List, Optional, Callable
 
 
 # Maximum number of predefined choices the agent can offer.
 # A 5th "Other (type your answer)" option is always appended by the UI.
 MAX_CHOICES = 4
+
+# Discord/chat-platform markup that has no meaning in clarify questions.
+# LLMs sometimes hallucinate these into question text.
+_DISCORD_MENTION_RE = re.compile(
+    r"<@[!&]?\d+>"       # user / role mentions: <@123>, <@!123>, <@&123>
+    r"|<#\d+>"            # channel mentions: <#123>
+    r"|@(?:everyone|here)\b"  # mass mentions (word boundary prevents partial match)
+)
+
+
+def _sanitize_clarify_text(text: str) -> str:
+    """Strip platform-specific markup that LLMs may hallucinate into question text."""
+    return _DISCORD_MENTION_RE.sub("", text).strip()
 
 
 def _flatten_choice(c) -> str:
@@ -75,7 +89,9 @@ def clarify_tool(
     if not question or not question.strip():
         return tool_error("Question text is required.")
 
-    question = question.strip()
+    question = _sanitize_clarify_text(question)
+    if not question:
+        return tool_error("Question text is required (empty after sanitizing).")
 
     # Validate and trim choices
     if choices is not None:
@@ -86,7 +102,12 @@ def clarify_tool(
         # user-facing text here — the single platform-agnostic entry point —
         # so the CLI panel, Discord buttons, and Telegram list all render clean
         # text and the resolved answer is never a raw Python dict repr.
-        choices = [s for s in (_flatten_choice(c) for c in choices) if s]
+        # _sanitize_clarify_text then strips hallucinated Discord mentions.
+        choices = [
+            s
+            for s in (_sanitize_clarify_text(_flatten_choice(c)) for c in choices)
+            if s
+        ]
         if len(choices) > MAX_CHOICES:
             choices = choices[:MAX_CHOICES]
         if not choices:
@@ -154,7 +175,9 @@ CLARIFY_SCHEMA = {
                 "description": (
                     "The question itself, and ONLY the question (e.g. 'Which "
                     "deployment target?'). Do NOT embed the answer options here "
-                    "— pass them as separate elements in `choices`."
+                    "— pass them as separate elements in `choices`. Use plain "
+                    "text only — no Discord/Telegram markup, no @mentions, no "
+                    "platform-specific formatting."
                 ),
             },
             "choices": {
