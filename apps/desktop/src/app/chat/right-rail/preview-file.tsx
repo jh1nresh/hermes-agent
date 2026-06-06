@@ -12,6 +12,7 @@ import { Streamdown } from 'streamdown'
 
 import { HERMES_PATHS_MIME } from '@/app/chat/hooks/use-composer-actions'
 import { PageLoader } from '@/components/page-loader'
+import { fsReadFileDataUrl, fsReadFileText } from '@/lib/desktop-fs'
 import { cn } from '@/lib/utils'
 import type { PreviewTarget } from '@/store/preview'
 
@@ -179,21 +180,19 @@ function looksBinaryBytes(bytes: Uint8Array) {
 }
 
 async function readTextPreview(filePath: string) {
-  if (window.hermesDesktop.readFileText) {
-    try {
-      return await window.hermesDesktop.readFileText(filePath)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+  try {
+    return await fsReadFileText(filePath)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
 
-      if (!message.includes("No handler registered for 'hermes:readFileText'")) {
-        throw error
-      }
+    if (!message.includes("No handler registered for 'hermes:readFileText'")) {
+      throw error
     }
   }
 
   // Back-compat for a running Electron process whose preload hasn't been
   // restarted since readFileText was added. readFileDataUrl already existed.
-  const dataUrl = await window.hermesDesktop.readFileDataUrl(filePath)
+  const dataUrl = await fsReadFileDataUrl(filePath)
   const [, metadata = '', data = ''] = dataUrl.match(/^data:([^,]*),(.*)$/) || []
   const base64 = metadata.includes(';base64')
   const mimeType = metadata.replace(/;base64$/, '') || undefined
@@ -441,7 +440,7 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
 
       try {
         if (isImage) {
-          const dataUrl = await window.hermesDesktop.readFileDataUrl(filePath)
+          const dataUrl = await fsReadFileDataUrl(filePath)
 
           if (active) {
             setState({ dataUrl, loading: false })

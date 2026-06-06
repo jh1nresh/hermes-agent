@@ -177,6 +177,42 @@ export function usePromptActions({
     [selectedStoredSessionIdRef, updateSessionState]
   )
 
+  // Remote gateways (e.g. a VPS over tailscale) cannot see the client's local
+  // filesystem, so a path-based `image.attach` fails with "image not found".
+  // Fall back to uploading the bytes the Electron client already holds.
+  const uploadImageAttachmentBytes = useCallback(
+    async (sessionId: string, attachment: ComposerAttachment): Promise<ImageAttachResponse | null> => {
+      const path = attachment.path
+
+      if (!path) {
+        return null
+      }
+
+      let data = attachment.previewUrl
+
+      if (!data && window.hermesDesktop?.readFileDataUrl) {
+        try {
+          data = await window.hermesDesktop.readFileDataUrl(path)
+        } catch {
+          return null
+        }
+      }
+
+      if (!data) {
+        return null
+      }
+
+      const result = await requestGateway<ImageAttachResponse>('image.attach_bytes', {
+        session_id: sessionId,
+        filename: pathLabel(path),
+        data
+      })
+
+      return result.attached ? result : null
+    },
+    [requestGateway]
+  )
+
   const syncImageAttachmentsForSubmit = useCallback(
     async (
       sessionId: string,
@@ -191,14 +227,28 @@ export function usePromptActions({
           continue
         }
 
-        const result = await requestGateway<ImageAttachResponse>('image.attach', {
-          session_id: sessionId,
-          path: attachment.path
-        })
+        let result: ImageAttachResponse | null = null
 
-        if (!result.attached) {
+        try {
+          const pathResult = await requestGateway<ImageAttachResponse>('image.attach', {
+            session_id: sessionId,
+            path: attachment.path
+          })
+
+          if (pathResult.attached) {
+            result = pathResult
+          }
+        } catch {
+          result = null
+        }
+
+        if (!result) {
+          result = await uploadImageAttachmentBytes(sessionId, attachment)
+        }
+
+        if (!result?.attached) {
           const label = attachment.label || (attachment.path ? pathLabel(attachment.path) : 'image')
-          throw new Error(result.message || `Could not attach ${label}`)
+          throw new Error(result?.message || `Could not attach ${label}`)
         }
 
         const attachedPath = result.path || attachment.path
@@ -214,7 +264,7 @@ export function usePromptActions({
         }
       }
     },
-    [requestGateway]
+    [requestGateway, uploadImageAttachmentBytes]
   )
 
   const submitPromptText = useCallback(
@@ -537,6 +587,7 @@ export function usePromptActions({
               session_id: sessionId,
               title: arg
             })
+
             const finalTitle = (result?.title || arg).trim()
             const queued = result?.pending === true
 

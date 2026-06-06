@@ -4980,6 +4980,249 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5027, str(e))
 
 
+_DATA_URL_MIME_EXT = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tiff",
+    "image/svg+xml": ".svg",
+    "image/x-icon": ".ico",
+    "image/vnd.microsoft.icon": ".ico",
+}
+
+
+@method("image.attach_bytes")
+def _(rid, params: dict) -> dict:
+    """Attach an image uploaded as bytes (base64 / data URL).
+
+    Unlike ``image.attach`` (which resolves a path on the gateway host), this
+    writes the client-supplied bytes into ``$HERMES_HOME/images`` on the
+    gateway. Used by the desktop app when the gateway is remote (e.g. a VPS)
+    and the UI file picker yields a path that only exists on the client.
+    """
+    import base64
+    import re
+
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    raw = str(params.get("data", "") or "").strip()
+    if not raw:
+        return _err(rid, 4015, "data required")
+
+    from cli import _IMAGE_EXTENSIONS
+
+    mime = ""
+    payload = raw
+    m = re.match(r"^data:([^;,]*)(;base64)?,(.*)$", raw, re.DOTALL)
+    if m:
+        mime = (m.group(1) or "").strip().lower()
+        payload = m.group(3) or ""
+    try:
+        blob = base64.b64decode(payload, validate=False)
+    except Exception:
+        return _err(rid, 4016, "invalid image data")
+    if not blob:
+        return _err(rid, 4016, "empty image data")
+
+    ext = Path(str(params.get("filename", "") or "")).suffix.lower()
+    if ext not in _IMAGE_EXTENSIONS:
+        ext = _DATA_URL_MIME_EXT.get(mime, "")
+    if ext not in _IMAGE_EXTENSIONS:
+        ext = ".png"
+
+    session["image_counter"] = session.get("image_counter", 0) + 1
+    img_dir = _hermes_home / "images"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    img_path = (
+        img_dir
+        / f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session['image_counter']}{ext}"
+    )
+    try:
+        img_path.write_bytes(blob)
+    except Exception as e:
+        session["image_counter"] = max(0, session["image_counter"] - 1)
+        return _err(rid, 5027, str(e))
+
+    session.setdefault("attached_images", []).append(str(img_path))
+    return _ok(
+        rid,
+        {
+            "attached": True,
+            "path": str(img_path),
+            "count": len(session["attached_images"]),
+            "text": f"[User attached image: {img_path.name}]",
+            **_image_meta(img_path),
+        },
+    )
+
+
+# Filesystem browsing RPCs (fs.*) run on the GATEWAY host. The desktop app uses
+# them when connected to a remote gateway (e.g. a VPS over tailscale) so the
+# Files sidebar and path pickers browse the agent's filesystem rather than the
+# client's. Shapes mirror the Electron `hermes:fs:*` IPC handlers so the same
+# renderer components consume either source unchanged.
+_FS_READDIR_HIDDEN = frozenset({
+    ".git", ".hg", ".svn", ".cache", ".next", ".turbo", ".venv",
+    "__pycache__", "build", "dist", "node_modules", "target", "venv",
+})
+_FS_TEXT_READ_MAX_BYTES = 512 * 1024
+_FS_DATA_URL_MAX_BYTES = 16 * 1024 * 1024
+_FS_LANGUAGE_BY_EXT = {
+    ".c": "c", ".conf": "ini", ".cpp": "cpp", ".css": "css", ".csv": "csv",
+    ".go": "go", ".graphql": "graphql", ".h": "c", ".hpp": "cpp",
+    ".html": "html", ".ini": "ini", ".java": "java", ".js": "javascript",
+    ".json": "json", ".jsx": "jsx", ".kt": "kotlin", ".lua": "lua",
+    ".md": "markdown", ".php": "php", ".py": "python", ".rb": "ruby",
+    ".rs": "rust", ".sh": "shell", ".sql": "sql", ".swift": "swift",
+    ".toml": "toml", ".ts": "typescript", ".tsx": "tsx", ".xml": "xml",
+    ".yaml": "yaml", ".yml": "yaml",
+}
+
+
+def _fs_resolve(params: dict, *, default_to_cwd: bool = False) -> Path:
+    """Resolve an fs.* path param on the gateway host.
+
+    Relative paths resolve against the session/terminal cwd (same base as path
+    completions). When ``default_to_cwd`` and no path is given, returns the cwd.
+    """
+    raw = str(params.get("path", "") or "").strip()
+    base = _completion_cwd(params)
+    if not raw:
+        return Path(base)
+    expanded = os.path.expanduser(os.path.expandvars(raw))
+    p = Path(expanded)
+    if not p.is_absolute():
+        p = Path(base) / p
+    return p
+
+
+def _fs_stat_file(rid, params: dict):
+    """Resolve + stat a regular file. Returns (resolved, stat, None) or (None, None, err)."""
+    target = _fs_resolve(params)
+    try:
+        resolved = target.resolve()
+        st = resolved.stat()
+    except FileNotFoundError:
+        return None, None, _err(rid, 4016, f"file not found: {target}")
+    except OSError as e:
+        return None, None, _err(rid, 5027, str(e))
+    if not resolved.is_file():
+        return None, None, _err(rid, 4016, f"not a file: {resolved}")
+    return resolved, st, None
+
+
+@method("fs.list")
+def _(rid, params: dict) -> dict:
+    import errno as _errno
+
+    target = _fs_resolve(params, default_to_cwd=True)
+    try:
+        resolved = target.resolve()
+    except Exception:
+        resolved = target
+    try:
+        entries = []
+        with os.scandir(resolved) as it:
+            for entry in it:
+                if entry.name in _FS_READDIR_HIDDEN:
+                    continue
+                try:
+                    is_dir = entry.is_dir()
+                except OSError:
+                    is_dir = False
+                entries.append(
+                    {
+                        "name": entry.name,
+                        "path": str(Path(resolved) / entry.name),
+                        "isDirectory": is_dir,
+                    }
+                )
+        entries.sort(key=lambda e: (0 if e["isDirectory"] else 1, e["name"].lower()))
+        return _ok(rid, {"path": str(resolved), "entries": entries})
+    except OSError as e:
+        code = _errno.errorcode.get(getattr(e, "errno", None), "read-error")
+        return _ok(rid, {"path": str(resolved), "entries": [], "error": code})
+
+
+@method("fs.read_text")
+def _(rid, params: dict) -> dict:
+    import mimetypes
+
+    resolved, st, err = _fs_stat_file(rid, params)
+    if err:
+        return err
+
+    to_read = min(st.st_size, _FS_TEXT_READ_MAX_BYTES)
+    try:
+        with open(resolved, "rb") as f:
+            chunk = f.read(to_read)
+    except OSError as e:
+        return _err(rid, 5027, str(e))
+
+    binary = b"\x00" in chunk[:4096]
+    text = "" if binary else chunk.decode("utf-8", errors="replace")
+    mime = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
+    return _ok(
+        rid,
+        {
+            "binary": binary,
+            "byteSize": st.st_size,
+            "language": _FS_LANGUAGE_BY_EXT.get(resolved.suffix.lower(), "text"),
+            "mimeType": mime,
+            "path": str(resolved),
+            "text": text,
+            "truncated": st.st_size > _FS_TEXT_READ_MAX_BYTES,
+        },
+    )
+
+
+@method("fs.read_data_url")
+def _(rid, params: dict) -> dict:
+    import base64
+    import mimetypes
+
+    resolved, st, err = _fs_stat_file(rid, params)
+    if err:
+        return err
+    if st.st_size > _FS_DATA_URL_MAX_BYTES:
+        return _err(rid, 4017, f"file too large: {resolved.name}")
+
+    try:
+        data = resolved.read_bytes()
+    except OSError as e:
+        return _err(rid, 5027, str(e))
+    mime = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
+    b64 = base64.b64encode(data).decode("ascii")
+    return _ok(rid, {"path": str(resolved), "dataUrl": f"data:{mime};base64,{b64}"})
+
+
+@method("fs.git_root")
+def _(rid, params: dict) -> dict:
+    target = _fs_resolve(params, default_to_cwd=True)
+    try:
+        start = target.resolve()
+        if start.is_file():
+            start = start.parent
+    except Exception:
+        start = target
+    current = start
+    for _ in range(50):
+        try:
+            if (current / ".git").exists():
+                return _ok(rid, {"root": str(current)})
+        except OSError:
+            return _ok(rid, {"root": None})
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return _ok(rid, {"root": None})
+
+
 @method("image.detach")
 def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)

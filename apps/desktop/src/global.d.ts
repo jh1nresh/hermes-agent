@@ -372,6 +372,9 @@ export interface HermesReadDirEntry {
 export interface HermesReadDirResult {
   entries: HermesReadDirEntry[]
   error?: string
+  // Absolute directory the entries were read from. Set by the gateway `fs.list`
+  // RPC (remote backends); the local Electron readDir omits it.
+  path?: string
 }
 
 export interface HermesPreviewFileChanged {

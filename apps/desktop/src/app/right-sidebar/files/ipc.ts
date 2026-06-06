@@ -1,6 +1,7 @@
 import ignore from 'ignore'
 
 import type { HermesReadDirEntry, HermesReadDirResult } from '@/global'
+import { fsGitRoot, fsReadDir, fsReadFileDataUrl } from '@/lib/desktop-fs'
 
 export type ProjectTreeEntry = HermesReadDirEntry
 
@@ -63,15 +64,11 @@ function ancestorDirs(root: string, dir: string) {
 }
 
 async function gitRootFor(start: string) {
-  if (!window.hermesDesktop?.gitRoot) {
-    return null
-  }
-
   const key = clean(start)
   let cached = gitRootCache.get(key)
 
   if (!cached) {
-    cached = window.hermesDesktop.gitRoot(key)
+    cached = fsGitRoot(key)
     gitRootCache.set(key, cached)
   }
 
@@ -80,18 +77,14 @@ async function gitRootFor(start: string) {
 
 /** Read .gitignore at `dir` if it actually exists — never probe missing files. */
 async function readGitignore(dir: string): Promise<GitignoreRule | null> {
-  if (!window.hermesDesktop?.readDir || !window.hermesDesktop.readFileDataUrl) {
-    return null
-  }
-
   try {
-    const listing = await window.hermesDesktop.readDir(dir)
+    const listing = await fsReadDir(dir)
 
     if (!listing.entries.some(e => e.name === '.gitignore' && !e.isDirectory)) {
       return null
     }
 
-    const text = decodeDataUrl(await window.hermesDesktop.readFileDataUrl(`${dir}/.gitignore`))
+    const text = decodeDataUrl(await fsReadFileDataUrl(`${dir}/.gitignore`))
 
     return { base: dir, ig: ignore().add(text) }
   } catch {
@@ -138,11 +131,7 @@ async function filterIgnored(entries: HermesReadDirEntry[], rootPath: string, di
 }
 
 export async function readProjectDir(dirPath: string, rootPath = dirPath): Promise<HermesReadDirResult> {
-  if (!window.hermesDesktop) {
-    return { entries: [], error: 'no-bridge' }
-  }
-
-  const result = await window.hermesDesktop.readDir(dirPath)
+  const result = await fsReadDir(dirPath)
 
   return { ...result, entries: await filterIgnored(result.entries, rootPath, dirPath) }
 }

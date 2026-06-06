@@ -3,6 +3,7 @@ import { useCallback } from 'react'
 import { requestComposerFocus, requestComposerInsert } from '@/app/chat/composer/focus'
 import { formatRefValue } from '@/components/assistant-ui/directive-text'
 import { attachmentId, contextPath, pathLabel } from '@/lib/chat-runtime'
+import { fsReadFileDataUrl, selectPaths } from '@/lib/desktop-fs'
 import {
   addComposerAttachment,
   type ComposerAttachment,
@@ -34,6 +35,27 @@ function blobExtension(blob: Blob): string {
 
 function isImagePath(filePath: string): boolean {
   return IMAGE_EXTENSION_PATTERN.test(filePath)
+}
+
+// Thumbnail source for an attached image. Locally-held paths (drag/paste saves,
+// local picks) read off the client; when that fails on a remote backend the
+// path lives on the gateway host, so fall back to the gateway data-url read.
+async function loadImagePreviewDataUrl(filePath: string): Promise<string | undefined> {
+  try {
+    const local = await window.hermesDesktop?.readFileDataUrl(filePath)
+
+    if (local) {
+      return local
+    }
+  } catch {
+    // Path isn't on the client (remote-picked image) — try the gateway below.
+  }
+
+  try {
+    return await fsReadFileDataUrl(filePath)
+  } catch {
+    return undefined
+  }
 }
 
 export interface DroppedFile {
@@ -228,7 +250,7 @@ export function useComposerActions({ activeSessionId, currentCwd, requestGateway
 
   const pickContextPaths = useCallback(
     async (kind: 'file' | 'folder') => {
-      const paths = await window.hermesDesktop?.selectPaths({
+      const paths = await selectPaths({
         title: kind === 'file' ? 'Add files as context' : 'Add folders as context',
         defaultPath: currentCwd || undefined,
         directories: kind === 'folder'
@@ -291,19 +313,13 @@ export function useComposerActions({ activeSessionId, currentCwd, requestGateway
 
     attachToMain(baseAttachment)
 
-    try {
-      const previewUrl = await window.hermesDesktop?.readFileDataUrl(filePath)
+    const previewUrl = await loadImagePreviewDataUrl(filePath)
 
-      if (previewUrl) {
-        addComposerAttachment({ ...baseAttachment, previewUrl })
-      }
-
-      return true
-    } catch (err) {
-      notifyError(err, 'Image preview failed')
-
-      return true
+    if (previewUrl) {
+      addComposerAttachment({ ...baseAttachment, previewUrl })
     }
+
+    return true
   }, [])
 
   const attachImageBlob = useCallback(
@@ -338,7 +354,7 @@ export function useComposerActions({ activeSessionId, currentCwd, requestGateway
   )
 
   const pickImages = useCallback(async () => {
-    const paths = await window.hermesDesktop?.selectPaths({
+    const paths = await selectPaths({
       title: 'Attach images',
       defaultPath: currentCwd || undefined,
       filters: [
