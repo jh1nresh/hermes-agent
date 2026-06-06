@@ -75,7 +75,6 @@ import {
 import { Loader } from '@/components/ui/loader'
 import type { HermesGateway } from '@/hermes'
 import { useResizeObserver } from '@/hooks/use-resize-observer'
-import { useI18n } from '@/i18n'
 import { DATA_IMAGE_URL_RE } from '@/lib/embedded-images'
 import { triggerHaptic } from '@/lib/haptics'
 import { GitBranchIcon, Loader2Icon, Volume2Icon, VolumeXIcon } from '@/lib/icons'
@@ -117,6 +116,10 @@ function messageContentText(content: unknown): string {
 
   return Array.isArray(content) ? content.map(partText).join('').trim() : ''
 }
+
+const INTERRUPTED_ONLY_RE = /^_?\[interrupted\]_?$/i
+
+const isInterruptedOnlyMessage = (text: string) => INTERRUPTED_ONLY_RE.test(text.trim())
 
 export const Thread: FC<{
   clampToComposer?: boolean
@@ -184,26 +187,22 @@ function pickPrimaryPreviewTarget(targets: string[]): string[] {
   return [localUrl || targets[targets.length - 1]]
 }
 
-const CenteredThreadSpinner: FC = () => {
-  const { t } = useI18n()
-
-  return (
-    <div
-      aria-label={t.assistant.thread.loadingSession}
-      className="pointer-events-none absolute inset-0 z-1 grid place-items-center"
-      role="status"
-    >
-      <Loader
-        aria-hidden="true"
-        className="size-12 text-midground/70"
-        pathSteps={220}
-        role="presentation"
-        strokeScale={0.72}
-        type="rose-curve"
-      />
-    </div>
-  )
-}
+const CenteredThreadSpinner: FC = () => (
+  <div
+    aria-label="Loading session"
+    className="pointer-events-none absolute inset-0 z-1 grid place-items-center"
+    role="status"
+  >
+    <Loader
+      aria-hidden="true"
+      className="size-12 text-midground/70"
+      pathSteps={220}
+      role="presentation"
+      strokeScale={0.72}
+      type="rose-curve"
+    />
+  </div>
+)
 
 const AssistantMessage: FC<{ onBranchInNewChat?: (messageId: string) => void }> = ({ onBranchInNewChat }) => {
   const messageId = useAuiState(s => s.message.id)
@@ -221,6 +220,7 @@ const AssistantMessage: FC<{ onBranchInNewChat?: (messageId: string) => void }> 
 
   const messageStatus = useAuiState(s => s.message.status?.type)
   const isPlaceholder = messageStatus === 'running' && content.length === 0
+  const interruptedOnly = useMemo(() => isInterruptedOnlyMessage(messageText), [messageText])
   const enterRef = useEnterAnimation(messageStatus === 'running', `assistant-message:${messageId}`)
 
   if (isPlaceholder) {
@@ -236,7 +236,10 @@ const AssistantMessage: FC<{ onBranchInNewChat?: (messageId: string) => void }> 
       ref={enterRef}
     >
       <div
-        className="wrap-anywhere min-w-0 max-w-full overflow-hidden text-pretty text-[length:var(--conversation-text-font-size)] leading-(--dt-line-height) text-foreground"
+        className={cn(
+          'wrap-anywhere min-w-0 max-w-full overflow-hidden text-pretty text-[length:var(--conversation-text-font-size)] leading-(--dt-line-height) text-foreground',
+          interruptedOnly && 'text-[0.8rem] leading-5 text-muted-foreground/82'
+        )}
         data-slot="aui_assistant-message-content"
       >
         {hoistedTodos.length > 0 && <HoistedTodoPanel todos={hoistedTodos} />}
@@ -257,7 +260,7 @@ const AssistantMessage: FC<{ onBranchInNewChat?: (messageId: string) => void }> 
           </ErrorPrimitive.Root>
         </MessagePrimitive.Error>
       </div>
-      {messageText.trim().length > 0 && (
+      {messageText.trim().length > 0 && !interruptedOnly && (
         <AssistantFooter messageId={messageId} messageText={messageText} onBranchInNewChat={onBranchInNewChat} />
       )}
     </MessagePrimitive.Root>
@@ -282,11 +285,10 @@ const StatusRow: FC<{ children: ReactNode; label: string } & React.ComponentProp
 )
 
 const ResponseLoadingIndicator: FC = () => {
-  const { t } = useI18n()
   const elapsed = useElapsedSeconds()
 
   return (
-    <StatusRow data-slot="aui_response-loading" label={t.assistant.thread.loadingResponse}>
+    <StatusRow data-slot="aui_response-loading" label="Hermes is loading a response">
       <span aria-hidden="true" className="dither inline-block size-3 rounded-[2px] text-midground/80 animate-pulse" />
       <ActivityTimerText seconds={elapsed} />
     </StatusRow>
@@ -335,7 +337,6 @@ const ThinkingDisclosure: FC<{
   pending?: boolean
   timerKey?: string
 }> = ({ children, messageRunning = false, pending = false, timerKey }) => {
-  const { t } = useI18n()
   // `null` = no explicit user toggle yet, defer to the streaming default.
   // The default is "auto-open while streaming, auto-collapse when done" so
   // reasoning surfaces a live preview without manual interaction. The first
@@ -392,7 +393,7 @@ const ThinkingDisclosure: FC<{
               pending && 'shimmer text-foreground/55'
             )}
           >
-            {t.assistant.thread.thinking}
+            Thinking
           </span>
           {pending && (
             <ActivityTimerText
@@ -437,7 +438,7 @@ const ReasoningAccordionGroup: FC<{ children?: ReactNode; endIndex: number; star
       s.thread.isRunning &&
       s.message.status?.type === 'running' &&
       s.message.parts
-        .slice(Math.max(0, startIndex))
+        .slice(Math.max(0, startIndex), Math.min(s.message.parts.length, endIndex))
         .some(p => p?.type === 'reasoning' && p.status?.type !== 'complete')
   )
 
@@ -494,10 +495,7 @@ function startOfDay(d: Date): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 }
 
-function formatMessageTimestamp(
-  value: Date | string | number | undefined,
-  labels: { today: (time: string) => string; yesterday: (time: string) => string }
-): string {
+function formatMessageTimestamp(value: Date | string | number | undefined): string {
   if (!value) {
     return ''
   }
@@ -511,19 +509,17 @@ function formatMessageTimestamp(
   const dayDelta = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86_400_000)
 
   if (dayDelta === 0) {
-    return labels.today(TIME_FMT.format(date))
+    return `Today, ${TIME_FMT.format(date)}`
   }
 
   if (dayDelta === 1) {
-    return labels.yesterday(TIME_FMT.format(date))
+    return `Yesterday, ${TIME_FMT.format(date)}`
   }
 
   return SHORT_FMT.format(date)
 }
 
 const AssistantActionBar: FC<MessageActionProps> = ({ messageId, messageText, onBranchInNewChat }) => {
-  const { t } = useI18n()
-  const copy = t.assistant.thread
   const [menuOpen, setMenuOpen] = useState(false)
 
   return (
@@ -542,15 +538,15 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, messageText, on
         )}
         data-slot="aui_msg-actions"
       >
-        <CopyButton appearance="icon" buttonSize="icon" disabled={!messageText} label={copy.copy} text={messageText} />
+        <CopyButton appearance="icon" buttonSize="icon" disabled={!messageText} label="Copy" text={messageText} />
         <ActionBarPrimitive.Reload asChild>
-          <TooltipIconButton onClick={() => triggerHaptic('submit')} tooltip={copy.refresh}>
+          <TooltipIconButton onClick={() => triggerHaptic('submit')} tooltip="Refresh">
             <Codicon name="refresh" />
           </TooltipIconButton>
         </ActionBarPrimitive.Reload>
         <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
           <DropdownMenuTrigger asChild>
-            <TooltipIconButton tooltip={copy.moreActions}>
+            <TooltipIconButton tooltip="More actions">
               <Codicon name="ellipsis" />
             </TooltipIconButton>
           </DropdownMenuTrigger>
@@ -558,7 +554,7 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, messageText, on
             <MessageTimestamp />
             <DropdownMenuItem onSelect={() => onBranchInNewChat?.(messageId)}>
               <GitBranchIcon />
-              {copy.branchNewChat}
+              Branch in new chat
             </DropdownMenuItem>
             <ReadAloudItem messageId={messageId} text={messageText} />
           </DropdownMenuContent>
@@ -569,8 +565,6 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, messageText, on
 }
 
 const ReadAloudItem: FC<{ messageId: string; text: string }> = ({ messageId, text }) => {
-  const { t } = useI18n()
-  const copy = t.assistant.thread
   const voicePlayback = useStore($voicePlayback)
 
   const readAloudStatus =
@@ -589,9 +583,9 @@ const ReadAloudItem: FC<{ messageId: string; text: string }> = ({ messageId, tex
     try {
       await playSpeechText(text, { messageId, source: 'read-aloud' })
     } catch (error) {
-      notifyError(error, copy.readAloudFailed)
+      notifyError(error, 'Read aloud failed')
     }
-  }, [copy.readAloudFailed, messageId, text])
+  }, [messageId, text])
 
   return (
     <DropdownMenuItem
@@ -602,15 +596,14 @@ const ReadAloudItem: FC<{ messageId: string; text: string }> = ({ messageId, tex
       }}
     >
       <Icon className={isPreparing ? 'animate-spin' : undefined} />
-      {isPreparing ? copy.preparingAudio : isSpeaking ? copy.stopReading : copy.readAloud}
+      {isPreparing ? 'Preparing audio...' : isSpeaking ? 'Stop reading' : 'Read aloud'}
     </DropdownMenuItem>
   )
 }
 
 const MessageTimestamp: FC = () => {
-  const { t } = useI18n()
   const createdAt = useAuiState(s => s.message.createdAt)
-  const label = formatMessageTimestamp(createdAt, t.assistant.thread)
+  const label = formatMessageTimestamp(createdAt)
 
   if (!label) {
     return null
@@ -662,11 +655,11 @@ function StickyHumanMessageContainer({ children }: { children: ReactNode }) {
 }
 
 // Shared "user bubble" base. Both the read-only message and the inline
-// edit composer render the same bubble surface (rounded glass card,
-// shadow-composer); they only differ in border weight, cursor, and
-// padding-right (the read-only view reserves room for the restore icon).
+// edit composer render the same bubble surface (rounded glass card);
+// they only differ in border weight, cursor, and padding-right (the
+// read-only view reserves room for the restore icon).
 const USER_BUBBLE_BASE_CLASS =
-  'composer-human-message standalone-glass relative flex w-full min-w-0 max-w-full flex-col gap-1.5 overflow-hidden rounded-xl border bg-(--dt-user-bubble) px-3 py-2 text-left shadow-composer'
+  'composer-human-message standalone-glass relative flex w-full min-w-0 max-w-full flex-col gap-1.5 overflow-hidden rounded-xl border bg-(--dt-user-bubble) px-3 py-2 text-left'
 
 const USER_ACTION_ICON_BUTTON_CLASS =
   'grid place-items-center rounded-md bg-transparent text-(--ui-text-secondary) transition-colors hover:bg-(--ui-control-active-background) hover:text-foreground disabled:cursor-default disabled:text-(--ui-text-quaternary) disabled:opacity-70'
@@ -677,8 +670,6 @@ const StopGlyph = <IconPlayerStopFilled aria-hidden className="size-3.5 -transla
 const UserMessage: FC<{
   onCancel?: () => Promise<void> | void
 }> = ({ onCancel }) => {
-  const { t } = useI18n()
-  const copy = t.assistant.thread
   const messageId = useAuiState(s => s.message.id)
   const content = useAuiState(s => s.message.content)
   const messageText = messageContentText(content)
@@ -770,10 +761,10 @@ const UserMessage: FC<{
               ) : (
                 <ActionBarPrimitive.Edit asChild>
                   <button
-                    aria-label={copy.editMessage}
+                    aria-label="Edit message"
                     className={bubbleClassName}
                     onClick={() => triggerHaptic('selection')}
-                    title={copy.editMessage}
+                    title="Edit message"
                     type="button"
                   >
                     {bubbleContent}
@@ -784,14 +775,14 @@ const UserMessage: FC<{
                 <div className="pointer-events-none absolute right-2 bottom-2 z-10 flex items-center justify-center opacity-0 transition-opacity group-hover/user-message:opacity-100 group-focus-within/user-message:opacity-100">
                   {showStop ? (
                     <button
-                      aria-label={copy.stop}
+                      aria-label="Stop"
                       className={cn('pointer-events-auto size-5', USER_ACTION_ICON_BUTTON_CLASS)}
                       onClick={event => {
                         event.preventDefault()
                         event.stopPropagation()
                         void onCancel?.()
                       }}
-                      title={copy.stop}
+                      title="Stop"
                       type="button"
                     >
                       {StopGlyph}
@@ -800,7 +791,7 @@ const UserMessage: FC<{
                     <span
                       aria-hidden="true"
                       className="flex size-6 items-center justify-center rounded-md text-(--ui-text-tertiary)"
-                      title={copy.editableCheckpoint}
+                      title="Editable checkpoint"
                     >
                       <Codicon name="discard" size="0.875rem" />
                     </span>
@@ -815,18 +806,18 @@ const UserMessage: FC<{
               <span aria-hidden className="checkpoint-icon size-1.5 rounded-full border border-current" />
               <BranchPickerPrimitive.Previous
                 className="checkpoint-restore-text rounded-sm bg-transparent px-1 opacity-65 hover:opacity-100 disabled:hidden disabled:cursor-default"
-                title={copy.restorePrevious}
+                title="Restore previous checkpoint"
               >
-                {copy.restoreCheckpoint}
+                Restore checkpoint
               </BranchPickerPrimitive.Previous>
               <span className="checkpoint-divider opacity-55">
                 <BranchPickerPrimitive.Number />/<BranchPickerPrimitive.Count />
               </span>
               <BranchPickerPrimitive.Next
                 className="checkpoint-restore-text rounded-sm bg-transparent px-1 opacity-65 hover:opacity-100 disabled:hidden disabled:cursor-default"
-                title={copy.restoreNext}
+                title="Restore next checkpoint"
               >
-                {copy.goForward}
+                Go forward
               </BranchPickerPrimitive.Next>
             </BranchPickerPrimitive.Root>
           </div>
@@ -837,30 +828,12 @@ const UserMessage: FC<{
 }
 
 const SLASH_STATUS_RE = /^slash:(?<command>\/[^\n]+)\n(?<output>[\s\S]*)$/
-const STEER_NOTE_RE = /^steer:(?<text>[\s\S]+)$/
 
 const SystemMessage: FC = () => {
   const text = useAuiState(s => messageContentText(s.message.content))
 
   if (!text) {
     return null
-  }
-
-  const steerNote = text.match(STEER_NOTE_RE)
-
-  if (steerNote?.groups) {
-    return (
-      <MessagePrimitive.Root
-        className="flex max-w-[min(86%,44rem)] items-center gap-1.5 self-center px-2 py-0.5 text-[0.6875rem] leading-5 text-muted-foreground/60"
-        data-role="system"
-        data-slot="aui_system-message-root"
-      >
-        <Codicon className="text-muted-foreground/55" name="compass" size="0.75rem" />
-        <span className="text-muted-foreground/55">steered</span>
-        <span className="text-muted-foreground/35">·</span>
-        <span className="whitespace-pre-wrap">{steerNote.groups.text.trim()}</span>
-      </MessagePrimitive.Root>
-    )
   }
 
   const slashStatus = text.match(SLASH_STATUS_RE)
@@ -897,8 +870,6 @@ interface UserEditComposerProps {
 }
 
 const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sessionId }) => {
-  const { t } = useI18n()
-  const copy = t.assistant.thread
   const aui = useAui()
   const draft = useAuiState(s => s.composer.text)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -1375,7 +1346,7 @@ const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sessionId }
             data-expanded={expanded ? 'true' : undefined}
           >
             <div
-              aria-label={copy.editMessage}
+              aria-label="Edit message"
               autoFocus
               className={cn(
                 'ui-prompt-input-editor__input max-h-48 w-full resize-none bg-transparent p-0 pr-7 text-[length:var(--conversation-text-font-size)] leading-(--dt-line-height) text-foreground/95 outline-none',
@@ -1384,7 +1355,7 @@ const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sessionId }
                 expanded ? 'min-h-16' : 'min-h-[1.25rem]'
               )}
               contentEditable
-              data-placeholder={copy.editMessage}
+              data-placeholder="Edit message"
               data-slot={RICH_INPUT_SLOT}
               onBlur={() => window.setTimeout(closeTrigger, 80)}
               onDragOver={handleDragOver}
@@ -1401,7 +1372,7 @@ const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sessionId }
             />
             <ComposerPrimitive.Input className="sr-only" tabIndex={-1} unstable_focusOnScrollToBottom={false} />
             <button
-              aria-label={copy.sendEdited}
+              aria-label="Send edited message"
               className={cn('absolute right-2 bottom-2 size-5', USER_ACTION_ICON_BUTTON_CLASS)}
               disabled={!canSubmit || submitting}
               onClick={() => {
@@ -1411,7 +1382,7 @@ const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sessionId }
                   submitEdit(editor)
                 }
               }}
-              title={copy.sendEdited}
+              title="Send edited message"
               type="button"
             >
               {submitting ? StopGlyph : <Codicon name="arrow-up" size={USER_ACTION_ICON_SIZE} />}
