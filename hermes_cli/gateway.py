@@ -3803,49 +3803,9 @@ _PLATFORMS = [
     # Discord moved to plugins/platforms/discord/ — its setup metadata is
     # discovered dynamically via _all_platforms() from the platform registry
     # entry registered by plugins/platforms/discord/adapter.py::register().
-    {
-        "key": "slack",
-        "label": "Slack",
-        "emoji": "💼",
-        "token_var": "SLACK_BOT_TOKEN",
-        "setup_instructions": [
-            "1. Go to https://api.slack.com/apps → Create New App → From Scratch",
-            "2. Enable Socket Mode: Settings → Socket Mode → Enable",
-            "   Create an App-Level Token with scope: connections:write → copy xapp-... token",
-            "3. Add Bot Token Scopes: Features → OAuth & Permissions → Scopes",
-            "   Required: chat:write, app_mentions:read, channels:history, channels:read,",
-            "   groups:history, im:history, im:read, im:write, users:read, files:read, files:write",
-            "4. Subscribe to Events: Features → Event Subscriptions → Enable",
-            "   Required events: message.im, message.channels, app_mention",
-            "   Optional: message.groups (for private channels)",
-            "   ⚠ Without message.channels the bot will ONLY work in DMs!",
-            "5. Install to Workspace: Settings → Install App → copy xoxb-... token",
-            "6. Reinstall the app after any scope or event changes",
-            "7. Find your user ID: click your profile → three dots → Copy member ID",
-            "8. Invite the bot to channels: /invite @YourBot",
-        ],
-        "vars": [
-            {
-                "name": "SLACK_BOT_TOKEN",
-                "prompt": "Bot Token (xoxb-...)",
-                "password": True,
-                "help": "Paste the bot token from step 3 above.",
-            },
-            {
-                "name": "SLACK_APP_TOKEN",
-                "prompt": "App Token (xapp-...)",
-                "password": True,
-                "help": "Paste the app-level token from step 4 above.",
-            },
-            {
-                "name": "SLACK_ALLOWED_USERS",
-                "prompt": "Allowed user IDs (comma-separated)",
-                "password": False,
-                "is_allowlist": True,
-                "help": "Paste your member ID from step 7 above.",
-            },
-        ],
-    },
+    # Slack moved to plugins/platforms/slack/ for the same reason — its setup
+    # metadata is discovered dynamically via the platform registry entry
+    # registered by plugins/platforms/slack/adapter.py::register(). #41112.
     # Matrix moved to plugins/platforms/matrix/ — setup metadata discovered
     # dynamically via the platform registry entry registered by
     # plugins/platforms/matrix/adapter.py::register(). #41112.
@@ -4891,7 +4851,9 @@ def _builtin_setup_fn(key: str):
         # discord moved into the plugin: setup_fn is registered by
         # plugins/platforms/discord/adapter.py::register() and dispatched
         # via the plugin path in _configure_platform().
-        "slack": _s._setup_slack,
+        # slack moved into the plugin: setup_fn is registered by
+        # plugins/platforms/slack/adapter.py::register() and dispatched
+        # via the plugin path in _configure_platform(). #41112.
         # matrix moved into the plugin: setup_fn registered by
         # plugins/platforms/matrix/adapter.py::register() and dispatched via
         # the plugin path in _configure_platform(). #41112.

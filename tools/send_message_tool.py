@@ -589,7 +589,6 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     """
     from gateway.config import Platform
     from gateway.platforms.base import BasePlatformAdapter, utf16_len
-    from gateway.platforms.slack import SlackAdapter
 
     # Telegram adapter import is optional (requires python-telegram-bot)
     try:
@@ -603,19 +602,16 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
 
     media_files = media_files or []
 
-    if platform == Platform.SLACK and message:
-        try:
-            slack_adapter = SlackAdapter.__new__(SlackAdapter)
-            message = slack_adapter.format_message(message)
-        except Exception:
-            logger.debug("Failed to apply Slack mrkdwn formatting in _send_to_platform", exc_info=True)
+    # Slack mrkdwn formatting is applied inside the slack plugin's
+    # _standalone_send (the registry standalone_sender_fn) rather than here —
+    # the SlackAdapter moved to plugins/platforms/slack/ in #41112.
 
     # Platform message length limits (from adapter class attributes for
     # built-in platforms; from PlatformEntry.max_message_length for plugins,
-    # resolved via the registry fallback below — covers Feishu since #41112).
+    # resolved via the registry fallback below — covers Slack and Feishu, both
+    # migrated to plugins in #41112).
     _MAX_LENGTHS = {
         Platform.TELEGRAM: TelegramAdapter.MAX_MESSAGE_LENGTH if _telegram_available else 4096,
-        Platform.SLACK: SlackAdapter.MAX_MESSAGE_LENGTH,
     }
 
     # Check plugin registry for max_message_length
@@ -779,7 +775,17 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     last_result = None
     for chunk in chunks:
         if platform == Platform.SLACK:
-            result = await _send_slack(pconfig.token, chat_id, chunk, thread_ts=thread_id)
+            # Slack migrated to a bundled plugin (#41112); delivery flows
+            # through the registry's standalone_sender_fn, which applies
+            # mrkdwn formatting and posts via the Slack Web API.
+            from gateway.platform_registry import platform_registry
+            _slack_entry = platform_registry.get("slack")
+            if _slack_entry is None or _slack_entry.standalone_sender_fn is None:
+                result = {"error": "Slack plugin not registered or missing standalone_sender_fn"}
+            else:
+                result = await _slack_entry.standalone_sender_fn(
+                    pconfig, chat_id, chunk, thread_id=thread_id
+                )
         elif platform == Platform.WHATSAPP:
             result = await _registry_standalone_send("whatsapp", pconfig, chat_id, chunk, thread_id)
         elif platform == Platform.SIGNAL:
@@ -1059,29 +1065,8 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
         return _error(f"Telegram send failed: {e}")
 
 
-async def _send_slack(token, chat_id, message, thread_ts=None):
-    """Send via Slack Web API."""
-    try:
-        import aiohttp
-    except ImportError:
-        return {"error": "aiohttp not installed. Run: pip install aiohttp"}
-    try:
-        from gateway.platforms.base import resolve_proxy_url, proxy_kwargs_for_aiohttp
-        _proxy = resolve_proxy_url()
-        _sess_kw, _req_kw = proxy_kwargs_for_aiohttp(_proxy)
-        url = "https://slack.com/api/chat.postMessage"
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), **_sess_kw) as session:
-            payload = {"channel": chat_id, "text": message, "mrkdwn": True}
-            if thread_ts:
-                payload["thread_ts"] = thread_ts
-            async with session.post(url, headers=headers, json=payload, **_req_kw) as resp:
-                data = await resp.json()
-                if data.get("ok"):
-                    return {"success": True, "platform": "slack", "chat_id": chat_id, "message_id": data.get("ts")}
-                return _error(f"Slack API error: {data.get('error', 'unknown')}")
-    except Exception as e:
-        return _error(f"Slack send failed: {e}")
+# _send_slack moved to the slack plugin as _standalone_send
+# (plugins/platforms/slack/adapter.py), wired via standalone_sender_fn. #41112.
 
 
 async def _registry_standalone_send(platform_name, pconfig, chat_id, message, thread_id=None):

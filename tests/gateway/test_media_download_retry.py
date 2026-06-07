@@ -3,7 +3,7 @@ Tests for media download retry logic added in PR #2982.
 
 Covers:
 - gateway/platforms/base.py:       cache_image_from_url
-- gateway/platforms/slack.py:      SlackAdapter._download_slack_file
+- plugins/platforms/slack/adapter.py: SlackAdapter._download_slack_file
                                     SlackAdapter._download_slack_file_bytes
 - gateway/platforms/mattermost.py: MattermostAdapter._send_url_as_file
 
@@ -532,10 +532,10 @@ def _ensure_slack_mock():
 
 _ensure_slack_mock()
 
-import gateway.platforms.slack as _slack_mod  # noqa: E402
+import plugins.platforms.slack.adapter as _slack_mod  # noqa: E402
 _slack_mod.SLACK_AVAILABLE = True
 
-from gateway.platforms.slack import SlackAdapter  # noqa: E402
+from plugins.platforms.slack.adapter import SlackAdapter  # noqa: E402
 from gateway.config import PlatformConfig  # noqa: E402
 
 
