@@ -66,6 +66,11 @@ metadata:
         description: "What this setting controls"
         default: "sensible-default"
         prompt: "Display prompt for setup"
+    recipe:                              # Optional — marks this skill a runnable automation
+      schedule: "0 9 * * *"              #   cron expr / "every 2h" / ISO timestamp
+      deliver: origin                    #   optional (default origin)
+      prompt: "Task instruction for each run"  # optional
+      no_agent: false                    # optional
 required_environment_variables:          # Optional — env vars the skill needs
   - name: MY_API_KEY
     prompt: "Enter your API key"
@@ -333,6 +338,35 @@ Bundled skills (in `skills/`) ship with every Hermes install. They should be **b
 If your skill is official and useful but not universally needed (e.g., a paid service integration, a heavyweight dependency), put it in **`optional-skills/`** — it ships with the repo, is discoverable via `hermes skills browse` (labeled "official"), and installs with built-in trust.
 
 If your skill is specialized, community-contributed, or niche, it's better suited for a **Skills Hub** — upload it to a registry and share it via `hermes skills install`.
+
+## Recipes: skills that are also automations
+
+A **recipe** is an ordinary skill that additionally declares a schedule in its frontmatter. Add a `metadata.hermes.recipe` block and the skill becomes a shareable, runnable automation:
+
+```yaml
+metadata:
+  hermes:
+    tags: [recipe, email]
+    recipe:
+      schedule: "0 8 * * *"     # presence of `recipe:` marks it runnable
+      deliver: telegram          # optional (default: origin)
+      prompt: "Summarize my unread email and today's calendar."  # optional
+      no_agent: false            # optional
+```
+
+Because a recipe **is** a skill, it flows through the entire skills pipeline unchanged — search, inspect, install, security scan, provenance, taps, the centralized index, and `hermes skills publish` for sharing. Nothing new to learn.
+
+**Installing a recipe.** When you install a skill that carries a `recipe:` block, Hermes tells you it's an automation and prints the exact command to schedule it. Scheduling is **opt-in** — installing never silently creates a recurring job:
+
+```bash
+hermes skills install owner/morning-brief
+# → Recipe: 'morning-brief' is an automation (schedule 0 8 * * *).
+#   Schedule it with: hermes cron create --skill morning-brief --schedule "0 8 * * *"
+```
+
+**Sharing an automation you built.** A recipe loaded by a cron job (`hermes cron create --skill <name> ...`) can be exported back to a SKILL.md and published like any other skill, so an automation you tuned for yourself becomes a one-command install for someone else.
+
+The recipe layer adds no new object type, store, or transport — the recipe is a skill, the schedule is a cron job, and sharing is the existing publish/tap/index path.
 
 ## Publishing Skills
 

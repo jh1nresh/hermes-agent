@@ -672,6 +672,36 @@ def do_install(identifier: str, category: str = "", force: bool = False,
     c.print(f"[bold green]Installed:[/] {install_dir.relative_to(SKILLS_DIR)}")
     c.print(f"[dim]Files: {', '.join(bundle.files.keys())}[/]\n")
 
+    # Recipe detection: if the installed skill declares a
+    # metadata.hermes.recipe block, it is a runnable automation. Surface how to
+    # schedule it. We do NOT auto-create the cron job — scheduling a recurring
+    # task is a side effect the user should opt into, and do_install runs on
+    # non-interactive surfaces (slash commands / gateway) where we must not
+    # block on input(). Printing the exact command keeps consent explicit.
+    try:
+        from tools.recipes import RecipeError, recipe_spec_for_installed
+
+        try:
+            spec = recipe_spec_for_installed(bundle.name)
+        except RecipeError as _rec_err:
+            c.print(f"[yellow]Recipe block present but invalid:[/] {_rec_err}\n")
+            spec = None
+        if spec is not None:
+            c.print(
+                f"[bold cyan]Recipe:[/] '{bundle.name}' is an automation "
+                f"(schedule [bold]{spec.schedule}[/])."
+            )
+            c.print(
+                "[dim]Schedule it with:[/] "
+                f"[bold]hermes cron create --skill {bundle.name} "
+                f'--schedule "{spec.schedule}"[/]'
+            )
+            if spec.deliver and spec.deliver != "origin":
+                c.print(f"[dim]Recipe delivery target:[/] {spec.deliver}")
+            c.print()
+    except Exception:  # pragma: no cover - recipe detection is best-effort
+        pass
+
     if invalidate_cache:
         # Invalidate the skills prompt cache so the new skill appears immediately
         try:
