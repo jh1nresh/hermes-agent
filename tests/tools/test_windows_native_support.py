@@ -541,10 +541,12 @@ class TestSubprocessCompatHelpers:
     def test_windows_flags_zero_on_posix(self):
         from hermes_cli._subprocess_compat import (
             windows_detach_flags,
+            windows_detach_flags_without_breakaway,
             windows_hide_flags,
         )
         if sys.platform != "win32":
             assert windows_detach_flags() == 0
+            assert windows_detach_flags_without_breakaway() == 0
             assert windows_hide_flags() == 0
 
     def test_windows_detach_popen_kwargs_is_posix_equivalent_on_posix(self):
@@ -556,7 +558,9 @@ class TestSubprocessCompatHelpers:
             # branch behaviour.  Do NOT break Linux/macOS here.
             assert kwargs == {"start_new_session": True}
         else:
-            # Windows path must include creationflags with all 3 bits set.
+            # Windows path must include creationflags with all 4 bits set
+            # (including CREATE_BREAKAWAY_FROM_JOB — see the dedicated
+            # breakaway test below for the rationale).
             assert "creationflags" in kwargs
             assert kwargs["creationflags"] != 0
             # No start_new_session on Windows (silently no-op there).
@@ -567,10 +571,84 @@ class TestSubprocessCompatHelpers:
         from hermes_cli import _subprocess_compat as sc
         monkeypatch.setattr(sc, "IS_WINDOWS", True)
         flags = sc.windows_detach_flags()
-        # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW
+        # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW |
+        # CREATE_BREAKAWAY_FROM_JOB
         assert flags & 0x00000200, "missing CREATE_NEW_PROCESS_GROUP"
         assert flags & 0x00000008, "missing DETACHED_PROCESS"
         assert flags & 0x08000000, "missing CREATE_NO_WINDOW"
+        assert flags & 0x01000000, "missing CREATE_BREAKAWAY_FROM_JOB"
+
+    def test_windows_detach_flags_includes_breakaway_from_job(self, monkeypatch):
+        """CREATE_BREAKAWAY_FROM_JOB is load-bearing for the GUI-driven update path.
+
+        Without it, the gateway-respawn watcher spawned by ``hermes update``
+        (which runs under hermes-setup.exe, itself a grandchild of the
+        Electron Desktop app) gets reaped when Electron exits and its
+        Win32 job object is torn down by the OS.  Result: gateway dies
+        during update and never comes back.
+
+        Regression guard against accidentally dropping the breakaway bit.
+        """
+        from hermes_cli import _subprocess_compat as sc
+        monkeypatch.setattr(sc, "IS_WINDOWS", True)
+        assert sc.windows_detach_flags() & 0x01000000, (
+            "CREATE_BREAKAWAY_FROM_JOB (0x01000000) must remain in the "
+            "default detach flag bundle so the Desktop GUI update flow "
+            "can respawn the gateway after Electron exits."
+        )
+
+    def test_windows_detach_flags_without_breakaway_drops_only_that_bit(
+        self, monkeypatch
+    ):
+        """Fallback retry payload for restrictive job objects.
+
+        Some Windows Terminal / container configurations refuse
+        CREATE_BREAKAWAY_FROM_JOB with ERROR_ACCESS_DENIED.  Callers
+        catch ``OSError`` and retry with this payload.  It must drop ONLY
+        the breakaway bit — DETACHED_PROCESS et al. are still required
+        for the child to survive the parent's exit.
+        """
+        from hermes_cli import _subprocess_compat as sc
+        monkeypatch.setattr(sc, "IS_WINDOWS", True)
+        full = sc.windows_detach_flags()
+        fallback = sc.windows_detach_flags_without_breakaway()
+        # Fallback equals full minus the breakaway bit, nothing else changed.
+        assert fallback == full & ~0x01000000
+        # And the three "detach" bits we still need are present.
+        assert fallback & 0x00000200, "fallback missing CREATE_NEW_PROCESS_GROUP"
+        assert fallback & 0x00000008, "fallback missing DETACHED_PROCESS"
+        assert fallback & 0x08000000, "fallback missing CREATE_NO_WINDOW"
+
+    def test_launch_detached_profile_gateway_restart_inlined_watcher_uses_breakaway(self):
+        """The inlined respawn script (stringified Python passed to ``python -c``)
+        must include CREATE_BREAKAWAY_FROM_JOB so the *respawned gateway* also
+        breaks away from any job-object the watcher itself inherits.
+
+        Static check — the watcher source is built at import time and embedded
+        verbatim in the module text.  Parsing it for an exact AST node would be
+        brittle; the textual presence of the hex flag plus the symbolic name is
+        a sufficient regression guard.
+        """
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parents[2] / "hermes_cli" / "gateway.py"
+        text = src.read_text(encoding="utf-8")
+        # Find the watcher block and assert the breakaway flag appears inside it.
+        marker = "watcher = textwrap.dedent("
+        idx = text.find(marker)
+        assert idx != -1, "watcher block not found in gateway.py"
+        end = text.find(").strip()", idx)
+        assert end != -1, "watcher block end not found"
+        block = text[idx:end]
+        assert "0x01000000" in block, (
+            "Inlined respawn watcher must set CREATE_BREAKAWAY_FROM_JOB "
+            "(0x01000000) on the respawned gateway — without it, the new "
+            "gateway is reaped when the parent job is torn down."
+        )
+        assert "_CREATE_BREAKAWAY_FROM_JOB" in block, (
+            "Inlined respawn watcher must name CREATE_BREAKAWAY_FROM_JOB "
+            "symbolically so the intent is greppable."
+        )
 
 
 # ---------------------------------------------------------------------------

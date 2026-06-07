@@ -637,11 +637,24 @@ def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
     # when the user closes the terminal, leaving ``hermes update`` users
     # with no running gateway until they re-invoke ``hermes gateway``
     # manually.  The Win32 equivalent is the ``CREATE_NEW_PROCESS_GROUP |
-    # DETACHED_PROCESS | CREATE_NO_WINDOW`` creationflags bundle.
+    # DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB``
+    # creationflags bundle.
+    #
+    # ``CREATE_BREAKAWAY_FROM_JOB`` is load-bearing on the Desktop GUI
+    # update path: Electron (which spawned hermes-setup.exe → which
+    # spawned `hermes update` → which spawned the watcher) wraps its
+    # children in a Win32 job object, and quits while handing off the
+    # update.  When the OS tears down Electron's job, any descendant
+    # without the breakaway bit gets reaped along with it — including
+    # this watcher, before it gets a chance to relaunch the gateway.
+    # Result: the gateway dies during the update and never comes back.
     #
     # ``windows_detach_popen_kwargs()`` returns the right kwargs for the
     # host platform and is a no-op on POSIX (just ``start_new_session=True``).
-    from hermes_cli._subprocess_compat import windows_detach_popen_kwargs
+    from hermes_cli._subprocess_compat import (
+        windows_detach_flags_without_breakaway,
+        windows_detach_popen_kwargs,
+    )
 
     watcher = textwrap.dedent(
         """
@@ -664,6 +677,9 @@ def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
         # Platform-appropriate detach for the respawned gateway.  On POSIX
         # start_new_session=True maps to os.setsid; on Windows we need
         # explicit creationflags because start_new_session is a no-op there.
+        # CREATE_BREAKAWAY_FROM_JOB matters here for the same reason it
+        # mattered when this watcher itself was spawned — without it, the
+        # respawned gateway can be reaped by the parent's job teardown.
         _popen_kwargs = {
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
@@ -672,32 +688,68 @@ def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
             _CREATE_NEW_PROCESS_GROUP = 0x00000200
             _DETACHED_PROCESS = 0x00000008
             _CREATE_NO_WINDOW = 0x08000000
-            _popen_kwargs["creationflags"] = (
-                _CREATE_NEW_PROCESS_GROUP | _DETACHED_PROCESS | _CREATE_NO_WINDOW
+            _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+            _flags = (
+                _CREATE_NEW_PROCESS_GROUP
+                | _DETACHED_PROCESS
+                | _CREATE_NO_WINDOW
+                | _CREATE_BREAKAWAY_FROM_JOB
             )
+            try:
+                _popen_kwargs["creationflags"] = _flags
+                subprocess.Popen(cmd, **_popen_kwargs)
+            except OSError:
+                # CREATE_BREAKAWAY_FROM_JOB can fail with ERROR_ACCESS_DENIED
+                # when the parent's job object doesn't permit breakaway.
+                # Retry without it — in most setups DETACHED_PROCESS is
+                # enough on its own.
+                _popen_kwargs["creationflags"] = _flags & ~_CREATE_BREAKAWAY_FROM_JOB
+                subprocess.Popen(cmd, **_popen_kwargs)
         else:
             _popen_kwargs["start_new_session"] = True
-        subprocess.Popen(cmd, **_popen_kwargs)
+            subprocess.Popen(cmd, **_popen_kwargs)
         """
     ).strip()
 
+    watcher_argv = [
+        sys.executable,
+        "-c",
+        watcher,
+        str(old_pid),
+        *_gateway_run_args_for_profile(profile),
+    ]
+
+    # Same platform-aware detach for the watcher process itself — so
+    # closing the user's terminal (or Electron exiting after handing
+    # off the update) doesn't kill the watcher before it can respawn
+    # the gateway.
     try:
-        # Same platform-aware detach for the watcher process itself — so
-        # closing the user's terminal doesn't kill the watcher.
         subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                watcher,
-                str(old_pid),
-                *_gateway_run_args_for_profile(profile),
-            ],
+            watcher_argv,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             **windows_detach_popen_kwargs(),
         )
     except OSError:
-        return False
+        # CREATE_BREAKAWAY_FROM_JOB rejected by the parent job object —
+        # retry without it.  Detach is still best-effort via
+        # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP + CREATE_NO_WINDOW.
+        # On POSIX this branch is unreachable (start_new_session always
+        # succeeds), so the fallback path is Windows-only in practice.
+        try:
+            fallback_kwargs: dict = (
+                {"creationflags": windows_detach_flags_without_breakaway()}
+                if sys.platform == "win32"
+                else {"start_new_session": True}
+            )
+            subprocess.Popen(
+                watcher_argv,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                **fallback_kwargs,
+            )
+        except OSError:
+            return False
     return True
 
 

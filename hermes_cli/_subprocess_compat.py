@@ -35,6 +35,7 @@ __all__ = [
     "IS_WINDOWS",
     "resolve_node_command",
     "windows_detach_flags",
+    "windows_detach_flags_without_breakaway",
     "windows_hide_flags",
     "windows_detach_popen_kwargs",
 ]
@@ -97,6 +98,7 @@ def resolve_node_command(name: str, argv: Sequence[str]) -> list[str]:
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _DETACHED_PROCESS = 0x00000008
 _CREATE_NO_WINDOW = 0x08000000
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 
 def windows_detach_flags() -> int:
@@ -116,6 +118,39 @@ def windows_detach_flags() -> int:
     - ``CREATE_NO_WINDOW`` — suppress the brief cmd flash that would
       otherwise appear when launching a console app.  Redundant with
       DETACHED_PROCESS but explicit for clarity.
+    - ``CREATE_BREAKAWAY_FROM_JOB`` — escape any Win32 job object the
+      parent process is wrapped in.  Electron (Desktop GUI) and some
+      Windows Terminal configs wrap their children in a job object;
+      when the parent exits, the OS tears down its job, which would
+      otherwise reap *detached* grandchildren (e.g. the post-update
+      gateway-respawn watcher) along with it.  Without this flag, the
+      Desktop GUI's "update + relaunch gateway" handoff fails on
+      Windows: Electron quits while handing off to hermes-setup.exe,
+      its job is torn down, and the gateway-respawn watcher dies
+      before it can relaunch the gateway.
+
+      Some restrictive job-object configurations refuse breakaway with
+      ERROR_ACCESS_DENIED.  Callers spawning a Popen with these flags
+      should be prepared to retry without ``CREATE_BREAKAWAY_FROM_JOB``
+      if the first attempt raises ``OSError`` — see
+      ``windows_detach_flags_without_breakaway`` below.
+    """
+    if not IS_WINDOWS:
+        return 0
+    return (
+        _CREATE_NEW_PROCESS_GROUP
+        | _DETACHED_PROCESS
+        | _CREATE_NO_WINDOW
+        | _CREATE_BREAKAWAY_FROM_JOB
+    )
+
+
+def windows_detach_flags_without_breakaway() -> int:
+    """Same as :func:`windows_detach_flags` minus ``CREATE_BREAKAWAY_FROM_JOB``.
+
+    Use as the retry payload when a Popen with the full detach bundle
+    raises ``OSError`` (typically ERROR_ACCESS_DENIED from a job object
+    that doesn't permit breakaway).  0 on non-Windows.
     """
     if not IS_WINDOWS:
         return 0
