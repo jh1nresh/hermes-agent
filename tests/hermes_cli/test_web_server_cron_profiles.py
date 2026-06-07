@@ -197,3 +197,41 @@ async def test_cron_profile_validation_errors(isolated_profiles):
     with pytest.raises(HTTPException) as missing:
         await web_server.list_cron_jobs(profile="missing_profile")
     assert missing.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_cron_job_runs_filters_prefix_and_respects_limit(isolated_profiles):
+    from hermes_cli import web_server
+    from hermes_state import SessionDB
+
+    worker_job = web_server._call_cron_for_profile(
+        "worker_alpha",
+        "create_job",
+        prompt="worker run history",
+        schedule="every 30m",
+        name="worker-runs",
+    )
+    prefix = f"cron_{worker_job['id']}_"
+
+    worker_db = SessionDB(db_path=isolated_profiles["worker_alpha"] / "state.db")
+    default_db = SessionDB(db_path=isolated_profiles["default"] / "state.db")
+    try:
+        worker_db.create_session(f"{prefix}20260606_100001", source="cron")
+        worker_db.create_session("cron_other_job_20260606_100002", source="cron")
+        worker_db.create_session(f"{prefix}20260606_100003", source="cron")
+
+        # Same prefix in another profile must not leak into worker results.
+        default_db.create_session(f"{prefix}20260606_100004", source="cron")
+    finally:
+        worker_db.close()
+        default_db.close()
+
+    payload = await web_server.list_cron_job_runs(worker_job["id"], limit=2)
+    runs = payload["runs"]
+
+    assert payload["limit"] == 2
+    assert [run["id"] for run in runs] == [
+        f"{prefix}20260606_100003",
+        f"{prefix}20260606_100001",
+    ]
+    assert all(run.get("profile") == "worker_alpha" for run in runs)

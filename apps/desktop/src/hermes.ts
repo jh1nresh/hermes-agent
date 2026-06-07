@@ -42,6 +42,7 @@ import type {
 } from '@/types/hermes'
 
 const DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS = 30_000
+const CRON_API_TIMEOUT_MS = 60_000
 
 export type {
   ActionResponse,
@@ -495,7 +496,8 @@ export function testMessagingPlatform(platformId: string): Promise<MessagingPlat
 
 export function getCronJobs(): Promise<CronJob[]> {
   return window.hermesDesktop.api<CronJob[]>({
-    path: '/api/cron/jobs'
+    path: '/api/cron/jobs',
+    timeoutMs: CRON_API_TIMEOUT_MS
   })
 }
 
@@ -507,7 +509,8 @@ export function getCronJob(jobId: string): Promise<CronJob> {
 
 export async function getCronJobRuns(jobId: string, limit = 20): Promise<SessionInfo[]> {
   const { runs } = await window.hermesDesktop.api<{ runs: SessionInfo[] }>({
-    path: `/api/cron/jobs/${encodeURIComponent(jobId)}/runs?limit=${limit}`
+    path: `/api/cron/jobs/${encodeURIComponent(jobId)}/runs?limit=${limit}`,
+    timeoutMs: CRON_API_TIMEOUT_MS
   })
 
   return runs ?? []

@@ -1880,6 +1880,82 @@ class SessionDB:
             s["preview"] = ""
         return s
 
+    def list_sessions_rich_by_id_prefix(
+        self,
+        id_prefix: str,
+        *,
+        source: str = None,
+        limit: int = 20,
+        offset: int = 0,
+        include_archived: bool = False,
+        archived_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """List rich session rows whose IDs start with ``id_prefix``.
+
+        Fast path for namespaces encoded directly in session IDs (for example
+        cron run sessions ``cron_<job_id>_<timestamp>``). Uses ``LIKE 'prefix%'``
+        so SQLite can leverage the primary-key index on ``sessions.id`` instead
+        of the heavier substring/chain path in ``list_sessions_rich(id_query=...)``.
+        """
+        prefix = (id_prefix or "").strip()
+        if not prefix or limit <= 0:
+            return []
+
+        escaped_prefix = (
+            prefix
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+
+        where_clauses = ["s.id LIKE ? ESCAPE '\\'"]
+        params: List[Any] = [f"{escaped_prefix}%"]
+
+        if source:
+            where_clauses.append("s.source = ?")
+            params.append(source)
+        if archived_only:
+            where_clauses.append("s.archived = 1")
+        elif not include_archived:
+            where_clauses.append("s.archived = 0")
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}"
+        query = f"""
+            SELECT s.*,
+                COALESCE(
+                    (SELECT SUBSTR(REPLACE(REPLACE(m.content, X'0A', ' '), X'0D', ' '), 1, 63)
+                     FROM messages m
+                     WHERE m.session_id = s.id AND m.role = 'user' AND m.content IS NOT NULL
+                     ORDER BY m.timestamp, m.id LIMIT 1),
+                    ''
+                ) AS _preview_raw,
+                COALESCE(
+                    (SELECT MAX(m2.timestamp) FROM messages m2 WHERE m2.session_id = s.id),
+                    s.started_at
+                ) AS last_active
+            FROM sessions s
+            {where_sql}
+            ORDER BY last_active DESC, s.started_at DESC, s.id DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+
+        with self._lock:
+            cursor = self._conn.execute(query, params)
+            rows = cursor.fetchall()
+
+        sessions: List[Dict[str, Any]] = []
+        for row in rows:
+            s = dict(row)
+            raw = s.pop("_preview_raw", "").strip()
+            if raw:
+                text = raw[:60]
+                s["preview"] = text + ("..." if len(raw) > 60 else "")
+            else:
+                s["preview"] = ""
+            sessions.append(s)
+        return sessions
+
     # =========================================================================
     # Message storage
     # =========================================================================

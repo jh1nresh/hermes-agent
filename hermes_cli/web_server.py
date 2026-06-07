@@ -5676,12 +5676,11 @@ async def list_cron_job_runs(job_id: str, profile: Optional[str] = None, limit: 
 
     db = _open_session_db_for_profile(selected)
     try:
-        runs = db.list_sessions_rich(
+        runs = db.list_sessions_rich_by_id_prefix(
+            f"cron_{canonical}_",
             source="cron",
-            id_query=f"cron_{canonical}_",
             limit=limit_n,
             offset=0,
-            order_by_last_active=True,
         )
         now = time.time()
         for s in runs:
