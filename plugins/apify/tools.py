@@ -1,12 +1,15 @@
-"""Apify Actor execution tools — discover, start, collect."""
+"""Apify Actor execution tools — discover, start, collect.
+
+Handlers and schemas for the three Apify tools. Registration happens in
+``plugins/apify/__init__.py`` via ``ctx.register_tool()`` (the plugin API),
+not via direct ``registry.register()`` calls.
+"""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 from typing import Any, Dict, List
-
-from tools.registry import registry
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +28,12 @@ def _attr(obj: Any, key: str, default: Any = None) -> Any:
 
 
 def _get_client() -> Any:
-    from tools.apify_client import get_apify_client
+    from plugins.apify.client import get_apify_client
     return get_apify_client()
 
 
 def _check_token() -> bool:
-    from tools.apify_client import check_apify_api_key
+    from plugins.apify.client import check_apify_api_key
     return check_apify_api_key()
 
 
@@ -385,36 +388,3 @@ _COLLECT_SCHEMA: Dict[str, Any] = {
         "required": ["runs"],
     },
 }
-
-
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-registry.register(
-    name="apify_discover",
-    toolset="apify",
-    schema=_DISCOVER_SCHEMA,
-    handler=lambda args, **kw: _discover_handler(args),
-    check_fn=_check_token,
-    emoji="🔍",
-)
-
-registry.register(
-    name="apify_start",
-    toolset="apify",
-    schema=_START_SCHEMA,
-    handler=lambda args, **kw: _start_handler(args),
-    check_fn=_check_token,
-    emoji="▶️",
-)
-
-registry.register(
-    name="apify_collect",
-    toolset="apify",
-    schema=_COLLECT_SCHEMA,
-    handler=lambda args, **kw: _collect_handler(args),
-    check_fn=_check_token,
-    is_async=True,
-    emoji="📦",
-)

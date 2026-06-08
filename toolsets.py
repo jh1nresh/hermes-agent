@@ -68,8 +68,6 @@ _HERMES_CORE_TOOLS = [
     "kanban_complete", "kanban_block", "kanban_heartbeat",
     "kanban_comment", "kanban_create", "kanban_link",
     "kanban_unblock",
-    # Apify Actor execution (gated on APIFY_API_TOKEN via check_fn)
-    "apify_discover", "apify_start", "apify_collect",
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
     "computer_use",
 ]

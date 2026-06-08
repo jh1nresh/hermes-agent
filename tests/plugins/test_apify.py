@@ -1,4 +1,4 @@
-"""Tests for tools/apify_tool.py — all mocked, no live Actor calls."""
+"""Tests for plugins/apify/tools.py — all mocked, no live Actor calls."""
 from __future__ import annotations
 
 import json
@@ -21,7 +21,7 @@ def mock_client(monkeypatch):
     """
     client = MagicMock()
     monkeypatch.setattr(
-        "tools.apify_tool._get_client",
+        "plugins.apify.tools._get_client",
         lambda: client,
     )
     return client
@@ -53,7 +53,7 @@ class TestDiscoverStoreSearch:
         list_result.items = [actor_mock]
         mock_client.store.return_value.list.return_value = list_result
 
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"query": "instagram scraper"})
 
         assert "actors" in result
@@ -81,7 +81,7 @@ class TestDiscoverStoreSearch:
         list_result.items = [actor_mock]
         mock_client.store.return_value.list.return_value = list_result
 
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"query": "test"})
 
         assert len(result["actors"][0]["description"]) == 200
@@ -89,7 +89,7 @@ class TestDiscoverStoreSearch:
     def test_store_search_api_error_returns_error_dict(self, mock_client):
         mock_client.store.return_value.list.side_effect = RuntimeError("API error")
 
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"query": "test"})
 
         assert "error" in result
@@ -125,7 +125,7 @@ class TestDiscoverActorSchema:
         schema = {"type": "object", "properties": {"query": {"type": "string"}}}
         self._setup_build_mock(mock_client, input_schema=schema, readme="# README content")
 
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"actor_id": "apify~google-search-scraper"})
 
         assert result["actor_id"] == "apify~google-search-scraper"
@@ -141,7 +141,7 @@ class TestDiscoverActorSchema:
     def test_readme_truncated_to_3000_chars(self, mock_client):
         self._setup_build_mock(mock_client, readme="R" * 4000)
 
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"actor_id": "apify~google-search-scraper"})
 
         assert len(result["readme"]) == 3000
@@ -152,7 +152,7 @@ class TestDiscoverActorSchema:
         build_detail.inputSchema = '{"type":"object"}'
         build_detail.actorDefinition.input = None
 
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"actor_id": "apify~google-search-scraper"})
 
         assert result["input_schema"] == '{"type":"object"}'
@@ -160,7 +160,7 @@ class TestDiscoverActorSchema:
     def test_actor_not_found_returns_error(self, mock_client):
         mock_client.actor.return_value.get.return_value = None
 
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"actor_id": "apify~nonexistent"})
 
         assert "error" in result
@@ -173,20 +173,20 @@ class TestDiscoverActorSchema:
 
 class TestDiscoverValidation:
     def test_missing_both_params_returns_error(self, mock_client):
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({})
         assert "error" in result
         assert "query" in result["error"]
         assert "actor_id" in result["error"]
 
     def test_empty_string_params_treated_as_missing(self, mock_client):
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"query": "  ", "actor_id": ""})
         assert "error" in result
 
     def test_interrupted_returns_error(self, mock_client, monkeypatch):
         monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: True)
-        from tools.apify_tool import _discover_handler
+        from plugins.apify.tools import _discover_handler
         result = _discover_handler({"query": "test"})
         assert result == {"error": "Interrupted"}
         mock_client.store.assert_not_called()
@@ -207,7 +207,7 @@ class TestStart:
     def test_single_run_returns_run_ref(self, mock_client):
         mock_client.actor.return_value.start.return_value = self._make_run_mock()
 
-        from tools.apify_tool import _start_handler
+        from plugins.apify.tools import _start_handler
         result = _start_handler({
             "runs": [{"actor_id": "apify~test", "input": {"key": "val"}}]
         })
@@ -226,7 +226,7 @@ class TestStart:
     def test_label_included_when_provided(self, mock_client):
         mock_client.actor.return_value.start.return_value = self._make_run_mock()
 
-        from tools.apify_tool import _start_handler
+        from plugins.apify.tools import _start_handler
         result = _start_handler({
             "runs": [{"actor_id": "apify~test", "input": {}, "label": "my-run"}]
         })
@@ -236,7 +236,7 @@ class TestStart:
     def test_label_absent_when_not_provided(self, mock_client):
         mock_client.actor.return_value.start.return_value = self._make_run_mock()
 
-        from tools.apify_tool import _start_handler
+        from plugins.apify.tools import _start_handler
         result = _start_handler({
             "runs": [{"actor_id": "apify~test", "input": {}}]
         })
@@ -248,7 +248,7 @@ class TestStart:
         run2 = self._make_run_mock(run_id="r2", dataset_id="d2")
         mock_client.actor.return_value.start.side_effect = [run1, run2]
 
-        from tools.apify_tool import _start_handler
+        from plugins.apify.tools import _start_handler
         result = _start_handler({
             "runs": [
                 {"actor_id": "apify~actor-a", "input": {}},
@@ -263,7 +263,7 @@ class TestStart:
     def test_per_run_api_error_goes_to_errors(self, mock_client):
         mock_client.actor.return_value.start.side_effect = RuntimeError("not found")
 
-        from tools.apify_tool import _start_handler
+        from plugins.apify.tools import _start_handler
         result = _start_handler({
             "runs": [{"actor_id": "apify~bad-actor", "input": {}}]
         })
@@ -275,7 +275,7 @@ class TestStart:
     def test_interrupted_returns_early(self, mock_client, monkeypatch):
         monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: True)
 
-        from tools.apify_tool import _start_handler
+        from plugins.apify.tools import _start_handler
         result = _start_handler({"runs": [{"actor_id": "apify~test", "input": {}}]})
 
         assert result == {"error": "Interrupted"}
@@ -296,7 +296,7 @@ class TestStart:
         interrupted_after_first = iter([False, False, True])
         monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: next(interrupted_after_first))
 
-        from tools.apify_tool import _start_handler
+        from plugins.apify.tools import _start_handler
         result = _start_handler({
             "runs": [
                 {"actor_id": "apify~actor-a", "input": {}},
@@ -309,7 +309,7 @@ class TestStart:
         assert len(result["runs"]) == 1
 
     def test_batch_over_limit_returns_error(self, mock_client):
-        from tools.apify_tool import _start_handler, _MAX_BATCH_RUNS
+        from plugins.apify.tools import _start_handler, _MAX_BATCH_RUNS
         oversized = [{"actor_id": f"apify~actor-{i}", "input": {}} for i in range(_MAX_BATCH_RUNS + 1)]
         result = _start_handler({"runs": oversized})
         assert "error" in result
@@ -328,7 +328,7 @@ class TestCollectNonTerminal:
         run_info.status = "RUNNING"
         mock_client.run.return_value.get.return_value = run_info
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -346,7 +346,7 @@ class TestCollectNonTerminal:
         run_info.status = "QUEUED"
         mock_client.run.return_value.get.return_value = run_info
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -360,7 +360,7 @@ class TestCollectNonTerminal:
         run_info.status = "FAILED"
         mock_client.run.return_value.get.return_value = run_info
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -375,7 +375,7 @@ class TestCollectNonTerminal:
         run_info.status = "ABORTED"
         mock_client.run.return_value.get.return_value = run_info
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -386,7 +386,7 @@ class TestCollectNonTerminal:
     async def test_run_not_found_goes_to_errors(self, mock_client):
         mock_client.run.return_value.get.return_value = None
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -399,7 +399,7 @@ class TestCollectNonTerminal:
         run_info.status = "RUNNING"
         mock_client.run.return_value.get.return_value = run_info
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1", "label": "instagram"}]
         })
@@ -423,7 +423,7 @@ class TestCollectSucceeded:
         dataset_result.items = items
         mock_client.dataset.return_value.list_items.return_value = dataset_result
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -436,7 +436,7 @@ class TestCollectSucceeded:
         assert "<<<EXTERNAL_UNTRUSTED_CONTENT>>>" in c["data"]
         assert "<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>" in c["data"]
         assert "Result 1" in c["data"]
-        from tools.apify_tool import _COLLECT_DEFAULT_LIMIT
+        from plugins.apify.tools import _COLLECT_DEFAULT_LIMIT
         mock_client.dataset.return_value.list_items.assert_called_once_with(limit=_COLLECT_DEFAULT_LIMIT)
         mock_client.dataset.assert_called_once_with("d1")
 
@@ -452,7 +452,7 @@ class TestCollectSucceeded:
         dataset_result.items = items
         mock_client.dataset.return_value.list_items.return_value = dataset_result
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -472,7 +472,7 @@ class TestCollectSucceeded:
         mock_client.run.return_value.get.return_value = run_info
         mock_client.dataset.return_value.list_items.return_value = MagicMock(items=[])
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -482,7 +482,7 @@ class TestCollectSucceeded:
 
     @pytest.mark.asyncio
     async def test_may_have_more_set_when_result_count_equals_limit(self, mock_client):
-        from tools.apify_tool import _collect_handler, _COLLECT_DEFAULT_LIMIT
+        from plugins.apify.tools import _collect_handler, _COLLECT_DEFAULT_LIMIT
         run_info = MagicMock()
         run_info.status = "SUCCEEDED"
         mock_client.run.return_value.get.return_value = run_info
@@ -502,7 +502,7 @@ class TestCollectSucceeded:
         mock_client.run.return_value.get.return_value = run_info
         mock_client.dataset.return_value.list_items.return_value = MagicMock(items=[{"i": 0}])
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -516,7 +516,7 @@ class TestCollectSucceeded:
         mock_client.run.return_value.get.return_value = run_info
         mock_client.dataset.return_value.list_items.return_value = MagicMock(items=[])
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}],
             "limit": 500,
@@ -548,7 +548,7 @@ class TestCollectMixed:
         mock_client.run.side_effect = _run_get_side_effect
         mock_client.dataset.return_value.list_items.return_value = MagicMock(items=[{"result": 1}])
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [
                 {"run_id": "r1", "actor_id": "apify~a", "dataset_id": "d1"},
@@ -566,7 +566,7 @@ class TestCollectMixed:
     async def test_interrupted_returns_early(self, mock_client, monkeypatch):
         monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: True)
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -578,7 +578,7 @@ class TestCollectMixed:
     async def test_api_exception_goes_to_errors(self, mock_client):
         mock_client.run.return_value.get.side_effect = RuntimeError("API error")
 
-        from tools.apify_tool import _collect_handler
+        from plugins.apify.tools import _collect_handler
         result = await _collect_handler({
             "runs": [{"run_id": "r1", "actor_id": "apify~test", "dataset_id": "d1"}]
         })
@@ -597,7 +597,7 @@ class TestCollectFullWorkflow:
         run2 = MagicMock(id="r2", default_dataset_id="d2", status="QUEUED")
         mock_client.actor.return_value.start.side_effect = [run1, run2]
 
-        from tools.apify_tool import _start_handler, _collect_handler
+        from plugins.apify.tools import _start_handler, _collect_handler
 
         start_result = _start_handler({
             "runs": [

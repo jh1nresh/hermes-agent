@@ -1,13 +1,17 @@
 """Shared Apify SDK client — lazy import, token validation, and cache.
 
-Extracted so both the web-search provider (plugins/web/apify/provider.py) and
-the Actor execution tools (tools/apify_tool.py) can import the client without
-depending on each other.
+Used by the Apify Actor execution tools (plugins/apify/tools.py). The
+``apify-client`` SDK is installed on demand via ``tools.lazy_deps`` so the
+dependency is only pulled when the user actually enables the plugin and runs
+an Actor.
 """
 from __future__ import annotations
 
 import os
 from typing import Any, Optional
+
+# Sent with every request so Apify can attribute traffic to this integration.
+_HERMES_HEADERS = {"x-apify-integration-platform": "hermes-agent"}
 
 _CLIENT_CLS: Optional[type] = None
 _CLIENT: Optional[Any] = None
@@ -49,7 +53,7 @@ def get_apify_client() -> Any:
     client_config = ("direct", api_token)
     if _CLIENT is not None and _CLIENT_CONFIG == client_config:
         return _CLIENT
-    _CLIENT = _load_client_cls()(token=api_token)
+    _CLIENT = _load_client_cls()(token=api_token, headers=_HERMES_HEADERS)
     _CLIENT_CONFIG = client_config
     return _CLIENT
 
