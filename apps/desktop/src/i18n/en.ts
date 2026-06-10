@@ -1,4 +1,5 @@
 import { FIELD_DESCRIPTIONS, FIELD_LABELS } from '@/app/settings/constants'
+import { formatCombo } from '@/lib/keybinds/combo'
 
 import type { Translations } from './types'
 
@@ -518,7 +519,7 @@ export const en: Translations = {
       loading: 'Loading archived sessions…',
       archivedTitle: 'Archived sessions',
       archivedIntro:
-        'Archived chats are hidden from the sidebar but keep all their messages. Ctrl/⌘-click a chat in the sidebar to archive it.',
+        `Archived chats are hidden from the sidebar but keep all their messages. ${formatCombo('mod')}-click a chat in the sidebar to archive it.`,
       emptyArchivedTitle: 'Nothing archived',
       emptyArchivedDesc: 'Archive a chat to hide it here.',
       unarchive: 'Unarchive',
@@ -529,7 +530,7 @@ export const en: Translations = {
       defaultDirTitle: 'Default project directory',
       defaultDirDesc:
         'New sessions start in this folder unless you pick another. Leave it unset to use your home directory.',
-      defaultDirUpdated: 'Default project directory updated — start a new chat (Ctrl/⌘+N) for it to take effect',
+      defaultDirUpdated: `Default project directory updated — start a new chat (${formatCombo('mod+n')}) for it to take effect`,
       defaultsTo: label => `Defaults to ${label}.`,
       change: 'Change',
       choose: 'Choose',
@@ -1677,7 +1678,7 @@ export const en: Translations = {
       loadingQuestion: 'Loading question…',
       other: 'Other (type your answer)',
       placeholder: 'Type your answer…',
-      shortcut: '⌘/Ctrl + Enter to send',
+      shortcut: `${formatCombo('mod+enter')} to send`,
       back: 'Back',
       skip: 'Skip',
       send: 'Send'

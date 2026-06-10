@@ -10,6 +10,7 @@ import type { SessionInfo } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
 import { sessionTitle } from '@/lib/chat-runtime'
 import { triggerHaptic } from '@/lib/haptics'
+import { modKey } from '@/lib/keybinds/combo'
 import { handoffOriginSource, sessionSourceLabel } from '@/lib/session-source'
 import { cn } from '@/lib/utils'
 import { $attentionSessionIds } from '@/store/session'
@@ -133,11 +134,11 @@ export function SidebarSessionRow({
               return
             }
 
-            // ⌘-click (mac) / ⌃-click (win/linux) pops the chat into its own
+            // ⌘-click (mac) / Ctrl-click (win/linux) pops the chat into its own
             // window — the universal "open in a new window" gesture. Archive
             // lives in the row's ⋯ and right-click menus. Falls through to a
             // normal resume when standalone windows aren't available (web embed).
-            if ((event.metaKey || event.ctrlKey) && canOpenSessionWindow()) {
+            if (event[modKey] && canOpenSessionWindow()) {
               event.preventDefault()
               event.stopPropagation()
               triggerHaptic('selection')

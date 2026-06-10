@@ -91,6 +91,7 @@ import { CommandPalette } from './command-palette'
 import { useGatewayBoot } from './gateway/hooks/use-gateway-boot'
 import { useGatewayRequest } from './gateway/hooks/use-gateway-request'
 import { useKeybinds } from './hooks/use-keybinds'
+import { modKey } from '@/lib/keybinds/combo'
 import { SIDEBAR_COLLAPSE_MEDIA_QUERY } from './layout-constants'
 import { ModelPickerOverlay } from './model-picker-overlay'
 import { ModelVisibilityOverlay } from './model-visibility-overlay'
@@ -271,7 +272,7 @@ export function DesktopController() {
         return
       }
 
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'w') {
+      if (event[modKey] && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'w') {
         event.preventDefault()
         event.stopPropagation()
         closeActiveRightRailTab()
