@@ -612,11 +612,52 @@ def find_profile_gateway_processes(
 
 
 def _gateway_run_args_for_profile(profile: str) -> list[str]:
-    args = [get_python_path(), "-m", "hermes_cli.main"]
+    python_exe = get_python_path()
+    if is_windows():
+        # uv-created venv launchers are a trap here: ``venv\Scripts\pythonw.exe``
+        # starts hidden but then re-execs the *base* interpreter as a console
+        # ``python.exe`` — and that re-exec is a fresh CreateProcess that does
+        # NOT inherit our CREATE_NO_WINDOW flag, so a blank console window pops
+        # up.  That's exactly what users hit when the gateway is respawned after
+        # a Desktop-GUI ``hermes update``.  Resolve the base ``pythonw.exe``
+        # directly — the same path ``_spawn_detached`` / ``_build_gateway_argv``
+        # take for ``hermes gateway start`` — so the post-update respawn is
+        # windowless.  The matching VIRTUAL_ENV / PYTHONPATH overlay is applied
+        # to the spawn env in ``launch_detached_profile_gateway_restart`` so
+        # imports still resolve without the venv launcher shim.
+        from hermes_cli.gateway_windows import _resolve_detached_python
+
+        python_exe, _venv_dir, _extra_pythonpath = _resolve_detached_python(python_exe)
+    args = [python_exe, "-m", "hermes_cli.main"]
     if profile != "default":
         args.extend(["--profile", profile])
     args.extend(["gateway", "run", "--replace"])
     return args
+
+
+def _gateway_respawn_env(spawn_env: dict[str, str]) -> dict[str, str]:
+    """Overlay VIRTUAL_ENV / PYTHONPATH so a base-``pythonw.exe`` respawn can
+    import ``hermes_cli`` without the venv launcher shim.
+
+    Returns ``spawn_env`` unchanged on non-Windows so the POSIX spawn path is
+    byte-for-byte identical to the pre-fix behaviour (it inherits ``os.environ``
+    exactly as before).  On Windows it mirrors what ``_build_gateway_argv`` does
+    for ``hermes gateway start``: point VIRTUAL_ENV at the venv and prepend the
+    repo root plus base-interpreter site-packages to PYTHONPATH.
+    """
+    if not is_windows():
+        return spawn_env
+    from hermes_cli.gateway_windows import (
+        _prepend_pythonpath,
+        _resolve_detached_python,
+    )
+
+    _python, venv_dir, extra_pythonpath = _resolve_detached_python(get_python_path())
+    spawn_env["VIRTUAL_ENV"] = str(venv_dir)
+    spawn_env["PYTHONIOENCODING"] = "utf-8"
+    spawn_env["HERMES_GATEWAY_DETACHED"] = "1"
+    _prepend_pythonpath(spawn_env, [str(PROJECT_ROOT), *extra_pythonpath])
+    return spawn_env
 
 
 def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
@@ -703,13 +744,32 @@ def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
         """
     ).strip()
 
+    # Resolve the watcher interpreter to the windowless base ``pythonw.exe``
+    # on Windows for the same reason as the respawned gateway (see
+    # ``_gateway_run_args_for_profile``): ``sys.executable`` during a
+    # GUI-driven ``hermes update`` is a console ``python.exe`` whose uv venv
+    # launcher re-execs a visible console.  ``_resolve_detached_python`` is a
+    # no-op shape on non-Windows callers because we only consult it under the
+    # ``is_windows()`` guard below.
+    watcher_python = sys.executable
+    if is_windows():
+        from hermes_cli.gateway_windows import _resolve_detached_python
+
+        watcher_python, _wv, _wpp = _resolve_detached_python(sys.executable)
+
     watcher_argv = [
-        sys.executable,
+        watcher_python,
         "-c",
         watcher,
         str(old_pid),
         *_gateway_run_args_for_profile(profile),
     ]
+
+    # The watcher inherits this env and the respawned gateway inherits it from
+    # the watcher, so the base-``pythonw.exe`` legs can import ``hermes_cli``
+    # without the venv launcher shim.  No-op on POSIX (returns os.environ copy
+    # unchanged), preserving the pre-fix spawn behaviour bit-for-bit there.
+    spawn_env = _gateway_respawn_env(dict(os.environ))
 
     # Same platform-aware detach for the watcher process itself — so
     # closing the user's terminal doesn't kill the watcher.
@@ -718,6 +778,7 @@ def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
             watcher_argv,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=spawn_env,
             **windows_detach_popen_kwargs(),
         )
     except OSError:
@@ -736,6 +797,7 @@ def launch_detached_profile_gateway_restart(profile: str, old_pid: int) -> bool:
                 watcher_argv,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=spawn_env,
                 **fallback_kwargs,
             )
         except OSError:
