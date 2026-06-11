@@ -555,6 +555,88 @@ def read_runtime_status() -> Optional[dict[str, Any]]:
     return _read_json_file(_get_runtime_status_path())
 
 
+# ---------------------------------------------------------------------------
+# HTTP management API discovery
+# ---------------------------------------------------------------------------
+#
+# While the gateway is running it writes its HTTP management API address
+# (host, port, token) to ``{HERMES_HOME}/gateway_http.json``.  Any caller
+# (dashboard, desktop, CLI tool) that wants to proxy a request to a specific
+# profile's gateway reads this file to find where to connect.
+#
+# The file is profile-scoped because HERMES_HOME is profile-scoped: the
+# "default" profile writes to ``~/.hermes/gateway_http.json`` and a named
+# profile "worker" writes to ``~/.hermes/profiles/worker/gateway_http.json``.
+#
+# The PID in the file is checked for liveness so stale files from crashed
+# gateways are treated as "not running".
+# ---------------------------------------------------------------------------
+
+_GATEWAY_HTTP_FILE = "gateway_http.json"
+
+
+def _get_gateway_http_path(hermes_home: Optional[Path] = None) -> Path:
+    home = hermes_home if hermes_home is not None else get_hermes_home()
+    return home / _GATEWAY_HTTP_FILE
+
+
+def write_gateway_http_info(
+    host: str,
+    port: int,
+    token: str,
+    hermes_home: Optional[Path] = None,
+) -> None:
+    """Persist this gateway's HTTP management API info so other processes can find it."""
+    path = _get_gateway_http_path(hermes_home)
+    _write_json_file(path, {
+        "host": host,
+        "port": port,
+        "token": token,
+        "pid": os.getpid(),
+        "base_url": f"http://{host}:{port}",
+        "ws_url": f"ws://{host}:{port}/api/ws",
+    })
+
+
+def remove_gateway_http_info(hermes_home: Optional[Path] = None) -> None:
+    """Remove this gateway's HTTP management API info on shutdown (best-effort)."""
+    path = _get_gateway_http_path(hermes_home)
+    if not path.exists():
+        return
+    # Only remove if it belongs to this process, to avoid clobbering a
+    # replacement gateway that already wrote its own file.
+    try:
+        data = _read_json_file(path)
+        if data and data.get("pid") == os.getpid():
+            path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def read_gateway_http_info(hermes_home: Optional[Path] = None) -> Optional[dict[str, Any]]:
+    """Read and validate a gateway's HTTP management API info.
+
+    Returns ``None`` when no gateway is running (file absent, stale PID, or
+    corrupt JSON).  Callers should fall back to direct file access when this
+    returns ``None``.
+    """
+    path = _get_gateway_http_path(hermes_home)
+    data = _read_json_file(path)
+    if not data:
+        return None
+    pid = data.get("pid")
+    if pid and not _pid_exists(int(pid)):
+        # Stale file from a crashed gateway — clean up silently.
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return None
+    if not data.get("port") or not data.get("token"):
+        return None
+    return data
+
+
 def remove_pid_file() -> None:
     """Remove the gateway PID file, but only if it belongs to this process.
 

@@ -16046,6 +16046,7 @@ async def start_gateway(
         try:
             import secrets
             from gateway.http_api import run_http_server as _run_http_server
+            from gateway.status import write_gateway_http_info, remove_gateway_http_info
             
             # Generate token if not provided
             http_token = config.http_token or secrets.token_urlsafe(32)
@@ -16059,6 +16060,11 @@ async def start_gateway(
             )
             config.http_port = actual_port
             logger.info("HTTP Management API started on %s:%d", config.http_host, actual_port)
+            
+            # Publish host/port/token so dashboard, desktop, and other tools
+            # can discover this gateway without needing to spawn it themselves.
+            write_gateway_http_info(config.http_host, actual_port, http_token)
+            atexit.register(remove_gateway_http_info)
         except Exception as e:
             logger.error("Failed to start HTTP Management API: %s", e)
     
@@ -16089,6 +16095,8 @@ async def start_gateway(
     # Stop HTTP Management API server
     if http_server is not None:
         try:
+            from gateway.status import remove_gateway_http_info
+            remove_gateway_http_info()
             await http_server.shutdown()
             logger.info("HTTP Management API stopped")
         except Exception as e:

@@ -2931,8 +2931,10 @@ async def set_model_assignment(body: ModelAssignment, profile: Optional[str] = N
                     "confirm_message": warning.message,
                 }
 
+        effective = body.profile or profile
+
         def _apply_assignment():
-            with _profile_scope(body.profile or profile):
+            with _profile_scope(effective):
                 return _apply_model_assignment_sync(
                     scope, provider, model, task, base_url
                 )
@@ -8710,6 +8712,31 @@ def _profile_scope(profile: Optional[str]):
                 reset_hermes_home_override(token)
 
 
+async def _profile_gateway_write(
+    profile: Optional[str],
+    method: str,
+    path: str,
+    **httpx_kwargs,
+) -> Optional[Any]:
+    """Try to proxy a write to a profile's running gateway HTTP API.
+
+    Returns the gateway's JSON response when the gateway is running, or
+    ``None`` when it isn't (caller falls back to ``_profile_scope``).
+
+    This is the one-line adapter for phase 4c: every write endpoint calls this
+    first, and only enters ``_profile_scope`` on a ``None`` return.
+    """
+    try:
+        from hermes_cli.gateway_http import call_profile_gateway
+        return await call_profile_gateway(profile, method, path, **httpx_kwargs)
+    except Exception:
+        _log.debug(
+            "Gateway write proxy failed for profile=%r %s %s, falling back",
+            profile, method, path, exc_info=True,
+        )
+        return None
+
+
 class SkillToggle(BaseModel):
     name: str
     enabled: bool
@@ -8732,7 +8759,15 @@ async def get_skills(profile: Optional[str] = None):
 @app.put("/api/skills/toggle")
 async def toggle_skill(body: SkillToggle, profile: Optional[str] = None):
     from hermes_cli.skills_config import get_disabled_skills, save_disabled_skills
-    with _profile_scope(body.profile or profile):
+    effective = body.profile or profile
+    # Try proxying to the profile's running gateway first
+    gw = await _profile_gateway_write(
+        effective, "PUT", "/api/skills/toggle",
+        json={"name": body.name, "enabled": body.enabled},
+    )
+    if gw is not None:
+        return {"ok": True, "name": body.name, "enabled": body.enabled}
+    with _profile_scope(effective):
         config = load_config()
         disabled = get_disabled_skills(config)
         if body.enabled:
@@ -8790,15 +8825,16 @@ async def get_skill_content(name: str, profile: Optional[str] = None):
 
 @app.post("/api/skills")
 async def create_skill(body: SkillCreate):
-    """Create a new custom skill (SKILL.md) from the dashboard editor.
-
-    Calls the same validated write path as the agent's ``skill_manage``
-    tool (frontmatter validation, name/category validation, size limit,
-    optional security scan) — but bypasses the agent write-approval gate:
-    a write from the authenticated dashboard IS the user acting directly.
-    """
+    """Create a new custom skill (SKILL.md) from the dashboard editor."""
     from tools.skill_manager_tool import _create_skill
 
+    gw = await _profile_gateway_write(
+        body.profile, "POST", "/api/skills",
+        json={"name": body.name, "content": body.content, "category": body.category},
+    )
+    if gw is not None:
+        _clear_skills_prompt_cache()
+        return gw
     with _profile_scope(body.profile):
         result = _create_skill(body.name, body.content, body.category or None)
     if not result.get("success"):
@@ -8812,6 +8848,13 @@ async def update_skill_content(body: SkillContentUpdate):
     """Replace the SKILL.md of an existing skill (full rewrite) from the editor."""
     from tools.skill_manager_tool import _edit_skill
 
+    gw = await _profile_gateway_write(
+        body.profile, "PUT", "/api/skills/content",
+        json={"name": body.name, "content": body.content},
+    )
+    if gw is not None:
+        _clear_skills_prompt_cache()
+        return gw
     with _profile_scope(body.profile):
         result = _edit_skill(body.name, body.content)
     if not result.get("success"):
@@ -8882,16 +8925,23 @@ async def toggle_toolset(name: str, body: ToolsetToggle, profile: Optional[str] 
     if name not in valid:
         raise HTTPException(status_code=400, detail=f"Unknown toolset: {name}")
 
-    with _profile_scope(body.profile or profile):
+    effective = body.profile or profile
+    gw = await _profile_gateway_write(
+        effective, "POST", f"/api/tools/toolsets/{name}/config",
+        params={"enabled": str(body.enabled).lower()},
+    )
+    if gw is not None:
+        return {"ok": True, "name": name, "enabled": body.enabled}
+    with _profile_scope(effective):
         config = load_config()
-        enabled = set(
+        enabled_set = set(
             _get_platform_tools(config, "cli", include_default_mcp_servers=False)
         )
         if body.enabled:
-            enabled.add(name)
+            enabled_set.add(name)
         else:
-            enabled.discard(name)
-        _save_platform_tools(config, "cli", enabled)
+            enabled_set.discard(name)
+        _save_platform_tools(config, "cli", enabled_set)
     return {"ok": True, "name": name, "enabled": body.enabled}
 
 
@@ -8984,7 +9034,14 @@ async def select_toolset_provider(
     if name not in valid:
         raise HTTPException(status_code=400, detail=f"Unknown toolset: {name}")
 
-    with _profile_scope(body.profile or profile):
+    effective = body.profile or profile
+    gw = await _profile_gateway_write(
+        effective, "POST", f"/api/tools/toolsets/{name}/provider",
+        json={"provider": body.provider},
+    )
+    if gw is not None:
+        return {"ok": True, "name": name, "provider": body.provider}
+    with _profile_scope(effective):
         config = load_config()
         try:
             apply_provider_selection(name, body.provider, config)
@@ -9022,7 +9079,16 @@ async def save_toolset_env(name: str, body: ToolsetEnvUpdate, profile: Optional[
     if name not in valid_ts:
         raise HTTPException(status_code=400, detail=f"Unknown toolset: {name}")
 
-    with _profile_scope(body.profile or profile):
+    effective = body.profile or profile
+    # Env writes: each key goes to ~/.hermes/.env; proxy to the gateway so it
+    # picks up the new values in its live process environment.
+    gw = await _profile_gateway_write(
+        effective, "PUT", f"/api/tools/toolsets/{name}/env",
+        json={"env": body.env},
+    )
+    if gw is not None:
+        return {"ok": True, "name": name, **gw}
+    with _profile_scope(effective):
         config = load_config()
         cat = TOOL_CATEGORIES.get(name)
         allowed: set[str] = set()
@@ -9134,8 +9200,16 @@ async def update_config_raw(body: RawConfigUpdate, profile: Optional[str] = None
         parsed = yaml.safe_load(body.yaml_text)
         if not isinstance(parsed, dict):
             raise HTTPException(status_code=400, detail="YAML must be a mapping")
-        with _profile_scope(body.profile or profile):
-            save_config(parsed)
+        effective = body.profile or profile
+        # Try gateway first so the live process picks up config changes immediately.
+        # Use PUT /api/config/raw which accepts a full YAML string.
+        gw = await _profile_gateway_write(
+            effective, "PUT", "/api/config/raw",
+            params={"yaml_text": body.yaml_text},
+        )
+        if gw is None:
+            with _profile_scope(effective):
+                save_config(parsed)
         return {"ok": True}
     except yaml.YAMLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
@@ -9650,13 +9724,40 @@ def _resolve_chat_argv(
     if sidecar_url:
         env["HERMES_TUI_SIDECAR_URL"] = sidecar_url
 
-    # Profile-scoped chats must NOT attach to the dashboard's in-memory
-    # gateway — it runs under the dashboard's own profile. Without the
-    # attach URL, gatewayClient spawns its own `tui_gateway.entry`, which
-    # inherits the profile HERMES_HOME set above.
+    # Profile-scoped chats: prefer attaching to the profile's own running
+    # gateway (which already has the right HERMES_HOME, config, skills, etc.)
+    # over the old approach of spawning a fresh tui_gateway.entry subprocess
+    # with HERMES_HOME env-injected.
+    #
+    # When no gateway is running for that profile we fall back to the previous
+    # behaviour: no HERMES_TUI_GATEWAY_URL, so tui_gateway.entry spawns its
+    # own instance inheriting the HERMES_HOME we set above.
     if profile_dir is None:
+        # Default/current profile: attach to this dashboard's in-memory gateway.
         if gateway_ws_url := _build_gateway_ws_url():
             env["HERMES_TUI_GATEWAY_URL"] = gateway_ws_url
+    else:
+        # Named profile: try to attach to that profile's running gateway.
+        try:
+            from hermes_cli.gateway_http import get_profile_gateway
+            gw = get_profile_gateway(requested)
+            if gw:
+                # Gateway is running for this profile — attach directly.
+                # Use ?token= on the ws url so it works with our auth middleware.
+                import urllib.parse as _up
+                ws_url = gw["ws_url"]
+                token = gw["token"]
+                ws_url_with_token = (
+                    ws_url + ("&" if "?" in ws_url else "?") +
+                    _up.urlencode({"token": token})
+                )
+                env["HERMES_TUI_GATEWAY_URL"] = ws_url_with_token
+                # Gateway process owns HERMES_HOME — no need to override it.
+                env.pop("HERMES_HOME", None)
+        except Exception:
+            _log.debug("Failed to look up gateway for profile %r", requested, exc_info=True)
+            # Fall back: keep HERMES_HOME set, no HERMES_TUI_GATEWAY_URL,
+            # tui_gateway.entry will spawn its own instance.
 
     return list(argv), str(cwd) if cwd else None, env
 

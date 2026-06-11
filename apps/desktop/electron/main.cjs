@@ -249,6 +249,32 @@ function resolveHermesHome() {
 }
 
 const HERMES_HOME = resolveHermesHome()
+
+// Read a profile's gateway_http.json file and return its contents as an object,
+// or null if the file doesn't exist, is stale (PID not alive), or is corrupted.
+// This is the JS mirror of gateway/status.py::read_gateway_http_info.
+function readGatewayHttpInfo(profile) {
+  try {
+    const profileHome = (!profile || profile === 'default')
+      ? HERMES_HOME
+      : path.join(HERMES_HOME, 'profiles', profile)
+    const infoPath = path.join(profileHome, 'gateway_http.json')
+    if (!fileExists(infoPath)) return null
+    const data = JSON.parse(fs.readFileSync(infoPath, 'utf8'))
+    if (!data || !data.port || !data.token || !data.base_url) return null
+    // Stale check: is the PID still alive?
+    if (data.pid) {
+      try {
+        process.kill(data.pid, 0) // throws if not alive
+      } catch {
+        return null // stale — gateway crashed without cleanup
+      }
+    }
+    return data
+  } catch {
+    return null
+  }
+}
 // ACTIVE_HERMES_ROOT — the canonical mutable Hermes install. Same path
 // install.ps1 / install.sh use, so a desktop-only user and a CLI-only user end
 // up with identical layouts and can share one install.
@@ -1792,14 +1818,15 @@ async function applyUpdatesPosixInApp() {
     PATH: [extraPath, process.env.PATH].filter(Boolean).join(path.delimiter)
   }
 
-  // `hermes update` reaps stale `hermes dashboard` backends (a code update
-  // leaves the running process serving old Python against the freshly-updated
-  // JS bundle). But OUR backend is one of those processes, and killing it
-  // mid-update produces the boot→kill→crash loop in #37532 — the desktop
-  // already restarts its own backend via the rebuild+relaunch below, so the
-  // reap must spare it. Hand the live backend's PID to the update process;
-  // _kill_stale_dashboard_processes reads HERMES_DESKTOP_CHILD_PID and excludes
-  // it while still reaping any genuinely-orphaned dashboards. (#37532)
+  // `hermes update` reaps stale `hermes dashboard` and `hermes gateway run`
+  // backends (a code update leaves the running process serving old Python
+  // against the freshly-updated JS bundle). But OUR backend is one of those
+  // processes, and killing it mid-update produces the boot→kill→crash loop
+  // in #37532 — the desktop already restarts its own backend via the
+  // rebuild+relaunch below, so the reap must spare it. Hand the live
+  // backend's PID to the update process; _kill_stale_dashboard_processes
+  // reads HERMES_DESKTOP_CHILD_PID and excludes it while still reaping
+  // any genuinely-orphaned backends. (#37532)
   // Exclude every desktop-managed backend (primary + all pool profiles) from
   // the update reaper. _kill_stale_dashboard_processes accepts a comma-separated
   // list (a single int still parses for back-compat).
@@ -4454,6 +4481,30 @@ async function ensureBackend(profile) {
     return existing.connectionPromise
   }
 
+  // Before spawning a new gateway process, check if one is already running
+  // (e.g. the user runs `hermes -p worker gateway run` themselves, or the
+  // desktop left a gateway running from a previous session that survived a
+  // renderer restart).
+  const alreadyRunning = readGatewayHttpInfo(key)
+  if (alreadyRunning) {
+    rememberLog(`Profile "${key}" gateway already running on port ${alreadyRunning.port} — reusing`)
+    const conn = {
+      baseUrl: alreadyRunning.base_url,
+      mode: 'local',
+      source: 'local',
+      authMode: 'token',
+      token: alreadyRunning.token,
+      profile: key,
+      wsUrl: `${alreadyRunning.ws_url}?token=${encodeURIComponent(alreadyRunning.token)}`,
+      logs: hermesLog.slice(-80),
+      ...getWindowState()
+    }
+    const entry = { process: null, port: alreadyRunning.port, token: alreadyRunning.token, connectionPromise: Promise.resolve(conn), lastActiveAt: Date.now() }
+    backendPool.set(key, entry)
+    startPoolIdleReaper()
+    return conn
+  }
+
   evictLruPoolBackends(POOL_MAX_BACKENDS - 1)
 
   const entry = { process: null, port: null, token: null, connectionPromise: null, lastActiveAt: Date.now() }
@@ -4538,10 +4589,9 @@ async function spawnPoolBackend(profile, entry) {
   const token = crypto.randomBytes(32).toString('base64url')
   // --profile wins over the inherited HERMES_HOME env (see _apply_profile_override
   // step 3 in hermes_cli/main.py), so the child re-homes to this profile.
-  const dashboardArgs = ['--profile', profile, 'dashboard', '--no-open', '--host', '127.0.0.1', '--port', String(port)]
-  const backend = await ensureRuntime(resolveHermesBackend(dashboardArgs))
+  const backendArgs = ['--profile', profile, 'gateway', 'run', '--http-port', String(port), '--http-host', '127.0.0.1', '--http-token', token]
+  const backend = await ensureRuntime(resolveHermesBackend(backendArgs))
   const hermesCwd = resolveHermesCwd()
-  const webDist = resolveWebDist()
 
   rememberLog(`Starting Hermes backend for profile "${profile}" via ${backend.label}`)
 
@@ -4555,11 +4605,11 @@ async function spawnPoolBackend(profile, entry) {
       // the child process. Inherited TERMINAL_CWD (or a stale config bridge)
       // can still point at the install dir even when spawn cwd is home.
       TERMINAL_CWD: hermesCwd,
+      GATEWAY_HTTP_TOKEN: token,
       HERMES_DASHBOARD_SESSION_TOKEN: token,
-      // Marks this dashboard backend as desktop-spawned so it runs the cron
-      // scheduler tick loop (the gateway isn't running under the app).
-      HERMES_DESKTOP: '1',
-      HERMES_WEB_DIST: webDist
+      // Marks this gateway backend as desktop-spawned so it runs the cron
+      // scheduler tick loop.
+      HERMES_DESKTOP: '1'
     },
     shell: backend.shell,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -4724,23 +4774,43 @@ async function startHermes() {
       }
     }
 
+    // Check if the primary profile's gateway is already running (e.g. started
+    // by the user from the CLI before launching the desktop). Reuse it rather
+    // than spawning a second gateway on a different port.
+    const activeProfile = readActiveDesktopProfile()
+    const primaryAlreadyRunning = readGatewayHttpInfo(activeProfile || null)
+    if (primaryAlreadyRunning) {
+      rememberLog(`Primary gateway already running on port ${primaryAlreadyRunning.port} — reusing`)
+      await advanceBootProgress('backend.wait', 'Connecting to existing Hermes gateway', 90)
+      await waitForHermes(primaryAlreadyRunning.base_url, primaryAlreadyRunning.token)
+      updateBootProgress({ phase: 'backend.ready', message: 'Hermes backend is ready', progress: 94, running: true, error: null })
+      return {
+        baseUrl: primaryAlreadyRunning.base_url,
+        mode: 'local',
+        source: 'local',
+        authMode: 'token',
+        token: primaryAlreadyRunning.token,
+        wsUrl: `${primaryAlreadyRunning.ws_url}?token=${encodeURIComponent(primaryAlreadyRunning.token)}`,
+        logs: hermesLog.slice(-80),
+        ...getWindowState()
+      }
+    }
+
     await advanceBootProgress('backend.port', 'Finding an open local port', 16)
     const port = await pickPort()
     const token = crypto.randomBytes(32).toString('base64url')
-    const dashboardArgs = ['dashboard', '--no-open', '--host', '127.0.0.1', '--port', String(port)]
+    const backendArgs = ['gateway', 'run', '--http-port', String(port), '--http-host', '127.0.0.1', '--http-token', token]
     // Pin the desktop's chosen profile via the global --profile flag. This is
     // deterministic (it wins over the sticky ~/.hermes/active_profile file) and
     // resolves HERMES_HOME the same way `hermes -p <name>` does on the CLI. An
     // unset preference keeps the legacy launch so existing installs are
     // unaffected.
-    const activeProfile = readActiveDesktopProfile()
     if (activeProfile) {
-      dashboardArgs.unshift('--profile', activeProfile)
+      backendArgs.unshift('--profile', activeProfile)
     }
     await advanceBootProgress('backend.runtime', 'Resolving Hermes runtime', 28)
-    const backend = await ensureRuntime(resolveHermesBackend(dashboardArgs))
+    const backend = await ensureRuntime(resolveHermesBackend(backendArgs))
     const hermesCwd = resolveHermesCwd()
-    const webDist = resolveWebDist()
 
     await advanceBootProgress('backend.spawn', `Starting Hermes backend via ${backend.label}`, 84)
     rememberLog(`Starting Hermes backend via ${backend.label}`)
@@ -4753,18 +4823,18 @@ async function startHermes() {
         // resolves to the SAME location our resolveHermesHome() picked. Without
         // this pin, Python falls back to ~/.hermes on every platform — fine on
         // mac/linux (where our default matches), but on Windows our default is
-        // %LOCALAPPDATA%\hermes, which differs from C:\Users\<u>\.hermes.
+        // %LOCALAPPDATA%\\hermes, which differs from C:\\Users\\<u>\\.hermes.
         // Mismatch would split config / sessions / .env / logs across two
         // directories. install.ps1 sets HERMES_HOME via setx; the desktop
         // can't reliably do that, so we set it inline for every spawn.
         HERMES_HOME,
         ...backend.env,
         TERMINAL_CWD: hermesCwd,
+        GATEWAY_HTTP_TOKEN: token,
         HERMES_DASHBOARD_SESSION_TOKEN: token,
-        // Marks this dashboard backend as desktop-spawned so it runs the cron
-        // scheduler tick loop (the gateway isn't running under the app).
-        HERMES_DESKTOP: '1',
-        HERMES_WEB_DIST: webDist
+        // Marks this gateway backend as desktop-spawned so it runs the cron
+        // scheduler tick loop.
+        HERMES_DESKTOP: '1'
       },
       shell: backend.shell,
       stdio: ['ignore', 'pipe', 'pipe']

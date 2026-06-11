@@ -2128,6 +2128,6 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         except ValueError:
             pass
     
-    http_token = os.getenv("GATEWAY_HTTP_TOKEN")
+    http_token = os.getenv("GATEWAY_HTTP_TOKEN") or os.getenv("HERMES_DASHBOARD_SESSION_TOKEN")
     if http_token:
         config.http_token = http_token

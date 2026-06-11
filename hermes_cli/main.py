@@ -5347,6 +5347,9 @@ def _find_stale_dashboard_pids(
         "hermes dashboard",
         "hermes_cli.main dashboard",
         "hermes_cli/main.py dashboard",
+        "hermes gateway run",
+        "hermes_cli.main gateway",
+        "hermes_cli/main.py gateway",
     ]
     self_pid = os.getpid()
     dashboard_pids: list[int] = []
