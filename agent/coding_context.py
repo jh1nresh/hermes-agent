@@ -98,13 +98,21 @@ _GIT_TIMEOUT = 2.5
 
 
 # Per-model edit-format steering. Matching the edit tool format to how a model
-# was trained reduces mistakes and wasted reasoning. Documented sources:
-# - GPT/Codex → V4A patch: OpenAI's GPT-4.1 prompting guide ships apply_patch
-#   with the V4A diff format as the recommended editing tool, and Codex CLI
-#   uses apply_patch natively.
-#   https://developers.openai.com/cookbook/examples/gpt4-1_prompting_guide
-# - Claude → str_replace: Anthropic ships `str_replace_based_edit_tool` as a
-#   schema-less tool whose schema is *built into the model* (trained-in).
+# was trained reduces mistakes and wasted reasoning. Documented sources,
+# verified against current first-party agent source (May–Jun 2026):
+# - GPT/Codex → V4A patch: Codex CLI's ONLY file-edit tool is apply_patch and
+#   its grammar (codex-rs/core/src/tools/handlers/apply_patch.lark) is exactly
+#   the V4A format; the GPT-5.1/5.2(-codex) prompts instruct "Use the
+#   `apply_patch` tool to edit files", and OpenAI gates the tool per model via
+#   ModelInfo.apply_patch_tool_type. No str_replace editor exists in Codex.
+#   (Earlier doc: the GPT-4.1 prompting guide ships apply_patch/V4A —
+#   https://developers.openai.com/cookbook/examples/gpt4-1_prompting_guide)
+# - Claude → str_replace: Claude Code's FileEditTool is exact string
+#   replacement (old_string/new_string/replace_all, unique-match semantics) —
+#   current Claude models are RL'd against str_replace editing in their own
+#   first-party harness. Also Anthropic's API text-editor tool
+#   (`str_replace_based_edit_tool`) is schema-less: the schema is built into
+#   the model.
 #   https://platform.claude.com/docs/en/agents-and-tools/tool-use/text-editor-tool
 # - Open-weight coding models → str_replace: the dominant open RL/agentic
 #   scaffolds (SWE-agent, OpenHands ACI) use str_replace-style editors, and
