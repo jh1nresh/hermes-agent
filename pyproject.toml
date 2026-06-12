@@ -402,8 +402,10 @@ addopts = "-m 'not integration' --timeout=30 --timeout-method=thread"
 python-version = "3.13"
 
 [tool.ty.rules]
+all = "warn"
 unknown-argument = "warn"
 redundant-cast = "ignore"
+unresolved-reference = "error"
 
 [tool.ruff]
 preview = true # required for PLW1514 (unspecified-encoding) — preview rule
