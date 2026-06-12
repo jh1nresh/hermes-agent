@@ -404,6 +404,47 @@ CITATION_GUIDANCE = (
     "only ids you cited."
 )
 
+# "auto" mode prefix: the model decides per-request whether the answer is
+# research/report-shaped. Mirrors Perplexity's leaked-prompt approach of
+# exempting query classes (translation, creative writing) via instruction
+# rather than a separate classifier.
+CITATION_GUIDANCE_AUTO = (
+    "GROUNDING (conditional): Each result has a stable source id like [3]. "
+    "IF the user's request is research-, report-, or fact-finding-shaped — "
+    "they asked for a sourced/grounded answer, a summary of information from "
+    "the web, a comparison, news, or anything where claim provenance matters "
+    "— then cite: place the bracketed id(s) immediately after each sentence "
+    "they support, e.g. 'Ice is less dense than water.[1][2]' — no space "
+    "before the bracket, at most 3 ids per sentence, cite while writing (not "
+    "one citation dumped at the end), and end with a 'Sources:' list mapping "
+    "each cited id to its URL — list only ids you cited. Only cite ids that "
+    "appear in tool results you actually received; never invent an id. "
+    "Claims from your own knowledge get no citation. IF instead the search "
+    "is incidental to a different task (quick lookup mid-coding, checking "
+    "syntax/versions, casual conversation, creative writing), skip inline "
+    "citations and just answer naturally — mention a URL only if the user "
+    "would plausibly want the link."
+)
+
+
+def _get_citations_mode() -> str:
+    """Return the web citations mode: 'auto' (default), 'always', or 'off'."""
+    mode = str(_load_web_config().get("citations", "auto") or "auto").strip().lower()
+    return mode if mode in {"auto", "always", "off"} else "auto"
+
+
+def _get_citation_guidance() -> Optional[str]:
+    """Return the guidance text for the active mode, or None when off."""
+    mode = _get_citations_mode()
+    if mode == "off":
+        return None
+    return CITATION_GUIDANCE if mode == "always" else CITATION_GUIDANCE_AUTO
+
+
+def _summary_stream_enabled() -> bool:
+    """Whether live summary streaming to a registered display is enabled."""
+    return bool(_load_web_config().get("summary_stream", True))
+
 
 def _is_nous_auxiliary_client(client: Any) -> bool:
     """Return True when the resolved auxiliary backend is Nous Portal."""
@@ -719,7 +760,8 @@ Create a markdown summary that captures all key information in a well-organized,
             # the call in streaming mode and mirror tokens to the UI.
             # Any failure falls through to the standard non-streaming path
             # with its full retry/fallback machinery.
-            if attempt == 0 and not is_chunk:
+            # Gated by web.summary_stream in config.yaml (default: on).
+            if attempt == 0 and not is_chunk and _summary_stream_enabled():
                 streamed = await _try_stream_summarizer(
                     aux_client, effective_model, extra_body,
                     system_prompt, user_prompt, max_tokens,
@@ -1183,13 +1225,16 @@ def web_search_tool(query: str, limit: int = 5) -> str:
         # ── Grounding annotations ──────────────────────────────────────
         # Tag each result with its stable citation id and attach citation
         # guidance so the model grounds its answer Perplexity-style.
+        # Gated by web.citations in config.yaml ("auto" | "always" | "off").
         try:
-            web_results = response_data.get("data", {}).get("web", []) if isinstance(response_data, dict) else []
-            for r in web_results:
-                if isinstance(r, dict) and r.get("url"):
-                    r["source"] = f"[{get_source_id(r['url'])}]"
-            if web_results and isinstance(response_data, dict):
-                response_data["citation_guidance"] = CITATION_GUIDANCE
+            guidance = _get_citation_guidance()
+            if guidance is not None:
+                web_results = response_data.get("data", {}).get("web", []) if isinstance(response_data, dict) else []
+                for r in web_results:
+                    if isinstance(r, dict) and r.get("url"):
+                        r["source"] = f"[{get_source_id(r['url'])}]"
+                if web_results and isinstance(response_data, dict):
+                    response_data["citation_guidance"] = guidance
         except Exception:
             logger.debug("Failed to annotate search results with source ids", exc_info=True)
 
@@ -1467,11 +1512,12 @@ async def web_extract_tool(
                 logger.info("%s (%d characters)", url, content_length)
         
         # Trim output to minimal fields per entry: title, content, error
+        _extract_guidance = _get_citation_guidance()
         trimmed_results = [
             {
                 "url": r.get("url", ""),
                 "title": r.get("title", ""),
-                "source": f"[{get_source_id(r['url'])}]" if r.get("url") else "",
+                **({"source": f"[{get_source_id(r['url'])}]"} if (_extract_guidance is not None and r.get("url")) else {}),
                 "content": r.get("content", ""),
                 "error": r.get("error"),
                 **({  "blocked_by_policy": r["blocked_by_policy"]} if "blocked_by_policy" in r else {}),
@@ -1479,8 +1525,8 @@ async def web_extract_tool(
             for r in response.get("results", [])
         ]
         trimmed_response: Dict[str, Any] = {"results": trimmed_results}
-        if any(r.get("content") for r in trimmed_results):
-            trimmed_response["citation_guidance"] = CITATION_GUIDANCE
+        if _extract_guidance is not None and any(r.get("content") for r in trimmed_results):
+            trimmed_response["citation_guidance"] = _extract_guidance
         if _free_parallel_extract:
             # Credit Parallel's free Search MCP (drives the "[Parallel]" UI tag
             # + lets the model cite the source). Free tier only.
@@ -1700,7 +1746,7 @@ from tools.registry import registry, tool_error
 
 WEB_SEARCH_SCHEMA = {
     "name": "web_search",
-    "description": "Search the web for information. Returns up to 5 results by default with titles, URLs, and descriptions. Each result carries a stable citation id in its 'source' field (e.g. \"[3]\"); when your answer uses a result, cite it inline by appending the id(s) after the supported sentence and finish with a 'Sources:' list mapping cited ids to URLs. The query is passed through to the configured backend, so operators such as site:domain, filetype:pdf, intitle:word, -term, and \"exact phrase\" may work when the backend supports them.",
+    "description": "Search the web for information. Returns up to 5 results by default with titles, URLs, and descriptions. Results may carry a stable citation id in a 'source' field (e.g. \"[3]\") with citation guidance in the response; follow that guidance when present. The query is passed through to the configured backend, so operators such as site:domain, filetype:pdf, intitle:word, -term, and \"exact phrase\" may work when the backend supports them.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -1722,7 +1768,7 @@ WEB_SEARCH_SCHEMA = {
 
 WEB_EXTRACT_SCHEMA = {
     "name": "web_extract",
-    "description": "Extract content from web page URLs. Returns page content in markdown format. Each result carries a stable citation id in its 'source' field (e.g. \"[3]\"); cite it inline after sentences your answer grounds on that page and finish with a 'Sources:' list mapping cited ids to URLs. Also works with PDF URLs (arxiv papers, documents, etc.) — pass the PDF link directly and it converts to markdown text. Pages under 5000 chars return full markdown; larger pages are LLM-summarized and capped at ~5000 chars per page. Pages over 2M chars are refused. If a URL fails or times out, use the browser tool to access it instead.",
+    "description": "Extract content from web page URLs. Returns page content in markdown format. Results may carry a stable citation id in a 'source' field (e.g. \"[3]\") with citation guidance in the response; follow that guidance when present. Also works with PDF URLs (arxiv papers, documents, etc.) — pass the PDF link directly and it converts to markdown text. Pages under 5000 chars return full markdown; larger pages are LLM-summarized and capped at ~5000 chars per page. Pages over 2M chars are refused. If a URL fails or times out, use the browser tool to access it instead.",
     "parameters": {
         "type": "object",
         "properties": {

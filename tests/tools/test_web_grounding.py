@@ -18,6 +18,10 @@ import pytest
 from tools import summary_display
 from tools.web_tools import (
     CITATION_GUIDANCE,
+    CITATION_GUIDANCE_AUTO,
+    _get_citation_guidance,
+    _get_citations_mode,
+    _summary_stream_enabled,
     _try_stream_summarizer,
     get_source_id,
     reset_source_registry,
@@ -132,7 +136,7 @@ class TestSearchAnnotation:
         web = out["data"]["web"]
         assert web[0]["source"] == "[1]"
         assert web[1]["source"] == "[2]"
-        assert out["citation_guidance"] == CITATION_GUIDANCE
+        assert out["citation_guidance"] == CITATION_GUIDANCE_AUTO
 
     def test_same_url_keeps_id_across_calls(self):
         from tools import web_tools
@@ -180,7 +184,7 @@ class TestExtractAnnotation:
                 web_tools.web_extract_tool(["https://a.com"], use_llm_processing=False)
             ))
         assert out["results"][0]["source"] == "[1]"
-        assert out["citation_guidance"] == CITATION_GUIDANCE
+        assert out["citation_guidance"] == CITATION_GUIDANCE_AUTO
 
     def test_search_then_extract_share_ids(self):
         from tools import web_tools
@@ -218,6 +222,72 @@ class TestExtractAnnotation:
 
 async def _async_true(url):
     return True
+
+
+# ---------------------------------------------------------------------------
+# Config toggles (web.citations / web.summary_stream)
+# ---------------------------------------------------------------------------
+
+class TestCitationModes:
+    def test_default_mode_is_auto(self):
+        with patch("tools.web_tools._load_web_config", return_value={}):
+            assert _get_citations_mode() == "auto"
+            assert _get_citation_guidance() == CITATION_GUIDANCE_AUTO
+
+    def test_always_mode(self):
+        with patch("tools.web_tools._load_web_config", return_value={"citations": "always"}):
+            assert _get_citation_guidance() == CITATION_GUIDANCE
+
+    def test_off_mode_returns_none(self):
+        with patch("tools.web_tools._load_web_config", return_value={"citations": "off"}):
+            assert _get_citation_guidance() is None
+
+    def test_invalid_mode_falls_back_to_auto(self):
+        with patch("tools.web_tools._load_web_config", return_value={"citations": "bogus"}):
+            assert _get_citations_mode() == "auto"
+
+    def test_off_mode_strips_annotations_from_search(self):
+        from tools import web_tools
+        provider = MagicMock()
+        provider.name = "fake"
+        provider.supports_search.return_value = True
+        provider.search.return_value = {
+            "success": True,
+            "data": {"web": [{"title": "A", "url": "https://a.com", "description": "d", "position": 1}]},
+        }
+        with patch.object(web_tools, "_ensure_web_plugins_loaded"), \
+             patch("agent.web_search_registry.get_provider", return_value=provider), \
+             patch.object(web_tools, "_get_search_backend", return_value="fake"), \
+             patch.object(web_tools, "_load_web_config", return_value={"citations": "off"}):
+            out = json.loads(web_tools.web_search_tool("query"))
+        assert "citation_guidance" not in out
+        assert "source" not in out["data"]["web"][0]
+
+    def test_off_mode_strips_annotations_from_extract(self):
+        from tools import web_tools
+        provider = MagicMock()
+        provider.name = "fake"
+        provider.supports_extract.return_value = True
+        provider.extract = MagicMock(return_value=[
+            {"url": "https://a.com", "title": "A", "content": "body"},
+        ])
+        with patch.object(web_tools, "_ensure_web_plugins_loaded"), \
+             patch("agent.web_search_registry.get_provider", return_value=provider), \
+             patch.object(web_tools, "_get_extract_backend", return_value="fake"), \
+             patch.object(web_tools, "check_auxiliary_model", return_value=False), \
+             patch.object(web_tools, "async_is_safe_url", new=_async_true), \
+             patch.object(web_tools, "_load_web_config", return_value={"citations": "off"}):
+            out = json.loads(asyncio.run(
+                web_tools.web_extract_tool(["https://a.com"], use_llm_processing=False)
+            ))
+        assert "citation_guidance" not in out
+        assert "source" not in out["results"][0]
+
+    def test_summary_stream_toggle(self):
+        with patch("tools.web_tools._load_web_config", return_value={}):
+            assert _summary_stream_enabled() is True
+        with patch("tools.web_tools._load_web_config", return_value={"summary_stream": False}):
+            assert _summary_stream_enabled() is False
 
 
 # ---------------------------------------------------------------------------

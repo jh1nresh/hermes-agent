@@ -1592,6 +1592,22 @@ web:
 
 **Parallel search modes:** Set `PARALLEL_SEARCH_MODE` to control search behavior — `fast`, `one-shot`, or `agentic` (default: `agentic`).
 
+### Grounded citations
+
+Web results carry stable numbered source ids (`[1]`, `[2]`, …) that the agent cites inline, Perplexity-style, with a `Sources:` list at the end of the answer. Control this with `web.citations`:
+
+```yaml
+web:
+  citations: auto   # auto (default) | always | off
+  summary_stream: true   # live summarization box in the CLI for long pages
+```
+
+- **`auto`** (default) — the agent cites inline only when the request is research/report-shaped (sourced summaries, comparisons, news, fact-finding). Incidental lookups (checking syntax mid-coding, casual questions) stay citation-free.
+- **`always`** — cite inline whenever the answer uses web results.
+- **`off`** — no source ids or citation guidance (pre-feature behavior).
+
+`web.summary_stream` toggles the live "Summarizing" box shown in the CLI while `web_extract` condenses long pages (gateway and cron are unaffected).
+
 **Exa:** Set `EXA_API_KEY` in `~/.hermes/.env`. Supports `category` filtering (`company`, `research paper`, `news`, `people`, `personal site`, `pdf`) and domain/date filters.
 
 ## Browser

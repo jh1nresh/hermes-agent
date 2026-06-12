@@ -1017,6 +1017,15 @@ DEFAULT_CONFIG = {
         "backend": "",           # shared fallback — applies to both search and extract
         "search_backend": "",    # per-capability override for web_search (e.g. "searxng")
         "extract_backend": "",   # per-capability override for web_extract (e.g. "native")
+        # Grounded citations on web results:
+        # "auto"   — results carry stable source ids; the model is instructed to
+        #            cite inline only for research/report-style requests
+        # "always" — model is instructed to cite inline whenever it uses results
+        # "off"    — no source ids, no citation guidance (pre-feature behavior)
+        "citations": "auto",
+        # Stream web_extract page summarization live into a reasoning-style
+        # box in the CLI (no effect on gateway/cron).
+        "summary_stream": True,
     },
 
     "browser": {
