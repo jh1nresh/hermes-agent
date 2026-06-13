@@ -51,6 +51,10 @@ def build_write_denied_paths(home: str) -> set[str]:
             os.path.join(home, ".profile"),
             os.path.join(home, ".bash_profile"),
             os.path.join(home, ".zprofile"),
+            os.path.join(home, ".zshenv"),
+            os.path.join(home, ".zlogin"),
+            os.path.join(home, ".bash_login"),
+            os.path.join(home, ".gitconfig"),
             os.path.join(home, ".netrc"),
             os.path.join(home, ".pgpass"),
             os.path.join(home, ".npmrc"),
@@ -78,6 +82,7 @@ def build_write_denied_prefixes(home: str) -> list[str]:
             os.path.join(home, ".azure"),
             os.path.join(home, ".config", "gh"),
             os.path.join(home, ".config", "gcloud"),
+            os.path.join(home, ".config", "git"),
         ]
     ]
 

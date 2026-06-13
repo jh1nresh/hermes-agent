@@ -69,8 +69,23 @@ class TestWriteDenyExactPaths:
 
     def test_shell_profiles(self):
         home = str(Path.home())
-        for name in [".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile"]:
+        for name in [
+            ".bashrc", ".zshrc", ".profile", ".bash_profile", ".zprofile",
+            ".zshenv", ".zlogin", ".bash_login",
+        ]:
             assert _is_write_denied(os.path.join(home, name)) is True, f"{name} should be denied"
+
+    def test_global_git_config_paths(self):
+        home = str(Path.home())
+        for path in [
+            os.path.join(home, ".gitconfig"),
+            os.path.join(home, ".config", "git", "config"),
+            os.path.join(home, ".config", "git", "hooks", "pre-commit"),
+        ]:
+            assert _is_write_denied(path) is True, f"{path} should be denied"
+
+    def test_project_git_config_allowed(self):
+        assert _is_write_denied("/tmp/someproject/.git/config") is False
 
     def test_package_manager_configs(self):
         home = str(Path.home())
