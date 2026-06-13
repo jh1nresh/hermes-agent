@@ -660,6 +660,51 @@ def has_named_custom_provider(requested_provider: str) -> bool:
         return False
 
 
+def find_custom_provider_identity(base_url: str) -> Optional[str]:
+    """Map an endpoint URL back to its canonical ``custom:<name>`` menu key.
+
+    Runtime agent state stores named custom endpoints as the resolved provider
+    ``"custom"``.  The session DB deliberately does not persist raw API keys,
+    so Desktop/TUI resume needs the original configured entry name to re-resolve
+    credentials from ``providers:`` / ``custom_providers:``.
+    """
+    target = _normalize_base_url_for_match(base_url)
+    if not target:
+        return None
+    try:
+        config = load_config()
+    except Exception:
+        return None
+
+    providers = config.get("providers")
+    if isinstance(providers, dict):
+        for ep_name, entry in providers.items():
+            if not isinstance(entry, dict):
+                continue
+            entry_url = entry.get("api") or entry.get("url") or entry.get("base_url") or ""
+            if _normalize_base_url_for_match(entry_url) == target:
+                return f"custom:{_normalize_custom_provider_name(str(ep_name))}"
+
+    try:
+        custom_providers = get_compatible_custom_providers(config)
+    except Exception:
+        custom_providers = None
+    for entry in custom_providers or []:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if _normalize_base_url_for_match(entry.get("base_url")) == target:
+            return f"custom:{_normalize_custom_provider_name(name)}"
+
+    return None
+
+
+def _normalize_base_url_for_match(value) -> str:
+    return str(value or "").strip().rstrip("/").lower()
+
+
 def _custom_provider_request_overrides(custom_provider: Dict[str, Any]) -> Dict[str, Any]:
     extra_body = custom_provider.get("extra_body")
     if not isinstance(extra_body, dict) or not extra_body:
