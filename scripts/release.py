@@ -992,6 +992,7 @@ AUTHOR_MAP = {
     "tuancanhnguyen706@gmail.com": "xxxigm",
     "larcombe.n@gmail.com": "NickLarcombe",
     "54813621+xxxigm@users.noreply.github.com": "xxxigm",
+    "xxxigm@users.noreply.github.com": "xxxigm",
     "asurla@nvidia.com": "anniesurla",
     "kchantharuan@nvidia.com": "nv-kasikritc",
     "bbednarski@nvidia.com": "bbednarski9",
