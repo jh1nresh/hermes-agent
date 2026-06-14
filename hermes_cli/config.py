@@ -1990,7 +1990,7 @@ DEFAULT_CONFIG = {
         "channel_prompts": {},         # Per-chat/topic ephemeral system prompts (topics inherit from parent group)
         "allowed_chats": "",           # If set, bot ONLY responds in these group/supergroup chat IDs (whitelist)
         "extra": {
-            "rich_messages": True,      # Bot API 10.1 rich messages; set false to force legacy MarkdownV2
+            "rich_messages": False,     # Bot API 10.1 rich messages (opt-in: blank on clients that can't render them, e.g. macOS desktop)
         },
     },
 

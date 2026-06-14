@@ -421,9 +421,13 @@ class TelegramAdapter(BasePlatformAdapter):
         self._disable_link_previews: bool = self._coerce_bool_extra("disable_link_previews", False)
         # Bot API 10.1 Rich Messages: send final replies via sendRichMessage
         # with the raw agent markdown so tables/task lists/etc. render natively.
-        # Enabled by default; users can opt out for clients that accept but do
-        # not render rich messages via platforms.telegram.extra.rich_messages.
-        self._rich_messages_enabled: bool = self._coerce_bool_extra("rich_messages", True)
+        # Opt-in (default off): clients without Bot API 10.1 rich rendering
+        # (e.g. the Telegram macOS desktop app) accept the message but display a
+        # BLANK bubble. sendRichMessage carries no plaintext fallback and the
+        # Bot API exposes no recipient-client signal, so forcing it on silently
+        # breaks delivery for those users. Enable per bot when every client is
+        # known to render rich content: platforms.telegram.extra.rich_messages: true.
+        self._rich_messages_enabled: bool = self._coerce_bool_extra("rich_messages", False)
         # Latched off after a capability failure on sendRichMessage /
         # sendRichMessageDraft (e.g. older python-telegram-bot without the
         # endpoint) so later sends skip the doomed rich attempt entirely.

@@ -46,9 +46,17 @@ PTB_INVALID_TOKEN_404 = InvalidToken(
 )
 
 
-def _make_adapter(extra=None):
-    """Build a TelegramAdapter with a mock bot wired for the rich path."""
-    config = PlatformConfig(enabled=True, token="fake-token", extra=extra or {})
+def _make_adapter(extra=None, enable_rich=True):
+    """Build a TelegramAdapter with a mock bot wired for the rich path.
+
+    Rich messages are opt-in in production (default off), but this harness
+    exists to exercise the rich path, so it enables them by default. Individual
+    tests override via ``extra`` (e.g. ``{"rich_messages": False}``) or disable
+    the injection entirely with ``enable_rich=False`` to assert the real default.
+    """
+    merged = {"rich_messages": True} if enable_rich else {}
+    merged.update(extra or {})
+    config = PlatformConfig(enabled=True, token="fake-token", extra=merged)
     adapter = TelegramAdapter(config)
     bot = MagicMock()
     # do_api_request as an AsyncMock makes inspect.iscoroutinefunction(...) True,
@@ -180,16 +188,19 @@ async def test_rich_messages_opt_out_accepts_string_false():
 
 
 @pytest.mark.asyncio
-async def test_rich_messages_default_is_enabled():
-    adapter = _make_adapter()
+async def test_rich_messages_default_is_opt_in():
+    # Rich messages are opt-in: with no explicit config the adapter must use
+    # the legacy MarkdownV2 send path, since clients that can't render Bot API
+    # 10.1 rich content (e.g. Telegram macOS desktop) would show a blank bubble.
+    adapter = _make_adapter(enable_rich=False)
 
     result = await adapter.send("12345", RICH_CONTENT)
 
     assert result.success is True
     bot = adapter._bot
     assert bot is not None
-    bot.do_api_request.assert_awaited_once()
-    bot.send_message.assert_not_called()
+    bot.do_api_request.assert_not_called()
+    bot.send_message.assert_awaited()
 
 
 @pytest.mark.asyncio

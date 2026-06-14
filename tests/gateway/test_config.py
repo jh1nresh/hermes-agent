@@ -832,7 +832,7 @@ class TestLoadGatewayConfig:
 
         assert config.platforms[Platform.TELEGRAM].extra["rich_messages"] is False
 
-    def test_load_config_default_includes_telegram_rich_messages(self, tmp_path, monkeypatch):
+    def test_load_config_default_telegram_rich_messages_opt_in(self, tmp_path, monkeypatch):
         hermes_home = tmp_path / ".hermes"
         hermes_home.mkdir()
 
@@ -842,7 +842,9 @@ class TestLoadGatewayConfig:
 
         config = load_config()
 
-        assert config["telegram"]["extra"]["rich_messages"] is True
+        # Opt-in by default: rich messages render blank on clients that don't
+        # support Bot API 10.1 (e.g. macOS desktop), so the default is off.
+        assert config["telegram"]["extra"]["rich_messages"] is False
 
     def test_bridges_telegram_extra_base_url_from_config_yaml(self, tmp_path, monkeypatch):
         hermes_home = tmp_path / ".hermes"
