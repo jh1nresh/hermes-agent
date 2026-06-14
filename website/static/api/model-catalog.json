@@ -109,6 +109,10 @@
           "description": ""
         },
         {
+          "id": "openrouter/fusion",
+          "description": "multi-model deliberation router"
+        },
+        {
           "id": "openrouter/pareto-code",
           "description": "auto-routes to cheapest coder meeting openrouter.min_coding_score"
         },

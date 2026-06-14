@@ -41,6 +41,37 @@ moa:
   max_tokens: 4096
 ```
 
+OpenRouter Fusion presets are valid model choices here too. Define any number
+of custom Fusion slugs under `fusion.presets`; those slugs appear under the
+configured provider (`openrouter` or `nous`) in `hermes model`, `/model`, and
+the dashboard picker.
+
+```yaml
+fusion:
+  presets:
+    - provider: openrouter      # or nous
+      slug: research-panel      # selectable as fusion/research-panel
+      analysis_models:
+        - anthropic/claude-opus-4.8
+        - openai/gpt-5.5
+        - google/gemini-3.5-flash
+      judge_model: openai/gpt-5.5   # optional
+      max_tool_calls: 8             # optional
+      max_completion_tokens: 4096   # optional
+
+moa:
+  reference_models:
+    - provider: openrouter
+      model: fusion/research-panel
+  aggregator:
+    provider: openrouter
+    model: fusion/research-panel
+```
+
+At request time Hermes sends the preset as `model: openrouter/fusion` plus the
+configured `openrouter:fusion` server-tool payload, so the user-facing slug is
+stable while the analysis panel stays configurable.
+
 Defaults use one Codex OAuth model and two OpenRouter-hosted models for high-signal testing:
 
 - `openai-codex:gpt-5.5`

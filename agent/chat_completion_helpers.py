@@ -736,6 +736,15 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
         if _ephemeral_out is not None:
             agent._ephemeral_max_output_tokens = None
 
+        _request_overrides = agent.request_overrides
+        try:
+            from hermes_cli.fusion_presets import fusion_request_overrides_for_model
+            _fusion_overrides = fusion_request_overrides_for_model(agent.provider, agent.model)
+        except Exception:
+            _fusion_overrides = None
+        if _fusion_overrides:
+            _request_overrides = {**(agent.request_overrides or {}), **_fusion_overrides}
+
         # Strip image parts for non-vision models that have provider profiles
         # (e.g. DeepSeek, Kimi). The legacy path below already does this, but
         # registered providers with profiles were bypassing the strip.
@@ -751,7 +760,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
             ephemeral_max_output_tokens=_ephemeral_out,
             max_tokens_param_fn=agent._max_tokens_param,
             reasoning_config=agent.reasoning_config,
-            request_overrides=agent.request_overrides,
+            request_overrides=_request_overrides,
             session_id=getattr(agent, "session_id", None),
             provider_profile=_profile,
             ollama_num_ctx=agent._ollama_num_ctx,
@@ -770,6 +779,15 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
     if _ephemeral_out is not None:
         agent._ephemeral_max_output_tokens = None
 
+    _request_overrides = agent.request_overrides
+    try:
+        from hermes_cli.fusion_presets import fusion_request_overrides_for_model
+        _fusion_overrides = fusion_request_overrides_for_model(agent.provider, agent.model)
+    except Exception:
+        _fusion_overrides = None
+    if _fusion_overrides:
+        _request_overrides = {**(agent.request_overrides or {}), **_fusion_overrides}
+
     # Strip image parts for non-vision models (no-op when vision-capable).
     _msgs_for_chat = agent._prepare_messages_for_non_vision_model(api_messages)
 
@@ -783,7 +801,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
         ephemeral_max_output_tokens=_ephemeral_out,
         max_tokens_param_fn=agent._max_tokens_param,
         reasoning_config=agent.reasoning_config,
-        request_overrides=agent.request_overrides,
+        request_overrides=_request_overrides,
         session_id=getattr(agent, "session_id", None),
         model_lower=(agent.model or "").lower(),
         is_openrouter=_is_or,
@@ -1416,6 +1434,13 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
                 summary_kwargs.update(agent._max_tokens_param(agent.max_tokens))
             if _lm_reasoning_effort is not None:
                 summary_kwargs["reasoning_effort"] = _lm_reasoning_effort
+            try:
+                from hermes_cli.fusion_presets import fusion_request_overrides_for_model
+                _fusion_summary = fusion_request_overrides_for_model(agent.provider, agent.model)
+            except Exception:
+                _fusion_summary = None
+            if _fusion_summary:
+                summary_kwargs.update(_fusion_summary)
 
             # Include provider routing preferences
             provider_preferences = {}

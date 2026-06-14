@@ -274,6 +274,34 @@ class TestWebServerEndpoints:
         assert cfg["moa"]["reference_models"] == payload["reference_models"]
         assert cfg["moa"]["aggregator"] == payload["aggregator"]
 
+    def test_put_fusion_presets_persists_custom_model_slugs(self):
+        from hermes_cli.config import load_config
+
+        payload = {
+            "presets": [
+                {
+                    "provider": "openrouter",
+                    "slug": "research panel",
+                    "analysis_models": ["anthropic/claude-opus-4.8", "openai/gpt-5.5"],
+                    "judge_model": "google/gemini-3.5-flash",
+                    "max_tool_calls": 6,
+                },
+                {
+                    "provider": "nous",
+                    "slug": "portal",
+                    "analysis_models": ["anthropic/claude-sonnet-4.6"],
+                },
+            ]
+        }
+
+        resp = self.client.put("/api/model/fusion", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["presets"][0]["model_slug"] == "fusion/research-panel"
+        cfg = load_config()
+        assert cfg["fusion"]["presets"][1]["model_slug"] == "fusion/portal"
+
     # ── GET /api/media (remote image display) ───────────────────────────
 
     def test_get_media_serves_image_in_root(self):

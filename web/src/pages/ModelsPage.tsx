@@ -16,6 +16,8 @@ import { api } from "@/lib/api";
 import type {
   AuxiliaryModelsResponse,
   AuxiliaryTaskAssignment,
+  FusionPreset,
+  FusionPresetsResponse,
   MoaConfigResponse,
   MoaModelSlot,
   ModelsAnalyticsModelEntry,
@@ -778,6 +780,92 @@ function MoaModelsModal({
   );
 }
 
+
+function FusionPresetsModal({
+  config,
+  onClose,
+  onSaved,
+}: {
+  config: FusionPresetsResponse;
+  onClose(): void;
+  onSaved(next: FusionPresetsResponse): void;
+}) {
+  const [draft, setDraft] = useState<FusionPresetsResponse>(config);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const updatePreset = (index: number, patch: Partial<FusionPreset>) => {
+    setDraft((prev) => ({
+      presets: prev.presets.map((preset, i) =>
+        i === index ? { ...preset, ...patch } : preset,
+      ),
+    }));
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await api.saveFusionPresets(draft);
+      onSaved(saved);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+      <Card className="max-h-[85vh] w-full max-w-3xl overflow-auto">
+        <CardHeader>
+          <CardTitle className="text-sm">Configure Fusion Presets</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-text-secondary">
+            Each preset creates a selectable model slug under OpenRouter or Nous, such as <code>fusion/research</code>. Hermes sends it as <code>openrouter/fusion</code> with your selected analysis panel.
+          </p>
+          {draft.presets.map((preset, index) => (
+            <div key={`${preset.provider}-${preset.slug}-${index}`} className="space-y-2 border border-border/50 bg-muted/20 p-3">
+              <div className="grid gap-2 sm:grid-cols-3">
+                <label className="text-xs text-text-secondary">
+                  Provider
+                  <select className="mt-1 w-full border border-border bg-background px-2 py-1 font-mono text-xs" value={preset.provider || "openrouter"} onChange={(e) => updatePreset(index, { provider: e.target.value })}>
+                    <option value="openrouter">openrouter</option>
+                    <option value="nous">nous</option>
+                  </select>
+                </label>
+                <label className="text-xs text-text-secondary">
+                  Slug
+                  <input className="mt-1 w-full border border-border bg-background px-2 py-1 font-mono text-xs" value={preset.slug || ""} onChange={(e) => updatePreset(index, { slug: e.target.value })} placeholder="research" />
+                </label>
+                <label className="text-xs text-text-secondary">
+                  Judge model
+                  <input className="mt-1 w-full border border-border bg-background px-2 py-1 font-mono text-xs" value={preset.judge_model || ""} onChange={(e) => updatePreset(index, { judge_model: e.target.value })} placeholder="openai/gpt-5.5" />
+                </label>
+              </div>
+              <label className="block text-xs text-text-secondary">
+                Analysis models (comma-separated OpenRouter/Nous catalog slugs, 1–8)
+                <textarea className="mt-1 min-h-20 w-full border border-border bg-background px-2 py-1 font-mono text-xs" value={(preset.analysis_models || []).join(", ")} onChange={(e) => updatePreset(index, { analysis_models: e.target.value.split(",").map((m) => m.trim()).filter(Boolean) })} placeholder="anthropic/claude-opus-4.8, openai/gpt-5.5, google/gemini-3.5-flash" />
+              </label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <label className="text-xs text-text-secondary">Max tool calls<input className="mt-1 w-full border border-border bg-background px-2 py-1 font-mono text-xs" value={preset.max_tool_calls ?? ""} onChange={(e) => updatePreset(index, { max_tool_calls: e.target.value ? Number(e.target.value) : null })} /></label>
+                <label className="text-xs text-text-secondary">Max completion tokens<input className="mt-1 w-full border border-border bg-background px-2 py-1 font-mono text-xs" value={preset.max_completion_tokens ?? ""} onChange={(e) => updatePreset(index, { max_completion_tokens: e.target.value ? Number(e.target.value) : null })} /></label>
+                <label className="text-xs text-text-secondary">Temperature<input className="mt-1 w-full border border-border bg-background px-2 py-1 font-mono text-xs" value={preset.temperature ?? ""} onChange={(e) => updatePreset(index, { temperature: e.target.value ? Number(e.target.value) : null })} /></label>
+              </div>
+              <div className="flex justify-end"><Button size="sm" ghost onClick={() => setDraft((prev) => ({ presets: prev.presets.filter((_, i) => i !== index) }))}>Remove preset</Button></div>
+            </div>
+          ))}
+          <Button size="sm" outlined onClick={() => setDraft((prev) => ({ presets: [...prev.presets, { provider: "openrouter", slug: "research", analysis_models: [] }] }))}>Add Fusion preset</Button>
+          {error && <div className="text-xs text-destructive">{error}</div>}
+          <div className="flex justify-end gap-2 pt-2"><Button ghost onClick={onClose} disabled={busy}>Cancel</Button><Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button></div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function ModelSettingsPanel({
   aux,
   refreshKey,
@@ -789,7 +877,9 @@ function ModelSettingsPanel({
 }) {
   const [auxModalOpen, setAuxModalOpen] = useState(false);
   const [moaModalOpen, setMoaModalOpen] = useState(false);
+  const [fusionModalOpen, setFusionModalOpen] = useState(false);
   const [moa, setMoa] = useState<MoaConfigResponse | null>(null);
+  const [fusion, setFusion] = useState<FusionPresetsResponse | null>(null);
   const [picker, setPicker] = useState<PickerTarget | null>(null);
 
   const mainProv = aux?.main.provider ?? "";
@@ -797,6 +887,7 @@ function ModelSettingsPanel({
 
   useEffect(() => {
     api.getMoaModels().then(setMoa).catch(() => setMoa(null));
+    api.getFusionPresets().then(setFusion).catch(() => setFusion(null));
   }, [refreshKey]);
 
   const applyAssignment = async ({
@@ -915,6 +1006,23 @@ function ModelSettingsPanel({
           </Button>
         </div>
 
+        <div className="flex min-w-0 flex-col gap-2 bg-muted/20 border border-border/50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 mb-0.5">
+              <Zap className="h-3 w-3 text-text-tertiary" />
+              <span className="text-display text-xs font-medium tracking-wider">
+                Fusion presets
+              </span>
+            </div>
+            <div className="text-xs font-mono text-text-secondary truncate">
+              {fusion ? `${fusion.presets.length} preset${fusion.presets.length === 1 ? "" : "s"}` : "not loaded"}
+            </div>
+          </div>
+          <Button size="sm" outlined onClick={() => setFusionModalOpen(true)} disabled={!fusion} className="shrink-0 self-start text-xs uppercase sm:self-center">
+            Configure
+          </Button>
+        </div>
+
         {picker && (
           <ModelPickerDialog
             key={`picker-${refreshKey}`}
@@ -952,6 +1060,17 @@ function ModelSettingsPanel({
               onSaved();
             }}
             onClose={() => setMoaModalOpen(false)}
+          />
+        )}
+
+        {fusionModalOpen && fusion && (
+          <FusionPresetsModal
+            config={fusion}
+            onSaved={(next) => {
+              setFusion(next);
+              onSaved();
+            }}
+            onClose={() => setFusionModalOpen(false)}
           />
         )}
       </CardContent>

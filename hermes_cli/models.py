@@ -71,6 +71,7 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     # NVIDIA
     ("nvidia/nemotron-3-super-120b-a12b",      ""),
     # OpenRouter routers
+    ("openrouter/fusion",                       "multi-model deliberation router"),
     ("openrouter/pareto-code",                 "auto-routes to cheapest coder meeting openrouter.min_coding_score"),
     # Free tier
     ("openrouter/elephant-alpha",              "free"),
@@ -1287,6 +1288,23 @@ def _openrouter_model_is_free(pricing: Any) -> bool:
         return False
 
 
+_OPENROUTER_AGENTIC_ROUTER_MODELS = frozenset({
+    "openrouter/fusion",
+    "openrouter/pareto-code",
+})
+
+
+def _ensure_openrouter_router_models(models: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Keep first-class OpenRouter router slugs visible if the remote manifest lags."""
+    seen = {mid for mid, _ in models}
+    out = list(models)
+    for mid, desc in OPENROUTER_MODELS:
+        if mid in _OPENROUTER_AGENTIC_ROUTER_MODELS and mid not in seen:
+            out.append((mid, desc))
+            seen.add(mid)
+    return out
+
+
 def _openrouter_model_supports_tools(item: Any) -> bool:
     """Return True when the model's ``supported_parameters`` advertise tool calling.
 
@@ -1305,6 +1323,14 @@ def _openrouter_model_supports_tools(item: Any) -> bool:
     """
     if not isinstance(item, dict):
         return True
+    mid = str(item.get("id") or "").strip().lower()
+    if mid in _OPENROUTER_AGENTIC_ROUTER_MODELS:
+        # OpenRouter routers expose synthetic model slugs whose catalog rows
+        # currently report supported_parameters=[] even though the chat
+        # completions endpoint handles them as first-class agentic routes.
+        # Keep those curated router slugs selectable while still dropping
+        # arbitrary non-tool models that explicitly omit `tools`.
+        return True
     params = item.get("supported_parameters")
     if not isinstance(params, list):
         # Field absent / malformed / None — be permissive.
@@ -1321,7 +1347,11 @@ def fetch_openrouter_models(
     global _openrouter_catalog_cache
 
     if _openrouter_catalog_cache is not None and not force_refresh:
-        return list(_openrouter_catalog_cache)
+        try:
+            from hermes_cli.fusion_presets import append_fusion_model_tuples
+            return append_fusion_model_tuples("openrouter", list(_openrouter_catalog_cache))
+        except Exception:
+            return list(_openrouter_catalog_cache)
 
     # Prefer the remotely-hosted catalog manifest; fall back to the in-repo
     # snapshot when the manifest is unreachable. Both are curated lists that
@@ -1332,7 +1362,7 @@ def fetch_openrouter_models(
         remote = get_curated_openrouter_models()
     except Exception:
         remote = None
-    fallback = list(remote) if remote else list(OPENROUTER_MODELS)
+    fallback = _ensure_openrouter_router_models(list(remote) if remote else list(OPENROUTER_MODELS))
     preferred_ids = [mid for mid, _ in fallback]
 
     try:
@@ -1376,6 +1406,11 @@ def fetch_openrouter_models(
 
     first_id, _ = curated[0]
     curated[0] = (first_id, "recommended")
+    try:
+        from hermes_cli.fusion_presets import append_fusion_model_tuples
+        curated = append_fusion_model_tuples("openrouter", curated)
+    except Exception:
+        pass
     _openrouter_catalog_cache = curated
     return list(curated)
 
@@ -2217,7 +2252,11 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
             if creds:
                 live = fetch_nous_models(api_key=creds.get("api_key", ""), inference_base_url=creds.get("base_url", ""))
                 if live:
-                    return live
+                    try:
+                        from hermes_cli.fusion_presets import append_fusion_model_ids
+                        return append_fusion_model_ids("nous", live)
+                    except Exception:
+                        return live
         except Exception:
             pass
         # Live failed (or no creds). Fall back to the docs-hosted manifest
@@ -2225,7 +2264,11 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         # added Portal models still surface without a Hermes release.
         manifest_ids = get_curated_nous_model_ids()
         if manifest_ids:
-            return manifest_ids
+            try:
+                from hermes_cli.fusion_presets import append_fusion_model_ids
+                return append_fusion_model_ids("nous", manifest_ids)
+            except Exception:
+                return manifest_ids
     if normalized == "stepfun":
         try:
             from hermes_cli.auth import resolve_api_key_provider_credentials

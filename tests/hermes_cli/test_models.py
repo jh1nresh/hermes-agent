@@ -135,6 +135,71 @@ class TestFetchOpenRouterModels:
         # Image-only model advertised supported_parameters WITHOUT tools → must be dropped.
         assert "google/gemini-3-pro-image-preview" not in ids
 
+    def test_keeps_openrouter_router_slugs_despite_empty_supported_parameters(self, monkeypatch):
+        """OpenRouter router slugs may report [] but are valid chat models."""
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return (
+                    b'{"data":['
+                    b'{"id":"openrouter/fusion","pricing":{"prompt":"-1","completion":"-1"},'
+                    b'"supported_parameters":[]},'
+                    b'{"id":"openrouter/pareto-code","pricing":{"prompt":"-1","completion":"-1"},'
+                    b'"supported_parameters":[]}'
+                    b']}'
+                )
+
+        monkeypatch.setattr(
+            _models_mod,
+            "OPENROUTER_MODELS",
+            [
+                ("openrouter/fusion", "multi-model deliberation router"),
+                ("openrouter/pareto-code", "auto-routes to cheapest coder"),
+            ],
+        )
+        monkeypatch.setattr(_models_mod, "_openrouter_catalog_cache", None)
+        with patch("hermes_cli.models.urllib.request.urlopen", return_value=_Resp()):
+            models = fetch_openrouter_models(force_refresh=True)
+
+        ids = [mid for mid, _ in models]
+        assert "openrouter/fusion" in ids
+        assert "openrouter/pareto-code" in ids
+
+    def test_remote_manifest_lag_does_not_hide_openrouter_fusion(self, monkeypatch):
+        """Fusion must stay selectable even before the hosted manifest refreshes."""
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return (
+                    b'{"data":['
+                    b'{"id":"openrouter/fusion","pricing":{"prompt":"-1","completion":"-1"},'
+                    b'"supported_parameters":[]},'
+                    b'{"id":"anthropic/claude-opus-4.8","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]}'
+                    b']}'
+                )
+
+        monkeypatch.setattr(_models_mod, "_openrouter_catalog_cache", None)
+        monkeypatch.setattr(
+            "hermes_cli.model_catalog.get_curated_openrouter_models",
+            lambda: [("anthropic/claude-opus-4.8", "")],
+        )
+        with patch("hermes_cli.models.urllib.request.urlopen", return_value=_Resp()):
+            models = fetch_openrouter_models(force_refresh=True)
+
+        ids = [mid for mid, _ in models]
+        assert "openrouter/fusion" in ids
+
     def test_permissive_when_supported_parameters_missing(self, monkeypatch):
         """Models missing the supported_parameters field keep appearing in the picker.
 
@@ -210,6 +275,13 @@ class TestOpenRouterToolSupportHelper:
         assert _openrouter_model_supports_tools(
             {"id": "x", "supported_parameters": []}
         ) is False
+
+    def test_agentic_router_empty_supported_parameters_are_allowed(self):
+        from hermes_cli.models import _openrouter_model_supports_tools
+
+        assert _openrouter_model_supports_tools(
+            {"id": "openrouter/fusion", "supported_parameters": []}
+        ) is True
 
 
 class TestFindOpenrouterSlug:

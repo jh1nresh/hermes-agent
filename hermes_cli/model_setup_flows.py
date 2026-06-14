@@ -194,6 +194,11 @@ def _model_flow_nous(config, current_model="", args=None):
     )
 
     model_ids = get_curated_nous_model_ids()
+    try:
+        from hermes_cli.fusion_presets import append_fusion_model_ids
+        model_ids = append_fusion_model_ids("nous", model_ids)
+    except Exception:
+        pass
     if not model_ids:
         print("No curated models available for Nous Portal.")
         return

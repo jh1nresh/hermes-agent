@@ -1327,6 +1327,12 @@ def list_authenticated_providers(
     # requiring a Hermes release. Falls back to the in-repo
     # _PROVIDER_MODELS["nous"] snapshot when the manifest is unreachable.
     curated["nous"] = get_curated_nous_model_ids()
+    try:
+        from hermes_cli.fusion_presets import append_fusion_model_ids
+        curated["openrouter"] = append_fusion_model_ids("openrouter", curated.get("openrouter", []))
+        curated["nous"] = append_fusion_model_ids("nous", curated.get("nous", []))
+    except Exception:
+        pass
     # Ollama Cloud uses dynamic discovery (no static curated list)
     if "ollama-cloud" not in curated:
         from hermes_cli.models import fetch_ollama_cloud_models
@@ -1588,6 +1594,12 @@ def list_authenticated_providers(
                 model_ids = curated.get(hermes_slug, []) or curated.get(pid, [])
                 if hermes_slug in _MODELS_DEV_PREFERRED:
                     model_ids = _merge_with_models_dev(hermes_slug, model_ids)
+        if hermes_slug in {"openrouter", "nous"}:
+            try:
+                from hermes_cli.fusion_presets import append_fusion_model_ids
+                model_ids = append_fusion_model_ids(hermes_slug, list(model_ids))
+            except Exception:
+                pass
         total = len(model_ids)
         top = model_ids[:max_models]
 

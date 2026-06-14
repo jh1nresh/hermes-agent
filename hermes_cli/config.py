@@ -1209,6 +1209,15 @@ DEFAULT_CONFIG = {
         "min_coding_score": 0.65,
     },
 
+    # User-defined OpenRouter Fusion presets. Each preset becomes a selectable
+    # model slug (`fusion/<slug>`) under its configured provider (`openrouter`
+    # or `nous`). At request time Hermes sends model `openrouter/fusion` with
+    # an explicit `openrouter:fusion` server-tool config containing the chosen
+    # analysis panel and optional judge model.
+    "fusion": {
+        "presets": [],
+    },
+
     # AWS Bedrock provider configuration.
     # Only used when model.provider is "bedrock".
     "bedrock": {

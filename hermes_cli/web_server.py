@@ -535,6 +535,7 @@ _CATEGORY_MERGE: Dict[str, str] = {
     "code_execution": "agent",
     "prompt_caching": "agent",
     "goals": "agent",
+    "fusion": "agent",
     "updates": "general",
     # `onboarding.profile_build` is the only schema-surfaced onboarding field
     # (`onboarding.seen` is an internal latch dict, not a user setting), so fold
@@ -750,6 +751,22 @@ class MoaConfigPayload(BaseModel):
     aggregator_temperature: float = 0.4
     max_tokens: int = 4096
     enabled: bool = True
+    profile: Optional[str] = None
+
+
+class FusionPresetPayload(BaseModel):
+    provider: str = "openrouter"
+    slug: str
+    analysis_models: list[str]
+    judge_model: str = ""
+    max_tool_calls: Optional[int] = None
+    max_completion_tokens: Optional[int] = None
+    reasoning: Optional[dict] = None
+    temperature: Optional[float] = None
+
+
+class FusionPresetsPayload(BaseModel):
+    presets: list[FusionPresetPayload]
     profile: Optional[str] = None
 
 
@@ -3296,6 +3313,52 @@ def set_moa_models(body: MoaConfigPayload, profile: Optional[str] = None):
     except Exception:
         _log.exception("PUT /api/model/moa failed")
         raise HTTPException(status_code=500, detail="Failed to save MoA config")
+
+
+@app.get("/api/model/fusion")
+def get_fusion_presets_api(profile: Optional[str] = None):
+    """Return configured OpenRouter/Nous Fusion presets."""
+    try:
+        from hermes_cli.fusion_presets import normalize_fusion_presets
+
+        with _profile_scope(profile):
+            cfg = load_config()
+            presets = normalize_fusion_presets(cfg.get("fusion") if isinstance(cfg, dict) else {})
+        return {"presets": presets}
+    except HTTPException:
+        raise
+    except Exception:
+        _log.exception("GET /api/model/fusion failed")
+        raise HTTPException(status_code=500, detail="Failed to read Fusion presets")
+
+
+@app.put("/api/model/fusion")
+def set_fusion_presets_api(body: FusionPresetsPayload, profile: Optional[str] = None):
+    """Persist OpenRouter/Nous Fusion presets."""
+    try:
+        from hermes_cli.fusion_presets import normalize_fusion_presets
+
+        raw = {"presets": [preset.dict() for preset in body.presets]}
+        presets = normalize_fusion_presets(raw)
+        with _profile_scope(body.profile or profile):
+            cfg = load_config()
+            cfg["fusion"] = {"presets": presets}
+            save_config(cfg)
+        try:
+            from hermes_cli.models import clear_provider_models_cache
+            import hermes_cli.models as _models
+
+            _models._openrouter_catalog_cache = None
+            clear_provider_models_cache("openrouter")
+            clear_provider_models_cache("nous")
+        except Exception:
+            pass
+        return {"ok": True, "presets": presets}
+    except HTTPException:
+        raise
+    except Exception:
+        _log.exception("PUT /api/model/fusion failed")
+        raise HTTPException(status_code=500, detail="Failed to save Fusion presets")
 
 
 @app.post("/api/model/set")

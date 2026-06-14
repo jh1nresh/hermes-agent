@@ -236,6 +236,31 @@ class TestChatCompletionsBuildKwargs:
             {"id": "pareto-router", "min_coding_score": 0.8}
         ]
 
+    def test_fusion_request_overrides_replace_model_and_tools(self, transport):
+        from providers import get_provider_profile
+        profile = get_provider_profile("openrouter")
+        msgs = [{"role": "user", "content": "Hi"}]
+        fusion_tool = {
+            "type": "openrouter:fusion",
+            "parameters": {"analysis_models": ["openai/gpt-5.5"]},
+        }
+
+        kw = transport.build_kwargs(
+            model="fusion/research",
+            messages=msgs,
+            tools=[{"type": "function", "function": {"name": "local_tool", "parameters": {}}}],
+            provider_profile=profile,
+            request_overrides={
+                "model": "openrouter/fusion",
+                "tools": [fusion_tool],
+                "tool_choice": "required",
+            },
+        )
+
+        assert kw["model"] == "openrouter/fusion"
+        assert kw["tools"] == [fusion_tool]
+        assert kw["tool_choice"] == "required"
+
     def test_nous_tags(self, transport):
         from agent.portal_tags import nous_portal_tags
         from providers import get_provider_profile

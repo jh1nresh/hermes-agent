@@ -4937,6 +4937,16 @@ def _build_call_kwargs(
     base_url: Optional[str] = None,
 ) -> dict:
     """Build kwargs for .chat.completions.create() with model/provider adjustments."""
+    fusion_overrides = None
+    try:
+        from hermes_cli.fusion_presets import fusion_request_overrides_for_model
+        fusion_overrides = fusion_request_overrides_for_model(provider, model)
+    except Exception:
+        fusion_overrides = None
+    if fusion_overrides:
+        model = str(fusion_overrides.get("model") or model)
+        tools = fusion_overrides.get("tools") or tools
+
     kwargs: Dict[str, Any] = {
         "model": model,
         "messages": messages,
@@ -5002,6 +5012,9 @@ def _build_call_kwargs(
                 _seen.add(_tname)
             _deduped.append(_t)
         kwargs["tools"] = _deduped
+
+    if fusion_overrides and fusion_overrides.get("tool_choice"):
+        kwargs["tool_choice"] = fusion_overrides["tool_choice"]
 
     # Provider-specific extra_body
     merged_extra = dict(extra_body or {})

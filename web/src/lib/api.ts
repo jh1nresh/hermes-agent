@@ -75,6 +75,7 @@ const PROFILE_SCOPED_PREFIXES = [
   "/api/model/set",
   "/api/model/auxiliary",
   "/api/model/moa",
+  "/api/model/fusion",
   "/api/model/options",
 ];
 
@@ -453,6 +454,13 @@ export const api = {
   getMoaModels: () => fetchJSON<MoaConfigResponse>("/api/model/moa"),
   saveMoaModels: (body: MoaConfigResponse) =>
     fetchJSON<MoaConfigResponse & { ok: boolean }>("/api/model/moa", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  getFusionPresets: () => fetchJSON<FusionPresetsResponse>("/api/model/fusion"),
+  saveFusionPresets: (body: FusionPresetsResponse) =>
+    fetchJSON<FusionPresetsResponse & { ok: boolean }>("/api/model/fusion", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -2037,6 +2045,22 @@ export interface MoaConfigResponse {
   aggregator_temperature: number;
   max_tokens: number;
   enabled: boolean;
+}
+
+export interface FusionPreset {
+  provider: "openrouter" | "nous" | string;
+  slug: string;
+  model_slug?: string;
+  analysis_models: string[];
+  judge_model?: string;
+  max_tool_calls?: number | null;
+  max_completion_tokens?: number | null;
+  reasoning?: Record<string, unknown> | null;
+  temperature?: number | null;
+}
+
+export interface FusionPresetsResponse {
+  presets: FusionPreset[];
 }
 
 export interface ModelAssignmentRequest {

@@ -32,6 +32,22 @@ def test_normalize_moa_config_drops_incomplete_slots_and_keeps_valid_ones():
     assert cfg["aggregator"] == {"provider": "openrouter", "model": "anthropic/claude-opus-4.8"}
 
 
+def test_normalize_moa_config_accepts_openrouter_fusion_model_slug():
+    cfg = normalize_moa_config(
+        {
+            "reference_models": [
+                {"provider": "openrouter", "model": "openrouter/fusion"},
+            ],
+            "aggregator": {"provider": "openrouter", "model": "openrouter/fusion"},
+        }
+    )
+
+    assert cfg["reference_models"] == [
+        {"provider": "openrouter", "model": "openrouter/fusion"}
+    ]
+    assert cfg["aggregator"] == {"provider": "openrouter", "model": "openrouter/fusion"}
+
+
 def test_build_moa_turn_prompt_keeps_user_prompt_and_marks_mode():
     prompt = build_moa_turn_prompt("write a file then inspect it")
 

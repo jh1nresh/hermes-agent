@@ -387,6 +387,13 @@ def normalize_model_for_provider(model_input: str, target_provider: str) -> str:
     if not name:
         return name
 
+    # User-defined Fusion presets intentionally live in a Hermes-local
+    # namespace (``fusion/<slug>``). Aggregators must receive that slug
+    # unchanged so the runtime can map it to ``openrouter/fusion`` plus the
+    # configured server-tool payload; don't try to vendor-prefix it.
+    if name.lower().startswith("fusion/"):
+        return name
+
     provider = _normalize_provider_alias(target_provider)
 
     # --- Aggregators: need vendor/model format ---
