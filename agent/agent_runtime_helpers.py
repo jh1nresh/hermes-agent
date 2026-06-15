@@ -1685,6 +1685,21 @@ def switch_model(agent, new_model, new_provider, api_key='', base_url='', api_mo
     agent._fallback_activated = False
     agent._fallback_index = 0
 
+    # Drop a credential pool that belongs to the previous provider.  The pool
+    # was seeded at agent init; if it survives a cross-provider /model switch,
+    # a later recoverable 401/429 can rotate back onto an old-provider entry
+    # and overwrite the live runtime with the wrong base_url/api_key.
+    _existing_pool = getattr(agent, "_credential_pool", None)
+    if _existing_pool is not None:
+        _pool_provider = (getattr(_existing_pool, "provider", "") or "").strip().lower()
+        _new_provider_norm = (new_provider or "").strip().lower()
+        if _pool_provider and _new_provider_norm and _pool_provider != _new_provider_norm:
+            logger.info(
+                "Model switch to %s/%s: detaching credential pool seeded for provider %s",
+                new_provider, new_model, _pool_provider,
+            )
+            agent._credential_pool = None
+
     # When the user deliberately swaps primary providers (e.g. openrouter
     # → anthropic), drop any fallback entries that target the OLD primary
     # or the NEW one.  The chain was seeded from config at agent init for

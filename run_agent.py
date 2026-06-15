@@ -3962,9 +3962,42 @@ class AIAgent:
         if merged:
             self._client_kwargs["default_headers"] = merged
 
+    def _pool_entry_swap_base_url(self, entry) -> Any:
+        """Resolve the base URL to adopt when swapping to a pool credential.
+
+        Env-seeded pool entries store the provider registry default endpoint,
+        while runtime resolution can layer a user-configured ``model.base_url``
+        override on top.  If rotation blindly adopts the entry's default URL,
+        Xiaomi Token Plan sessions get re-pointed from their configured
+        ``token-plan-*`` host back to the standard API host after a 401/429.
+
+        Keep the current URL when the entry carries only the provider default;
+        entries with a real per-credential endpoint still win.
+        """
+        runtime_base = getattr(entry, "runtime_base_url", None) or getattr(entry, "base_url", None)
+        if not runtime_base:
+            return self.base_url
+
+        current_base = self.base_url if isinstance(self.base_url, str) else ""
+        if isinstance(runtime_base, str) and current_base:
+            try:
+                from hermes_cli.auth import PROVIDER_REGISTRY
+                pconfig = PROVIDER_REGISTRY.get((getattr(self, "provider", "") or "").strip().lower())
+            except Exception:
+                pconfig = None
+            default_url = (getattr(pconfig, "inference_base_url", "") or "").rstrip("/")
+            if (
+                default_url
+                and runtime_base.rstrip("/") == default_url
+                and current_base.rstrip("/") != default_url
+            ):
+                return self.base_url
+
+        return runtime_base
+
     def _swap_credential(self, entry) -> None:
         runtime_key = getattr(entry, "runtime_api_key", None) or getattr(entry, "access_token", "")
-        runtime_base = getattr(entry, "runtime_base_url", None) or getattr(entry, "base_url", None) or self.base_url
+        runtime_base = self._pool_entry_swap_base_url(entry)
 
         if self.api_mode == "anthropic_messages":
             from agent.anthropic_adapter import build_anthropic_client, _is_oauth_token

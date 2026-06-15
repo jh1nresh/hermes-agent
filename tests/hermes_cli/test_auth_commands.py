@@ -62,6 +62,73 @@ def test_auth_add_api_key_persists_manual_entry(tmp_path, monkeypatch):
     assert entry["access_token"] == "sk-or-manual"
 
 
+def test_auth_add_api_key_uses_config_base_url_for_active_provider(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.delenv("XIAOMI_API_KEY", raising=False)
+    monkeypatch.delenv("XIAOMI_BASE_URL", raising=False)
+    _write_auth_store(tmp_path, {"version": 1, "providers": {}})
+    token_plan_url = "https://token-plan-ams.xiaomimimo.com/v1"
+    (hermes_home / "config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "model": {
+                    "provider": "xiaomi",
+                    "default": "mimo-v2.5-pro",
+                    "base_url": token_plan_url,
+                }
+            }
+        )
+    )
+
+    from hermes_cli.auth_commands import auth_add_command
+
+    class _Args:
+        provider = "xiaomi"
+        auth_type = "api-key"
+        api_key = "sk-xiaomi-token-plan"
+        label = "token-plan"
+
+    auth_add_command(_Args())
+
+    payload = json.loads((hermes_home / "auth.json").read_text())
+    entries = payload["credential_pool"]["xiaomi"]
+    entry = next(item for item in entries if item["source"] == "manual")
+    assert entry["base_url"] == token_plan_url
+
+
+def test_auth_add_api_key_does_not_inherit_other_provider_base_url(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    _write_auth_store(tmp_path, {"version": 1, "providers": {}})
+    (hermes_home / "config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "model": {
+                    "provider": "xiaomi",
+                    "default": "mimo-v2.5-pro",
+                    "base_url": "https://token-plan-ams.xiaomimimo.com/v1",
+                }
+            }
+        )
+    )
+
+    from hermes_cli.auth_commands import auth_add_command
+
+    class _Args:
+        provider = "anthropic"
+        auth_type = "api-key"
+        api_key = "sk-ant-manual"
+        label = "anthropic"
+
+    auth_add_command(_Args())
+
+    payload = json.loads((hermes_home / "auth.json").read_text())
+    entries = payload["credential_pool"]["anthropic"]
+    entry = next(item for item in entries if item["source"] == "manual")
+    assert entry["base_url"] != "https://token-plan-ams.xiaomimimo.com/v1"
+
+
 def test_auth_add_anthropic_oauth_persists_pool_entry(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

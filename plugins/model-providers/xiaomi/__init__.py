@@ -9,8 +9,12 @@ xiaomi = ProviderProfile(
     env_vars=("XIAOMI_API_KEY",),
     base_url="https://api.xiaomimimo.com/v1",
     supports_health_check=False,  # /v1/models returns 401 even with valid key
-    supports_vision=True,  # mimo-v2-omni is vision-capable
+    supports_vision=True,  # mimo-v2-omni and mimo-v2.5 are vision-capable
     supports_vision_tool_messages=False,  # rejects list-type tool content (400 "text is not set")
+    fallback_models=(
+        "mimo-v2.5-pro",
+        "mimo-v2.5",
+    ),
 )
 
 register_provider(xiaomi)

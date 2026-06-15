@@ -145,6 +145,14 @@ class TestXiaomiModelCatalog:
         assert "xiaomi" in _PROVIDER_MODELS
         assert len(_PROVIDER_MODELS["xiaomi"]) >= 1
 
+    def test_provider_profile_fallback_models_include_current_mimo(self):
+        from providers import get_provider_profile
+
+        profile = get_provider_profile("xiaomi")
+        assert profile is not None
+        assert "mimo-v2.5-pro" in profile.fallback_models
+        assert "mimo-v2.5" in profile.fallback_models
+
     def test_list_agentic_models_mock(self, monkeypatch):
         """When models.dev returns Xiaomi data, list_agentic_models should return models."""
         from agent import models_dev as md
