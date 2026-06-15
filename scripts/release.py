@@ -1374,6 +1374,9 @@ AUTHOR_MAP = {
     # batch salvage (May 2026 LHF run, group 2)
     "shellybotmoyer@example.com": "shellybotmoyer",  # PR #26661 (kanban --severity >=)
     "coulson@shellybotmoyer.com": "shellybotmoyer",  # PR #25576 (credential_pool ISO rehydrate)
+    "pppan2003@gmail.com": "pppan2003",  # PR #25379 salvage (Xiaomi MiMo /anthropic thinking replay)
+    "zhao.zr11@protonmail.com": "CallMe1101",  # PR #26802 salvage (Xiaomi MiMo /anthropic thinking replay)
+    "morpheu5code@gmail.com": "Morpheu5Code",  # PR #26803 (Slack file upload parsing)
     "258858106+shellybotmoyer@users.noreply.github.com": "shellybotmoyer",
     "33156212+ether-btc@users.noreply.github.com": "ether-btc",  # PR #26632 (memory provider whitespace guard)
     "Bloomtonjovish@gmail.com": "LifeJiggy",  # PR #26516 (paste collapse logging)

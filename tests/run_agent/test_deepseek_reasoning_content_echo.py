@@ -14,9 +14,10 @@ Fix covers three paths:
    persisted poisoned.
 2. ``_copy_reasoning_content_for_api`` — already-poisoned history replays
    with ``reasoning_content=" "`` injected defensively.
-3. Detection covers three signals: ``provider == "deepseek"``,
-   ``"deepseek" in model``, and ``api.deepseek.com`` host match. The third
-   catches custom-provider setups pointing at DeepSeek.
+3. Detection is provider/host driven: ``provider == "deepseek"`` or the
+   ``api.deepseek.com`` host. Model-name-only matching is intentionally
+   rejected because aggregators re-export DeepSeek slugs but do not accept
+   native ``reasoning_content`` echoes.
 
 The placeholder is a single space (not empty string) because DeepSeek V4 Pro
 tightened validation and rejects empty-string reasoning_content with a
@@ -72,16 +73,16 @@ def _build_sdk_message(reasoning_content=_ATTR_ABSENT, **extra):
 
 
 class TestNeedsDeepSeekToolReasoning:
-    """_needs_deepseek_tool_reasoning() recognises all three detection signals."""
+    """_needs_deepseek_tool_reasoning() recognises native endpoint signals."""
 
     def test_provider_deepseek(self) -> None:
         agent = _make_agent(provider="deepseek", model="deepseek-v4-flash")
         assert agent._needs_deepseek_tool_reasoning() is True
 
-    def test_model_substring(self) -> None:
-        # Custom provider pointing at DeepSeek with provider='custom'
+    def test_model_substring_without_native_provider_or_host_is_false(self) -> None:
+        # Aggregators can re-export DeepSeek slugs but reject native echoes.
         agent = _make_agent(provider="custom", model="deepseek-v4-pro")
-        assert agent._needs_deepseek_tool_reasoning() is True
+        assert agent._needs_deepseek_tool_reasoning() is False
 
     def test_base_url_host(self) -> None:
         agent = _make_agent(
@@ -106,6 +107,50 @@ class TestNeedsDeepSeekToolReasoning:
     def test_empty_everything(self) -> None:
         agent = _make_agent()
         assert agent._needs_deepseek_tool_reasoning() is False
+
+
+class TestNeedsMiMoToolReasoning:
+    """_needs_mimo_tool_reasoning() covers native hosts and known aggregators."""
+
+    def test_provider_xiaomi(self) -> None:
+        agent = _make_agent(provider="xiaomi", model="mimo-v2.5-pro")
+        assert agent._needs_mimo_tool_reasoning() is True
+
+    def test_xiaomi_base_url_host(self) -> None:
+        agent = _make_agent(
+            provider="custom",
+            model="some-alias",
+            base_url="https://token-plan-sgp.xiaomimimo.com/v1",
+        )
+        assert agent._needs_mimo_tool_reasoning() is True
+
+    def test_openrouter_xiaomi_slug_is_true(self) -> None:
+        agent = _make_agent(
+            provider="openrouter",
+            model="xiaomi/mimo-v2.5-pro",
+            base_url="https://openrouter.ai/api/v1",
+        )
+        assert agent._needs_mimo_tool_reasoning() is True
+
+    def test_nous_xiaomi_slug_is_true(self) -> None:
+        agent = _make_agent(
+            provider="nous",
+            model="xiaomi/mimo-v2.5-pro",
+            base_url="https://inference-api.nousresearch.com/v1",
+        )
+        assert agent._needs_mimo_tool_reasoning() is True
+
+    def test_custom_mimo_slug_without_native_host_is_false(self) -> None:
+        agent = _make_agent(provider="custom", model="mimo-v2.5-pro")
+        assert agent._needs_mimo_tool_reasoning() is False
+
+    def test_openrouter_non_mimo_xiaomi_slug_is_false(self) -> None:
+        agent = _make_agent(
+            provider="openrouter",
+            model="xiaomi/other-model",
+            base_url="https://openrouter.ai/api/v1",
+        )
+        assert agent._needs_mimo_tool_reasoning() is False
 
 
 class TestCopyReasoningContentForApi:

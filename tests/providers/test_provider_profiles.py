@@ -96,6 +96,41 @@ class TestKimiProfile:
         assert "reasoning_effort" not in tl
 
 
+class TestXiaomiProfile:
+    def test_alias_lookup(self):
+        p = get_provider_profile("mimo")
+        assert p is not None
+        assert p.name == "xiaomi"
+
+    def test_no_config_omits_thinking(self):
+        p = get_provider_profile("xiaomi")
+        assert p is not None
+        eb, tl = p.build_api_kwargs_extras(reasoning_config=None)
+        assert eb == {}
+        assert tl == {}
+
+    def test_disabled_reasoning_disables_thinking(self):
+        p = get_provider_profile("xiaomi")
+        assert p is not None
+        eb, tl = p.build_api_kwargs_extras(reasoning_config={"enabled": False})
+        assert eb["thinking"] == {"type": "disabled"}
+        assert tl == {}
+
+    def test_effort_none_disables_thinking(self):
+        p = get_provider_profile("xiaomi")
+        assert p is not None
+        eb, tl = p.build_api_kwargs_extras(reasoning_config={"enabled": True, "effort": "none"})
+        assert eb["thinking"] == {"type": "disabled"}
+        assert tl == {}
+
+    def test_enabled_reasoning_omits_thinking(self):
+        p = get_provider_profile("xiaomi")
+        assert p is not None
+        eb, tl = p.build_api_kwargs_extras(reasoning_config={"enabled": True, "effort": "high"})
+        assert eb == {}
+        assert tl == {}
+
+
 class TestOpenRouterProfile:
     def test_extra_body_with_prefs(self):
         p = get_provider_profile("openrouter")

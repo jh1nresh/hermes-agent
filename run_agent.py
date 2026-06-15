@@ -4933,11 +4933,10 @@ class AIAgent:
         ``reasoning_content`` on every assistant tool-call message; omitting
         it causes the next replay to fail with HTTP 400.
 
-        Detection is host-driven, not model-name-driven: aggregators like
-        OpenRouter that re-export Kimi/Moonshot models speak their own
-        protocol and reject ``reasoning_content`` echoes. We only enable the
-        kimi-reasoning replay when the request actually targets a
-        kimi/moonshot endpoint or the dedicated kimi-coding provider.
+        Detection is host/provider-driven, not model-name-driven: aggregators
+        like OpenRouter that re-export thinking models speak their own protocol
+        and reject ``reasoning_content`` echoes. We only enable replay when the
+        request actually targets the provider's native endpoint.
         """
         return (
             self.provider in {"kimi-coding", "kimi-coding-cn"}
@@ -4953,11 +4952,8 @@ class AIAgent:
         assistant tool-call turn; omitting it causes HTTP 400 when the
         message is replayed in a subsequent API request (#15250).
         """
-        provider = (self.provider or "").lower()
-        model = (self.model or "").lower()
         return (
-            provider == "deepseek"
-            or "deepseek" in model
+            (getattr(self, "provider", "") or "").lower() == "deepseek"
             or base_url_host_matches(self.base_url, "api.deepseek.com")
         )
 
@@ -4968,11 +4964,12 @@ class AIAgent:
         tool-call message when replaying history; omitting it causes HTTP 400.
         Refs: https://platform.xiaomimimo.com/docs/zh-CN/usage-guide/passing-back-reasoning_content
         """
-        provider = (self.provider or "").lower()
-        model = (self.model or "").lower()
+        provider = (getattr(self, "provider", "") or "").lower()
+        model = (getattr(self, "model", "") or "").lower()
+        aggregator_mimo = provider in {"openrouter", "nous"} and model.startswith("xiaomi/mimo-")
         return (
             provider == "xiaomi"
-            or "mimo" in model
+            or aggregator_mimo
             or base_url_host_matches(self.base_url, "api.xiaomimimo.com")
             or base_url_host_matches(self.base_url, "xiaomimimo.com")
         )

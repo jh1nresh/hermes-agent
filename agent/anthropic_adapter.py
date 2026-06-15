@@ -528,6 +528,23 @@ def _is_deepseek_anthropic_endpoint(base_url: str | None) -> bool:
     return "/anthropic" in normalized.rstrip("/").lower()
 
 
+def _is_xiaomi_anthropic_endpoint(base_url: str | None) -> bool:
+    """Return True for Xiaomi MiMo's Anthropic-compatible endpoint.
+
+    MiMo's ``/anthropic`` route speaks the Anthropic Messages protocol but
+    requires unsigned thinking blocks synthesized from ``reasoning_content``
+    to round-trip on replayed assistant tool-call messages. Pin the match to
+    Xiaomi's host and the ``/anthropic`` path so OpenAI-compatible MiMo bases
+    and aggregator ``xiaomi/mimo-*`` slugs do not get Anthropic replay semantics.
+    """
+    if not base_url_host_matches(base_url or "", "xiaomimimo.com"):
+        return False
+    normalized = _normalize_base_url_text(base_url)
+    if not normalized:
+        return False
+    return "/anthropic" in normalized.rstrip("/").lower()
+
+
 def _requires_bearer_auth(base_url: str | None) -> bool:
     """Return True for Anthropic-compatible providers that require Bearer auth.
 
@@ -2070,12 +2087,13 @@ def _manage_thinking_signatures(
     """
     _THINKING_TYPES = frozenset(("thinking", "redacted_thinking"))
     _is_third_party = _is_third_party_anthropic_endpoint(base_url)
-    # Kimi / DeepSeek share a contract: strip signed Anthropic blocks
-    # (neither upstream can validate Anthropic signatures), preserve unsigned
-    # ones synthesised from reasoning_content.  See #13848, #16748.
+    # Kimi / DeepSeek / MiMo share a contract: strip signed Anthropic blocks
+    # (none of these upstreams can validate Anthropic signatures), preserve
+    # unsigned ones synthesised from reasoning_content.  See #13848, #16748.
     _preserve_unsigned_thinking = (
         _is_kimi_family_endpoint(base_url, model)
         or _is_deepseek_anthropic_endpoint(base_url)
+        or _is_xiaomi_anthropic_endpoint(base_url)
     )
 
     last_assistant_idx = None
