@@ -545,14 +545,25 @@ def _supports_media_in_tool_results(provider: str, model: str) -> bool:
         results. Older Gemini does NOT.
 
     For unknown / legacy providers we conservatively return False — the
-    caller falls back to the legacy aux-LLM text path.  The check is relaxed
-    when the provider's ``ProviderProfile`` declares ``supports_vision=True``.
+    caller falls back to the legacy aux-LLM text path.  Model-level vision
+    support is deliberately not enough here: providers like Xiaomi MiMo accept
+    image content in user messages but reject list-type tool-result content.
     """
     if not isinstance(provider, str):
         return False
     p = provider.strip().lower()
     if not p:
         return False
+
+    # Provider profiles can explicitly deny list-type tool-result content
+    # even when their models accept multimodal user messages.
+    try:
+        from providers import get_provider_profile
+        profile = get_provider_profile(p)
+        if profile is not None and getattr(profile, "supports_vision_tool_messages", True) is False:
+            return False
+    except Exception:
+        pass
 
     # Aggregators that route to multiple vendors — assume support since
     # users on these aggregators are typically using vision-capable
@@ -583,17 +594,6 @@ def _supports_media_in_tool_results(provider: str, model: str) -> bool:
             return True
         return False
 
-    # Check the provider's registered profile for the supports_vision flag.
-    # This covers vision-capable providers like xiaomi, minimax, etc. that
-    # aren't in the hardcoded list above.
-    try:
-        from providers import get_provider_profile
-        profile = get_provider_profile(p)
-        if profile is not None and profile.supports_vision:
-            return True
-    except Exception:
-        pass
-
     # Other vision-capable provider stacks. Conservative default: False.
     # Add explicit entries here as we verify each provider's tool-result
     # multimodal support empirically.
@@ -606,14 +606,15 @@ def _should_use_native_vision_fast_path() -> bool:
 
     True when image routing resolves to ``native`` AND either the provider is
     known to accept images inside tool results, or the user explicitly declared
-    the model vision-capable via the ``model.supports_vision`` config override.
-    The override is the escape hatch for custom/local providers that aren't in
-    the static allowlist. Best-effort: any resolution failure returns False so
-    the caller falls back to the legacy aux-LLM path.
+    the model vision-capable via the ``model.supports_vision`` config override
+    without the provider profile explicitly denying tool-message vision. The
+    override is the escape hatch for custom/local providers that aren't in the
+    static allowlist. Best-effort: any resolution failure returns False so the
+    caller falls back to the legacy aux-LLM path.
     """
     try:
         from agent.auxiliary_client import _read_main_provider, _read_main_model
-        from agent.image_routing import decide_image_input_mode, _lookup_supports_vision
+        from agent.image_routing import decide_image_input_mode, _supports_vision_override
         from hermes_cli.config import load_config
 
         provider = _read_main_provider()
@@ -621,9 +622,18 @@ def _should_use_native_vision_fast_path() -> bool:
         cfg = load_config()
         if decide_image_input_mode(provider, model, cfg) != "native":
             return False
+
+        try:
+            from providers import get_provider_profile
+            profile = get_provider_profile((provider or "").strip())
+            if profile is not None and getattr(profile, "supports_vision_tool_messages", True) is False:
+                return False
+        except Exception:
+            pass
+
         return (
             _supports_media_in_tool_results(provider, model)
-            or _lookup_supports_vision(provider, model, cfg) is True
+            or _supports_vision_override(cfg, provider, model) is True
         )
     except Exception as exc:
         logger.debug("Native vision fast-path check failed: %s", exc)
