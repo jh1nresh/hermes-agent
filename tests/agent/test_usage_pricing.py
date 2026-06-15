@@ -1,3 +1,4 @@
+from decimal import Decimal
 from types import SimpleNamespace
 
 from agent.usage_pricing import (
@@ -104,6 +105,73 @@ def test_normalize_usage_openai_prefers_prompt_tokens_details_over_top_level():
 
     assert normalized.cache_read_tokens == 600
     assert normalized.cache_write_tokens == 150
+
+
+def test_normalize_usage_reads_xiaomi_cache_hit_tokens_variant():
+    usage = SimpleNamespace(
+        prompt_tokens=1000,
+        completion_tokens=200,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+        cache_hit_tokens=700,
+    )
+
+    normalized = normalize_usage(usage, provider="xiaomi", api_mode="chat_completions")
+
+    assert normalized.cache_read_tokens == 700
+    assert normalized.input_tokens == 300
+    assert normalized.output_tokens == 200
+
+
+def test_normalize_usage_reads_xiaomi_hit_tokens_variant():
+    usage = SimpleNamespace(
+        prompt_tokens=1000,
+        completion_tokens=200,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+        hit_tokens=650,
+    )
+
+    normalized = normalize_usage(usage, provider="xiaomi", api_mode="chat_completions")
+
+    assert normalized.cache_read_tokens == 650
+    assert normalized.input_tokens == 350
+
+
+def test_normalize_usage_reads_top_level_cache_tokens_variant():
+    usage = SimpleNamespace(
+        prompt_tokens=1000,
+        completion_tokens=200,
+        cache_tokens=600,
+    )
+
+    normalized = normalize_usage(usage, provider="xiaomi", api_mode="chat_completions")
+
+    assert normalized.cache_read_tokens == 600
+    assert normalized.input_tokens == 400
+
+
+def test_normalize_usage_reads_top_level_reasoning_tokens_when_details_missing():
+    usage = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=300,
+        reasoning_tokens=75,
+    )
+
+    normalized = normalize_usage(usage, provider="xiaomi", api_mode="chat_completions")
+
+    assert normalized.reasoning_tokens == 75
+
+
+def test_normalize_usage_prefers_nested_reasoning_tokens_over_top_level():
+    usage = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=300,
+        output_tokens_details=SimpleNamespace(reasoning_tokens=80),
+        reasoning_tokens=75,
+    )
+
+    normalized = normalize_usage(usage, provider="xiaomi", api_mode="chat_completions")
+
+    assert normalized.reasoning_tokens == 80
 
 
 def test_openrouter_models_api_pricing_is_converted_from_per_token_to_per_million(monkeypatch):
@@ -250,3 +318,57 @@ def test_deepseek_v4_pro_estimate_usage_cost():
     assert result.amount_usd is not None
     # 1M input × $1.74/M + 500K output × $3.48/M = $1.74 + $1.74 = $3.48
     assert float(result.amount_usd) == 3.48
+
+
+def test_xiaomi_mimo_v25_pricing_entry_exists():
+    entry = get_pricing_entry(
+        "mimo-v2.5",
+        provider="xiaomi",
+    )
+
+    assert entry is not None
+    assert entry.input_cost_per_million == Decimal("0.14")
+    assert entry.output_cost_per_million == Decimal("0.28")
+    assert entry.cache_read_cost_per_million == Decimal("0.0028")
+
+
+def test_xiaomi_mimo_v25_pro_pricing_entry_exists():
+    entry = get_pricing_entry(
+        "mimo-v2.5-pro",
+        provider="xiaomi",
+    )
+
+    assert entry is not None
+    assert entry.input_cost_per_million == Decimal("0.435")
+    assert entry.output_cost_per_million == Decimal("0.87")
+    assert entry.cache_read_cost_per_million == Decimal("0.0036")
+
+
+def test_xiaomi_mimo_v25_estimate_usage_cost_includes_cache_read():
+    result = estimate_usage_cost(
+        "mimo-v2.5",
+        CanonicalUsage(
+            input_tokens=1000000,
+            output_tokens=500000,
+            cache_read_tokens=1000000,
+        ),
+        provider="xiaomi",
+    )
+
+    assert result.status == "estimated"
+    assert result.amount_usd == Decimal("0.2828")
+
+
+def test_xiaomi_mimo_v25_pro_estimate_usage_cost_includes_cache_read():
+    result = estimate_usage_cost(
+        "mimo-v2.5-pro",
+        CanonicalUsage(
+            input_tokens=1000000,
+            output_tokens=500000,
+            cache_read_tokens=1000000,
+        ),
+        provider="xiaomi",
+    )
+
+    assert result.status == "estimated"
+    assert result.amount_usd == Decimal("0.8736")

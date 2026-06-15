@@ -415,6 +415,7 @@ AUTHOR_MAP = {
     "leon@agentlinker.ai": "agentlinker",
     "santoshhumagain1887@gmail.com": "npmisantosh",
     "39641663+luarss@users.noreply.github.com": "luarss",
+    "64351924+sujeet111@users.noreply.github.com": "sujeet111",
     "16263913+zccyman@users.noreply.github.com": "zccyman",
     "zccyman@users.noreply.github.com": "zccyman",  # PR #26998 (auxiliary fallback chain)
     "ahmetosrak@Ahmet-MacBook-Air.local": "Osraka",

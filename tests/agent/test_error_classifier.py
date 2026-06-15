@@ -1612,6 +1612,47 @@ class TestMultimodalToolContentUnsupported:
         assert result.reason == FailoverReason.multimodal_tool_content_unsupported
         assert result.retryable is True
 
+    def test_xiaomi_mimo_nested_param_backtick_text_is_not_set(self):
+        """MiMo can put the actionable message in error.param, not error.message."""
+        e = MockAPIError(
+            "Error code: 400 - {'error': {'code': '400', 'message': 'Param Incorrect'}}",
+            status_code=400,
+            body={
+                "error": {
+                    "code": "400",
+                    "message": "Param Incorrect",
+                    "param": "`text` is not set",
+                }
+            },
+        )
+
+        result = classify_api_error(e, provider="xiaomi", model="mimo-v2.5-pro")
+
+        assert result.reason == FailoverReason.multimodal_tool_content_unsupported
+        assert result.retryable is True
+
+    def test_xiaomi_mimo_top_level_param_backtick_text_is_not_set(self):
+        e = MockAPIError(
+            "HTTP 400: Param Incorrect",
+            status_code=400,
+            body={"message": "Param Incorrect", "param": "`text` is not set"},
+        )
+
+        result = classify_api_error(e, provider="xiaomi", model="mimo-v2.5-pro")
+
+        assert result.reason == FailoverReason.multimodal_tool_content_unsupported
+
+    def test_xiaomi_mimo_unrelated_param_stays_format_error(self):
+        e = MockAPIError(
+            "HTTP 400: Param Incorrect",
+            status_code=400,
+            body={"message": "Param Incorrect", "param": "model"},
+        )
+
+        result = classify_api_error(e, provider="xiaomi", model="mimo-v2.5-pro")
+
+        assert result.reason == FailoverReason.format_error
+
     def test_generic_tool_message_must_be_string(self):
         e = MockAPIError(
             "tool message content must be a string",

@@ -410,6 +410,29 @@ _OFFICIAL_DOCS_PRICING: Dict[tuple[str, str], PricingEntry] = {
         source_url="https://api-docs.deepseek.com/quick_start/pricing",
         pricing_version="deepseek-pricing-2026-05-12",
     ),
+    # Xiaomi MiMo
+    (
+        "xiaomi",
+        "mimo-v2.5",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("0.14"),
+        output_cost_per_million=Decimal("0.28"),
+        cache_read_cost_per_million=Decimal("0.0028"),
+        source="official_docs_snapshot",
+        source_url="https://platform.xiaomimimo.com/docs/en-US/price/pay-as-you-go",
+        pricing_version="xiaomi-pricing-2026-06-01",
+    ),
+    (
+        "xiaomi",
+        "mimo-v2.5-pro",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("0.435"),
+        output_cost_per_million=Decimal("0.87"),
+        cache_read_cost_per_million=Decimal("0.0036"),
+        source="official_docs_snapshot",
+        source_url="https://platform.xiaomimimo.com/docs/en-US/price/pay-as-you-go",
+        pricing_version="xiaomi-pricing-2026-06-01",
+    ),
     # Google Gemini
     (
         "google",
@@ -749,7 +772,12 @@ def normalize_usage(
         # Port of cline/cline#10266.
         cache_read_tokens = _to_int(getattr(details, "cached_tokens", 0) if details else 0)
         if not cache_read_tokens:
-            cache_read_tokens = _to_int(getattr(response_usage, "cache_read_input_tokens", 0))
+            cache_read_tokens = _to_int(
+                getattr(response_usage, "cache_read_input_tokens", 0)
+                or getattr(response_usage, "cache_hit_tokens", 0)
+                or getattr(response_usage, "hit_tokens", 0)
+                or getattr(response_usage, "cache_tokens", 0)
+            )
         cache_write_tokens = _to_int(
             getattr(details, "cache_write_tokens", 0) if details else 0
         )
@@ -763,6 +791,8 @@ def normalize_usage(
     output_details = getattr(response_usage, "output_tokens_details", None)
     if output_details:
         reasoning_tokens = _to_int(getattr(output_details, "reasoning_tokens", 0))
+    if not reasoning_tokens:
+        reasoning_tokens = _to_int(getattr(response_usage, "reasoning_tokens", 0))
 
     return CanonicalUsage(
         input_tokens=input_tokens,
