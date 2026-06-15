@@ -115,11 +115,12 @@ class TestRegistration:
         import tools.computer_use_tool  # noqa: F401
         from tools.registry import registry
         entry = registry._tools["computer_use"]
-        if sys.platform == "win32":
-            from tools.computer_use.windows_backend import windows_backend_available
-            assert entry.check_fn() is windows_backend_available()
-        elif sys.platform != "darwin":
-            assert entry.check_fn() is False
+        with patch.dict(os.environ, {}, clear=True):
+            if sys.platform == "win32":
+                from tools.computer_use.windows_backend import windows_backend_available
+                assert entry.check_fn() is windows_backend_available()
+            elif sys.platform != "darwin":
+                assert entry.check_fn() is False
 
 
 # ---------------------------------------------------------------------------
