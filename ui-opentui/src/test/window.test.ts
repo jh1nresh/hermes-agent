@@ -305,6 +305,23 @@ describe('estimateMessageHeight — line-count estimate for never-mounted rows',
     const text = Array.from({ length: 10_000 }, (_, i) => `l${i}`).join('\n')
     expect(estimateMessageHeight({ text }, { top: 0, bottom: 0 }, 0)).toBeLessThanOrEqual(500)
   })
+
+  test('chips: settled non-system rows count the ⧉ copy line; system rows do not', () => {
+    const spacing0 = { top: 0, bottom: 0 }
+    expect(estimateMessageHeight({ role: 'user', text: 'hi' }, spacing0, 1, true)).toBe(2)
+    expect(estimateMessageHeight({ role: 'system', text: 'note' }, spacing0, 1, true)).toBe(1)
+    expect(estimateMessageHeight({ role: 'user', text: 'hi' }, spacing0, 1, false)).toBe(1)
+    // parts: one chip line per text block, none for tool headers
+    const message: Pick<Message, 'text' | 'parts'> = {
+      text: '',
+      parts: [
+        { type: 'text', id: 'p1', text: 'one\ntwo' },
+        { type: 'tool', id: 't1', name: 'terminal', state: 'complete' }
+      ]
+    }
+    // (2 text + 1 chip) + 1 tool + 1 gap
+    expect(estimateMessageHeight(message, spacing0, 1, true)).toBe(5)
+  })
 })
 
 describe('edgeMeasureBatch — the S2 idle measure picker', () => {

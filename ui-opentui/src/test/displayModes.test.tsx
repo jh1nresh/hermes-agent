@@ -116,23 +116,23 @@ describe('/compact — transcript spacing (frame line-count)', () => {
       const b = rows.findIndex(r => r.includes('beta-line'))
       expect(a).toBeGreaterThanOrEqual(0)
       // user turns are set off by MORE space than the part gap (design pass:
-      // turn boundary > part gap): top 2 + bottom 1 around each prompt.
-      expect(b - a).toBe(4)
+      // turn boundary > part gap): top 2 + bottom 1 around each prompt, plus
+      // the prompt's own `⧉ copy` footer line (chrome v3 chip placement).
+      expect(b - a).toBe(5)
 
       store.setCompact(true)
       await probe.settle()
       const dense = probe.frame().split('\n')
       const a2 = dense.findIndex(r => r.includes('alpha-line'))
       const b2 = dense.findIndex(r => r.includes('beta-line'))
-      expect(b2 - a2).toBe(1) // adjacent rows — densified
+      expect(b2 - a2).toBe(1) // adjacent rows — densified (copy-chip chrome shed too)
 
       store.setCompact(false)
       await probe.settle()
       const again = probe.frame().split('\n')
       const a3 = again.findIndex(r => r.includes('alpha-line'))
       const b3 = again.findIndex(r => r.includes('beta-line'))
-
-      expect(b3 - a3).toBe(4)
+      expect(b3 - a3).toBe(5)
     } finally {
       probe.destroy()
     }
