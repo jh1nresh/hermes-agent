@@ -243,12 +243,7 @@ export function Transcript(props: { store: SessionStore }) {
       const cached = estimates.get(key)
       if (cached !== undefined) return cached
     }
-    const estimate = estimateMessageHeight(
-      message,
-      turnSpacing(message.role, compact),
-      compact ? 0 : 1,
-      !compact && !streaming
-    )
+    const estimate = estimateMessageHeight(message, turnSpacing(message.role, compact), compact ? 0 : 1)
     if (!streaming) estimates.set(key, estimate)
     return estimate
   }

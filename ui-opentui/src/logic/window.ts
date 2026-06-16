@@ -227,11 +227,10 @@ function lineCount(text: string): number {
 }
 
 /** Estimated rendered lines of one part: text → its line count (view strips
- *  leading/trailing blanks — mirror that) + the settled block's `⧉ copy` chip
- *  line when `chips`; tool/reasoning → 1 collapsed header line (the default
- *  render for settled, never-mounted history). */
-function partLines(part: Part, chips: boolean): number {
-  if (part.type === 'text') return lineCount(part.text.replace(/^\n+|\n+$/g, '')) + (chips ? 1 : 0)
+ *  leading/trailing blanks — mirror that); tool/reasoning → 1 collapsed header
+ *  line (the default render for settled, never-mounted history). */
+function partLines(part: Part): number {
+  if (part.type === 'text') return lineCount(part.text.replace(/^\n+|\n+$/g, ''))
   return 1 // collapsed tool/reasoning header line
 }
 
@@ -241,23 +240,20 @@ function partLines(part: Part, chips: boolean): number {
  * — it is a placeholder until the row is actually mounted/measured, and a
  * wrong value may only be corrected per `correctionIsLegal` (or left until
  * remount). `spacing` is the row's turnSpacing margins; `gap` the inter-part
- * blank line (0 in /compact); `chips` mirrors the view's per-block `⧉ copy`
- * line (settled non-system rows outside /compact — messageLine.tsx CopyChip).
+ * blank line (0 in /compact).
  */
 export function estimateMessageHeight(
   message: Pick<Message, 'text' | 'parts'> & { readonly role?: Message['role'] },
   spacing: { readonly top: number; readonly bottom: number },
-  gap: number,
-  chips = false
+  gap: number
 ): number {
   const parts = message.parts
   let content: number
   if (parts && parts.length > 0) {
     content = gap * (parts.length - 1)
-    for (const part of parts) content += partLines(part, chips)
+    for (const part of parts) content += partLines(part)
   } else {
     content = lineCount(message.text)
-    if (chips && message.role !== undefined && message.role !== 'system' && message.text.trim()) content += 1
   }
   return Math.min(ESTIMATE_MAX_LINES, Math.max(1, content)) + spacing.top + spacing.bottom
 }
