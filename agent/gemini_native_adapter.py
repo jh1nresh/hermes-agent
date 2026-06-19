@@ -889,6 +889,9 @@ class GeminiNativeClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
             "x-goog-api-key": self.api_key,
+            # Google requires platform/library clients to identify themselves
+            # via x-goog-api-client (company-product/version format).
+            # See https://ai.google.dev/gemini-api/docs/partner-integration
             "User-Agent": f"hermes-agent/{_HERMES_VERSION} (gemini-native)",
             "X-Goog-Api-Client": f"hermes-agent/{_HERMES_VERSION}",
         }
