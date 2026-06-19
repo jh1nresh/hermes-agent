@@ -1075,3 +1075,95 @@ class TestSafeStderr:
             logger.info("Session hygiene: 400 messages — auto-compressing")
         finally:
             logger.removeHandler(handler)
+
+
+class TestBodyCaptureOptIn:
+    """Opt-in HTTP/WS body capture (logging.capture_bodies).
+
+    The heavy diagnostic tier: OFF by default, isolated from gui.log, and
+    structurally excluded from `hermes debug share` (#22016).
+    """
+
+    def _home(self, tmp_path, monkeypatch, capture):
+        import yaml
+        home = tmp_path / ".hermes"
+        home.mkdir()
+        (home / "config.yaml").write_text(
+            yaml.safe_dump({"logging": {"capture_bodies": capture}})
+        )
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        return home
+
+    def test_disabled_by_default_no_body_file_and_no_capture(self, tmp_path, monkeypatch):
+        import logging
+        import hermes_logging
+        from hermes_logging import BODY_CAPTURE_LOGGER
+        import hermes_cli.web_server as ws
+
+        home = self._home(tmp_path, monkeypatch, False)
+        hermes_logging.setup_logging(hermes_home=home, mode="gui", force=True)
+
+        ws._capture_body("http.request", "rid", b"secret-conversation-content")
+        for h in logging.getLogger(BODY_CAPTURE_LOGGER).handlers:
+            h.flush()
+
+        assert not (home / "logs" / "gui_bodies.log").exists()
+
+    def test_enabled_captures_to_isolated_file_not_gui_log(self, tmp_path, monkeypatch):
+        import logging
+        import hermes_logging
+        from hermes_logging import BODY_CAPTURE_LOGGER
+        import hermes_cli.web_server as ws
+
+        home = self._home(tmp_path, monkeypatch, True)
+        hermes_logging.setup_logging(hermes_home=home, mode="gui", force=True)
+
+        ws._capture_body("http.request", "rid", b"captured-body-payload")
+        for h in logging.getLogger(BODY_CAPTURE_LOGGER).handlers:
+            h.flush()
+
+        body = (home / "logs" / "gui_bodies.log")
+        assert body.exists()
+        assert "captured-body-payload" in body.read_text()
+
+        # Must never leak into the shared gui.log.
+        gui = home / "logs" / "gui.log"
+        gui_text = gui.read_text() if gui.exists() else ""
+        assert "captured-body-payload" not in gui_text
+
+    def test_truncates_large_body(self, tmp_path, monkeypatch):
+        import logging
+        import hermes_logging
+        from hermes_logging import BODY_CAPTURE_LOGGER
+        import hermes_cli.web_server as ws
+
+        home = self._home(tmp_path, monkeypatch, True)
+        hermes_logging.setup_logging(hermes_home=home, mode="gui", force=True)
+
+        ws._capture_body("http.request", "rid", b"A" * (ws._BODY_CAPTURE_MAX * 3))
+        for h in logging.getLogger(BODY_CAPTURE_LOGGER).handlers:
+            h.flush()
+
+        text = (home / "logs" / "gui_bodies.log").read_text()
+        assert "(truncated)" in text
+        # Far fewer than the 3x-cap input bytes are written.
+        assert text.count("A") <= ws._BODY_CAPTURE_MAX + 10
+
+    def test_body_logger_is_isolated_from_all_components(self):
+        from hermes_logging import BODY_CAPTURE_LOGGER, COMPONENT_PREFIXES
+
+        for comp, prefixes in COMPONENT_PREFIXES.items():
+            assert not BODY_CAPTURE_LOGGER.startswith(tuple(prefixes)), \
+                f"body logger must not be a member of component {comp!r}"
+
+    def test_body_file_excluded_from_log_registry_and_debug_share(self):
+        # Structural #22016 guarantee: the body file is neither tailable via
+        # `hermes logs` nor uploadable via `hermes debug share`.
+        from hermes_cli.logs import LOG_FILES
+        from hermes_cli.debug import _capture_default_log_snapshots
+
+        assert "gui_bodies" not in LOG_FILES
+        assert not any("bodies" in fname for fname in LOG_FILES.values())
+
+        snaps = _capture_default_log_snapshots(50)
+        assert "gui_bodies" not in snaps

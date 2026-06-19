@@ -483,6 +483,44 @@ def _new_request_id() -> str:
     return secrets.token_hex(4)
 
 
+# Opt-in body-capture logger (OFF unless logging.capture_bodies=true). It is
+# isolated from gui.log and excluded from debug share — see hermes_logging.py.
+# The handler attached to it gates output (NullHandler + level above CRITICAL
+# when disabled), so calling _capture_body() while disabled is a cheap no-op.
+try:
+    from hermes_logging import BODY_CAPTURE_LOGGER as _BODY_LOGGER_NAME
+except Exception:  # pragma: no cover - logging module always present in practice
+    _BODY_LOGGER_NAME = "hermes_body_capture"
+_body_log = logging.getLogger(_BODY_LOGGER_NAME)
+
+# Cap per-captured body so a large upload/stream can't bloat the log.
+_BODY_CAPTURE_MAX = 4096
+
+
+def _capture_body(kind: str, rid, data) -> None:
+    """Record one request/response/frame body to the opt-in body log.
+
+    No-op unless ``logging.capture_bodies`` is enabled (the logger level/handler
+    gate this without a config read on the hot path). Truncates to
+    ``_BODY_CAPTURE_MAX`` and relies on the logger's RedactingFormatter to scrub
+    secrets as defence-in-depth. Diagnostic-only — never raises into a request.
+    """
+    if not _body_log.isEnabledFor(logging.INFO):
+        return
+    try:
+        if isinstance(data, (bytes, bytearray)):
+            text = bytes(data[:_BODY_CAPTURE_MAX]).decode("utf-8", "replace")
+        else:
+            text = str(data)[:_BODY_CAPTURE_MAX]
+        truncated = len(data) > _BODY_CAPTURE_MAX
+        _body_log.info(
+            "%s rid=%s len=%d%s body=%r",
+            kind, rid, len(data), " (truncated)" if truncated else "", text,
+        )
+    except Exception:
+        pass
+
+
 @app.middleware("http")
 async def access_log_middleware(request: Request, call_next):
     import time as _time
@@ -490,6 +528,13 @@ async def access_log_middleware(request: Request, call_next):
     rid = request.headers.get("x-request-id") or _new_request_id()
     request.state.rid = rid
     peer = request.client.host if request.client else "?"
+    # Opt-in request-body capture. request.body() is cached by Starlette, so
+    # reading it here does not consume the stream for downstream handlers.
+    if _body_log.isEnabledFor(logging.INFO):
+        try:
+            _capture_body("http.request", rid, await request.body())
+        except Exception:
+            pass
     start = _time.monotonic()
     status = 500
     response = None
@@ -611,6 +656,16 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "type": "select",
         "description": "Log level for agent.log",
         "options": ["DEBUG", "INFO", "WARNING", "ERROR"],
+    },
+    "logging.capture_bodies": {
+        "type": "boolean",
+        "description": (
+            "Capture HTTP request bodies and PTY/WebSocket frames to a "
+            "separate gui_bodies.log for deep dashboard/TUI debugging. OFF by "
+            "default. Bodies may contain conversation content — this log is "
+            "isolated from gui.log and is NEVER included in 'hermes debug "
+            "share'. Enable only while reproducing an issue."
+        ),
     },
     "agent.service_tier": {
         "type": "select",
@@ -11201,6 +11256,7 @@ async def pty_ws(ws: WebSocket) -> None:
             try:
                 await ws.send_bytes(chunk)
                 _stats["bytes_out"] += len(chunk)
+                _capture_body("pty.out", peer, chunk)
             except Exception:
                 _stats["reason"] = "send_failed"
                 return
@@ -11231,6 +11287,7 @@ async def pty_ws(ws: WebSocket) -> None:
 
             bridge.write(raw)
             _stats["bytes_in"] += len(raw)
+            _capture_body("pty.in", peer, raw)
     except WebSocketDisconnect:
         pass
     except Exception:

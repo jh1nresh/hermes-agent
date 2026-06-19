@@ -2359,6 +2359,12 @@ DEFAULT_CONFIG = {
         "level": "INFO",       # Minimum level for agent.log: DEBUG, INFO, WARNING
         "max_size_mb": 5,      # Max size per log file before rotation
         "backup_count": 3,     # Number of rotated backup files to keep
+        # Opt-in deep dashboard/TUI debugging: capture HTTP request bodies and
+        # PTY/WebSocket frames to a SEPARATE gui_bodies.log. OFF by default.
+        # Bodies may contain conversation content; this log is isolated from
+        # gui.log and is NEVER uploaded by `hermes debug share`. Enable only
+        # while reproducing an issue.
+        "capture_bodies": False,
     },
 
     # Remotely-hosted model catalog manifest.  When enabled, the CLI fetches

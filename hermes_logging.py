@@ -223,6 +223,12 @@ COMPONENT_PREFIXES = {
     ),
 }
 
+# Dedicated logger for opt-in HTTP/WS body capture. Intentionally NOT a member
+# of any COMPONENT_PREFIXES above and configured with propagate=False, so its
+# records reach only the isolated gui_bodies.log handler — never gui.log,
+# agent.log, or anything the diagnostic surfaces (debug share) read.
+BODY_CAPTURE_LOGGER = "hermes_body_capture"
+
 
 # ---------------------------------------------------------------------------
 # Main setup
@@ -332,6 +338,35 @@ def setup_logging(
             formatter=RedactingFormatter(_LOG_FORMAT),
             log_filter=_ComponentFilter(COMPONENT_PREFIXES["gui"]),
         )
+
+        # --- gui_bodies.log (opt-in HTTP/WS body capture) ------------------
+        # OFF by default; enabled only when config.yaml ``logging.capture_bodies``
+        # is true. This is the heavy diagnostic tier — request/response bodies
+        # and WS frames — so it is DELIBERATELY ISOLATED:
+        #   * a dedicated logger (BODY_CAPTURE_LOGGER, propagate=False) that is
+        #     NOT under any COMPONENT_PREFIXES, so bodies never leak into
+        #     gui.log / agent.log;
+        #   * a dedicated file that is NOT registered in hermes_cli/logs.py
+        #     LOG_FILES and NOT in the debug-share snapshot set, so it can
+        #     never be auto-uploaded by ``hermes debug share`` (see #22016).
+        # Still redacted via RedactingFormatter as defence-in-depth.
+        body_logger = logging.getLogger(BODY_CAPTURE_LOGGER)
+        body_logger.handlers.clear()
+        body_logger.propagate = False
+        if _read_capture_bodies_config():
+            body_logger.setLevel(logging.INFO)
+            _add_rotating_handler(
+                body_logger,
+                log_dir / "gui_bodies.log",
+                level=logging.INFO,
+                max_bytes=10 * 1024 * 1024,
+                backup_count=3,
+                formatter=RedactingFormatter(_LOG_FORMAT),
+            )
+        else:
+            # Disabled: swallow any emit so a stray call is a cheap no-op.
+            body_logger.setLevel(logging.CRITICAL + 1)
+            body_logger.addHandler(logging.NullHandler())
 
     if _logging_initialized and not force:
         return log_dir
@@ -563,3 +598,24 @@ def _read_logging_config():
     except Exception:
         pass
     return (None, None, None)
+
+
+def _read_capture_bodies_config() -> bool:
+    """Best-effort read of ``logging.capture_bodies`` from config.yaml.
+
+    Defaults to ``False`` — body capture is opt-in. This is the gate that keeps
+    the heavy diagnostic tier off unless an operator explicitly enables it
+    (``hermes config set logging.capture_bodies true`` or the dashboard toggle).
+    """
+    try:
+        import yaml
+        config_path = get_config_path()
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            log_cfg = cfg.get("logging", {})
+            if isinstance(log_cfg, dict):
+                return bool(log_cfg.get("capture_bodies", False))
+    except Exception:
+        pass
+    return False
