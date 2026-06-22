@@ -1037,7 +1037,7 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
     ProviderEntry("copilot-acp",    "GitHub Copilot ACP",       "GitHub Copilot ACP (Spawns copilot --acp --stdio)"),
     ProviderEntry("huggingface",    "Hugging Face",             "Hugging Face Inference Providers"),
     ProviderEntry("gemini",         "Google AI Studio",         "Google AI Studio (Native Gemini API)"),
-    ProviderEntry("google-gemini-cli", "Google Gemini (OAuth)",   "Google Gemini via OAuth + Code Assist (Code Assist OAuth flow)"),
+    ProviderEntry("google-gemini-cli", "Google Gemini (OAuth, paid Code Assist)",   "Google Gemini via OAuth + Code Assist (requires a paid Gemini Code Assist / Enterprise license; consumer tiers were sunset June 18 — use Google Antigravity instead)"),
     ProviderEntry("google-antigravity", "Google Antigravity (OAuth)", "Google Antigravity via OAuth + Code Assist (Gemini 3.5/3.1, Claude, GPT-OSS where entitled)"),
     ProviderEntry("deepseek",       "DeepSeek",                 "DeepSeek (V3, R1, coder, direct API)"),
     ProviderEntry("xai",            "xAI",                      "xAI Grok (Direct API)"),

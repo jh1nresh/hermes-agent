@@ -634,12 +634,17 @@ def _model_flow_minimax_oauth(config, current_model="", args=None):
     print(f"\u2713 Using MiniMax model: {selected}")
 
 def _model_flow_google_gemini_cli(_config, current_model=""):
-    """Google Gemini OAuth (PKCE) via Cloud Code Assist — supports free AND paid tiers.
+    """Google Gemini OAuth (PKCE) via Cloud Code Assist — requires a PAID tier.
+
+    NOTE: Google sunset the consumer (free / Google One / AI Pro) Code Assist
+    endpoint on 2026-06-18. This provider now only works for accounts with a
+    paid Gemini Code Assist / Enterprise license. Consumer users should use the
+    `google-antigravity` provider instead.
 
     Flow:
-      1. Show upfront warning about Google's ToS stance (per opencode-gemini-auth).
+      1. Show upfront warning about Google's ToS stance + the consumer sunset.
       2. If creds missing, run PKCE browser OAuth via agent.google_oauth.
-      3. Resolve project context (env -> config -> auto-discover -> free tier).
+      3. Resolve project context (env -> config -> auto-discover).
       4. Prompt user to pick a model.
       5. Save to ~/.hermes/config.yaml.
     """
@@ -654,10 +659,15 @@ def _model_flow_google_gemini_cli(_config, current_model=""):
     from hermes_cli.models import _PROVIDER_MODELS
 
     print()
-    print("⚠  Google considers using the Gemini CLI OAuth client with third-party")
-    print("   software a policy violation. Some users have reported account")
-    print("   restrictions. You can use your own API key via 'gemini' provider")
-    print("   for the lowest-risk experience.")
+    print("⚠  Requires a PAID Gemini Code Assist / Enterprise license.")
+    print("   Google sunset the consumer (free / Google One / AI Pro) Code Assist")
+    print("   endpoint on 2026-06-18 — if you're on a consumer plan, cancel and")
+    print("   pick 'Google Antigravity (OAuth)' instead.")
+    print()
+    print("⚠  Google also considers using the Gemini CLI OAuth client with")
+    print("   third-party software a policy violation. Some users have reported")
+    print("   account restrictions. You can use your own API key via the 'gemini'")
+    print("   provider for the lowest-risk experience.")
     print()
     try:
         proceed = input("Continue with OAuth login? [y/N]: ").strip().lower()
@@ -687,7 +697,9 @@ def _model_flow_google_gemini_cli(_config, current_model=""):
             print(f"  Using GCP project: {project_id}")
         else:
             print(
-                "  No GCP project configured — free tier will be auto-provisioned on first request."
+                "  No GCP project configured — set one via the GCP project prompt "
+                "in setup, or the GOOGLE_CLOUD_PROJECT env var. A paid Code Assist "
+                "license is required for requests to succeed."
             )
     except Exception as exc:
         print(f"Failed to resolve Gemini credentials: {exc}")

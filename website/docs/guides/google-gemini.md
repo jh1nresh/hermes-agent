@@ -106,10 +106,20 @@ Hermes also has a `google-gemini-cli` provider:
 
 ```bash
 hermes model
-# → Choose "Google Gemini (OAuth)"
+# → Choose "Google Gemini (OAuth, paid Code Assist)"
 ```
 
-This uses browser PKCE login and the Cloud Code Assist backend. It can be useful for users who want Gemini CLI-style OAuth, but Hermes shows an explicit warning because Google may treat use of the Gemini CLI OAuth client from third-party software as a policy violation. For production or lowest-risk usage, prefer the API-key provider above.
+This uses browser PKCE login and the Cloud Code Assist backend.
+
+:::warning Paid Code Assist only
+Google sunset the **consumer** (free / Google One / Gemini AI Pro) Code Assist
+endpoint on 2026-06-18, so `google-gemini-cli` now works only with a paid
+**Gemini Code Assist / Enterprise** license. Consumer users should pick the
+**`google-antigravity`** provider instead. Hermes also shows a policy warning
+because Google may treat use of the Gemini CLI OAuth client from third-party
+software as a policy violation. For production or lowest-risk usage, prefer the
+API-key provider above.
+:::
 
 Hermes also supports `google-antigravity` for Antigravity Code Assist:
 

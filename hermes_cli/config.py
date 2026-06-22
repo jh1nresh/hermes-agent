@@ -3093,8 +3093,8 @@ OPTIONAL_ENV_VARS = {
         "advanced": True,
     },
     "HERMES_GEMINI_PROJECT_ID": {
-        "description": "GCP project ID for paid Gemini tiers (free tier auto-provisions)",
-        "prompt": "GCP project ID for Gemini OAuth (leave empty for free tier)",
+        "description": "GCP project ID for the Gemini Code Assist OAuth provider (paid/Enterprise license required since the 2026-06-18 consumer sunset)",
+        "prompt": "GCP project ID for Gemini Code Assist OAuth (paid tier)",
         "url": None,
         "password": False,
         "category": "provider",

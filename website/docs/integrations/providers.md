@@ -40,7 +40,7 @@ You need at least one way to connect to an LLM. Use `hermes model` to switch pro
 | **DeepSeek** | `DEEPSEEK_API_KEY` in `~/.hermes/.env` (provider: `deepseek`) |
 | **Hugging Face** | `HF_TOKEN` in `~/.hermes/.env` (provider: `huggingface`, aliases: `hf`) |
 | **Google / Gemini** | `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) in `~/.hermes/.env` (provider: `gemini`) |
-| **Google Gemini (OAuth)** | `hermes model` → "Google Gemini (OAuth)" (provider: `google-gemini-cli`, free tier supported, browser PKCE login) |
+| **Google Gemini (OAuth, paid Code Assist)** | `hermes model` → "Google Gemini (OAuth, paid Code Assist)" (provider: `google-gemini-cli`; requires a paid Code Assist / Enterprise license — consumer tiers were sunset 2026-06-18, use **Google Antigravity (OAuth)** instead, browser PKCE login) |
 | **OpenAI API (direct)** | `OPENAI_API_KEY` in `~/.hermes/.env` (provider: `openai-api`, optional `OPENAI_BASE_URL`) |
 | **Azure AI Foundry** | `hermes model` → "Azure AI Foundry" (provider: `azure-foundry`; uses Azure OpenAI / Foundry endpoint and key) |
 | **AWS Bedrock** | `hermes model` → "AWS Bedrock" (provider: `bedrock`; standard AWS credentials chain via boto3) |
@@ -594,19 +594,28 @@ The base URL can be overridden with `HF_BASE_URL`.
 
 ### Google Gemini via OAuth (`google-gemini-cli`)
 
+:::warning Consumer tiers sunset (2026-06-18)
+Google shut down the **consumer** (free / Google One / Gemini AI Pro) Code
+Assist endpoint on June 18, 2026. The `google-gemini-cli` provider now works
+**only** for accounts with a paid **Gemini Code Assist / Enterprise** license.
+If you're on a consumer plan, use the **`google-antigravity`** provider
+instead — it's Google's consumer successor and reuses the same Code Assist
+backend with the Antigravity OAuth client.
+:::
+
 The `google-gemini-cli` provider uses Google's Cloud Code Assist backend — the
-same API that Google's own `gemini-cli` tool uses. This supports both the
-**free tier** (generous daily quota for personal accounts) and **paid tiers**
-(Standard/Enterprise via a GCP project).
+same API that Google's own `gemini-cli` tool used. Since the consumer sunset it
+requires a **paid** Gemini Code Assist / Enterprise license attached to a GCP
+project.
 
 **Quick start:**
 
 ```bash
 hermes model
-# → pick "Google Gemini (OAuth)"
-# → see policy warning, confirm
+# → pick "Google Gemini (OAuth, paid Code Assist)"
+# → see paid-tier + policy warnings, confirm
 # → browser opens to accounts.google.com, sign in
-# → done — Hermes auto-provisions your free tier on first request
+# → set HERMES_GEMINI_PROJECT_ID / GOOGLE_CLOUD_PROJECT to your licensed project
 ```
 
 Hermes ships Google's **public** `gemini-cli` desktop OAuth client by default —
@@ -635,11 +644,11 @@ need to install `gemini-cli` or register your own GCP OAuth client.
 
 | Your situation | What to do |
 |---|---|
-| Personal Google account, want free tier | Nothing — sign in, start chatting |
-| Workspace / Standard / Enterprise account | Set `HERMES_GEMINI_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT` to your GCP project ID |
+| Consumer plan (free / Google One / Gemini AI Pro) | Not supported here since 2026-06-18 — use the `google-antigravity` provider instead |
+| Workspace / Standard / Enterprise account with a paid Code Assist license | Set `HERMES_GEMINI_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT` to your licensed GCP project ID |
 | VPC-SC-protected org | Hermes detects `SECURITY_POLICY_VIOLATED` and forces `standard-tier` automatically |
 
-Free tier auto-provisions a Google-managed project on first use. No GCP setup required.
+A paid Code Assist / Enterprise license on the configured GCP project is required — there is no longer a free tier to auto-provision.
 
 **Quota monitoring:**
 
