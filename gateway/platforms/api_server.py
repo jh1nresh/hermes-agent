@@ -1147,6 +1147,7 @@ class APIServerAdapter(BasePlatformAdapter):
         /proc access.  No authentication required.
         """
         from gateway.status import (
+            count_recent_start_blocks,
             derive_gateway_busy,
             derive_gateway_drainable,
             parse_active_agents,
@@ -1175,6 +1176,10 @@ class APIServerAdapter(BasePlatformAdapter):
                 gateway_running=True,
                 gateway_state=gw_state,
             ),
+            # Mirror /api/status: refused-start crash-loop count over 5 min, read
+            # from the shared HERMES_HOME ring so a cross-container dashboard
+            # probe sees the same wedged-but-looping signal /api/status exposes.
+            "gateway_restarts_5m": count_recent_start_blocks(300),
             "exit_reason": runtime.get("exit_reason"),
             "updated_at": runtime.get("updated_at"),
             "pid": os.getpid(),
