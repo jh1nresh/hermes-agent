@@ -875,3 +875,14 @@ class LocalEnvironment(BaseEnvironment):
                 os.unlink(f)
             except OSError:
                 pass
+        # Remove any orphaned atomic-write temp snapshots (snap.tmp.<pid>) that
+        # a failed mv could have left behind (#38249).
+        try:
+            import glob
+            for tmp in glob.glob(f"{self._snapshot_path}.tmp.*"):
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        except Exception:
+            pass

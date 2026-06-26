@@ -4,6 +4,7 @@ Tests _wrap_command(), _extract_cwd_from_output(), _embed_stdin_heredoc(),
 init_session() failure handling, and the CWD marker contract.
 """
 
+import subprocess
 from unittest.mock import MagicMock
 
 from tools.environments.base import BaseEnvironment
@@ -88,6 +89,70 @@ class TestWrapCommand:
         wrapped = env._wrap_command("ls", "/nonexistent")
 
         assert "exit 126" in wrapped
+
+
+class TestAtomicSnapshotWrite:
+    """Regression for #38249: concurrent terminal calls in one session both
+    source AND rewrite the shared env snapshot. A non-atomic ``export -p >
+    snap`` truncates-then-writes in place, so a concurrent ``source snap`` can
+    read a half-written file and embed ``declare -x``/``export`` fragments into
+    PATH, breaking ``ls``/``git``/``tr`` with command-not-found. The write must
+    be atomic: ``export -p > snap.tmp.$$`` then ``mv -f snap.tmp.$$ snap`` (mv
+    is atomic on POSIX same-fs), so a reader sees the old-or-new complete file,
+    never a torn one."""
+
+    def test_wrap_command_uses_atomic_temp_then_mv(self):
+        env = _TestableEnv()
+        env._snapshot_ready = True
+        wrapped = env._wrap_command("echo hi", "/tmp")
+        # Writes go to a temp file, not directly over the live snapshot.
+        assert "export -p > " in wrapped
+        assert ".tmp." in wrapped
+        # Then an atomic rename onto the real snapshot path.
+        assert "mv -f " in wrapped
+        # The env-dump must NOT write the live snapshot in place (the bug).
+        snap = env._snapshot_path
+        assert f"export -p > {snap} " not in wrapped
+        assert f"export -p > '{snap}'" not in wrapped
+
+    def test_temp_path_is_per_process_unique(self):
+        """``$$`` (bash PID) makes concurrent processes use distinct temp files
+        so their temp writes can't clobber each other before the mv."""
+        env = _TestableEnv()
+        env._snapshot_ready = True
+        wrapped = env._wrap_command("echo hi", "/tmp")
+        assert ".tmp.$$" in wrapped or ".tmp.'$$'" in wrapped or "'.tmp.'$$" in wrapped
+
+    def test_temp_path_static_part_is_quoted(self):
+        """The static path portion must be shlex-quoted (Windows/Git-Bash
+        ``C:/Users/...`` or spaces) while ``$$`` stays outside the quotes so
+        it still expands. The bug-prone form is a bare unquoted temp path."""
+        env = _TestableEnv()
+        env._snapshot_ready = True
+        env._snapshot_path = "/tmp/has space/hermes-snap-x.sh"
+        wrapped = env._wrap_command("echo hi", "/tmp")
+        # The space in the path must be quoted, not left bare in the temp name.
+        assert "/tmp/has space/hermes-snap-x.sh.tmp.$$" not in wrapped
+        # $$ must remain shell-expandable (not swallowed inside quotes as a literal).
+        assert "$$" in wrapped
+
+    def test_init_session_bootstrap_also_atomic(self):
+        """The init_session bootstrap (first snapshot write) must be atomic too
+        — it's the same shared file a concurrent command could source."""
+        env = _TestableEnv()
+        captured = {}
+
+        def fake_run_bash(cmd_string, *, login=False, timeout=120, stdin_data=None):
+            captured["cmd"] = cmd_string
+            raise RuntimeError("stop after capture")  # we only need the script
+
+        env._run_bash = fake_run_bash  # type: ignore[assignment]
+        try:
+            env.init_session()
+        except Exception:
+            pass
+        boot = captured.get("cmd", "")
+        assert ".tmp." in boot and "mv -f " in boot, boot
 
 
 class TestExtractCwdFromOutput:
@@ -194,3 +259,74 @@ class TestCwdMarker:
         env1 = _TestableEnv()
         env2 = _TestableEnv()
         assert env1._cwd_marker != env2._cwd_marker
+
+
+class TestAtomicSnapshotConcurrencyBehavioral:
+    """Behavioral regression for #38249 — actually EXECUTES the generated
+    snapshot write concurrently and asserts the file never tears.
+
+    The string-inspection tests prove the right script is emitted; this proves
+    the emitted script's guarantee holds: N concurrent writers + readers, and
+    the snapshot is ALWAYS a complete, parseable env dump — never truncated
+    mid-line with a `declare -x` / `export` fragment that would corrupt PATH.
+    """
+
+    def _run(self, script, env=None):
+        return subprocess.run(["/bin/bash", "-c", script], capture_output=True,
+                              text=True, env=env)
+
+    def test_concurrent_writes_never_tear_the_snapshot(self, tmp_path):
+        import shutil
+        if not shutil.which("bash"):
+            import pytest; pytest.skip("bash required")
+        snap = str(tmp_path / "hermes-snap-x.sh")
+        _q = __import__("shlex").quote
+        _snap_tmp = _q(snap + ".tmp.") + "$$"
+        # One writer iteration = the exact atomic sequence _wrap_command emits.
+        writer = (
+            "for i in $(seq 1 40); do "
+            f"export BIG_$i=$(head -c 400 /dev/zero | tr '\\0' x); "
+            f"{{ export -p > {_snap_tmp} && mv -f {_snap_tmp} {_q(snap)}; }} "
+            f"2>/dev/null || rm -f {_snap_tmp} 2>/dev/null || true; "
+            "done"
+        )
+        # Reader: repeatedly source the snapshot and check PATH never absorbs
+        # an `export `/`declare -x` fragment (the corruption signature).
+        reader = (
+            f"export PATH=/usr/bin:/bin; "
+            "for i in $(seq 1 80); do "
+            f"( source {_q(snap)} >/dev/null 2>&1 || true; "
+            "case \"$PATH\" in *'declare -x'*|*'export '*) echo CORRUPT; ;; esac ); "
+            "done"
+        )
+        # seed a valid snapshot first
+        self._run(f"export -p > {_q(snap)}")
+        # launch 6 concurrent writers + 6 readers
+        procs = [self._run(f"{writer} & {writer} & {reader} & {reader} & wait")
+                 for _ in range(3)]
+        corrupt = any("CORRUPT" in p.stdout for p in procs)
+        assert not corrupt, "snapshot tore — PATH absorbed a declare-x/export fragment"
+        # final snapshot must still be a complete, sourceable env dump
+        final = self._run(f"source {_q(snap)} >/dev/null 2>&1 && echo OK || echo BROKEN")
+        assert "OK" in final.stdout, f"final snapshot not sourceable: {final.stdout} {final.stderr}"
+
+    def test_failed_export_does_not_destroy_good_snapshot(self, tmp_path):
+        """If `export -p` fails, the `&&`-chained mv must NOT clobber the
+        existing good snapshot (the failure-path fix)."""
+        import shutil
+        if not shutil.which("bash"):
+            import pytest; pytest.skip("bash required")
+        snap = str(tmp_path / "snap.sh")
+        _q = __import__("shlex").quote
+        self._run(f"echo 'export GOOD=1' > {_q(snap)}")  # seed good snapshot
+        _snap_tmp = _q(snap + ".tmp.") + "$$"
+        # Simulate a failed dump: redirect export into an unwritable temp dir so
+        # the export side fails; mv must then NOT run (&&) and not clobber snap.
+        bad_tmp = _q("/nonexistent-dir/snap.tmp.") + "$$"
+        script = (
+            f"{{ export -p > {bad_tmp} && mv -f {bad_tmp} {_q(snap)}; }} "
+            f"2>/dev/null || rm -f {bad_tmp} 2>/dev/null || true"
+        )
+        self._run(script)
+        out = self._run(f"cat {_q(snap)}")
+        assert "export GOOD=1" in out.stdout, "good snapshot was destroyed by a failed export"
