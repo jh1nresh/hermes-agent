@@ -1859,7 +1859,27 @@ export const ja = defineLocale({
     price: (input, output) => `${input} 入力 / ${output} 出力 per Mtok`,
     change: '変更',
     startChatting: '始める',
-    docs: provider => `${provider} ドキュメント`
+    docs: provider => `${provider} ドキュメント`,
+    connectRemoteGateway: 'リモートゲートウェイに接続',
+    gateway: {
+      urlLabel: 'ゲートウェイ URL',
+      urlHint: 'リモート Hermes ゲートウェイのベース URL。パスプレフィックス対応（例: /hermes）。',
+      probing: 'ゲートウェイの認証方式を確認中…',
+      probeError: 'ゲートウェイに接続できません。URL を確認してください — 応答後に認証方式が表示されます。',
+      signIn: 'サインイン',
+      signInWith: provider => `${provider} でサインイン`,
+      passwordHint: 'このゲートウェイはユーザー名とパスワードを使用します。サインインしてアプリを認証してください。',
+      oauthHint: provider => `このゲートウェイは OAuth を使用します。${provider} でサインインしてアプリを認証してください。`,
+      tokenLabel: 'セッショントークン',
+      tokenPlaceholder: 'セッショントークンを貼り付け',
+      tokenHint: 'REST および WebSocket アクセスに使用されるダッシュボードセッショントークン。',
+      connect: '接続',
+      connecting: '接続中',
+      saveFailed: 'ゲートウェイ接続を保存できませんでした。',
+      signInFailed: 'サインインに失敗しました。再試行してください。',
+      backToProviders: 'プロバイダーに戻る',
+      identityProvider: 'ゲートウェイ'
+    }
   },
 
   modelPicker: {

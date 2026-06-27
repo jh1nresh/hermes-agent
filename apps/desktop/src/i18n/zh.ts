@@ -1909,7 +1909,27 @@ export const zh: Translations = {
     price: (input, output) => `${input} 输入 / ${output} 输出每 Mtok`,
     change: '更改',
     startChatting: '开始',
-    docs: provider => `${provider} 文档`
+    docs: provider => `${provider} 文档`,
+    connectRemoteGateway: '连接到远程网关',
+    gateway: {
+      urlLabel: '网关地址',
+      urlHint: '远程 Hermes 网关的基础 URL。支持路径前缀，例如 /hermes。',
+      probing: '正在检查网关认证方式…',
+      probeError: '暂时无法连接到此网关。请检查 URL — 认证方式将在网关响应后显示。',
+      signIn: '登录',
+      signInWith: provider => `使用 ${provider} 登录`,
+      passwordHint: '此网关使用用户名和密码。登录以授权此应用。',
+      oauthHint: provider => `此网关使用 OAuth。使用 ${provider} 登录以授权此应用。`,
+      tokenLabel: '会话令牌',
+      tokenPlaceholder: '粘贴会话令牌',
+      tokenHint: '用于 REST 和 WebSocket 访问的仪表板会话令牌。',
+      connect: '连接',
+      connecting: '正在连接',
+      saveFailed: '无法保存网关连接。',
+      signInFailed: '登录失败。请重试。',
+      backToProviders: '返回提供商列表',
+      identityProvider: '网关'
+    }
   },
 
   modelPicker: {

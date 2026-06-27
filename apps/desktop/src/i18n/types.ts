@@ -1393,6 +1393,26 @@ export interface Translations {
     change: string
     startChatting: string
     docs: (provider: string) => string
+    connectRemoteGateway: string
+    gateway: {
+      urlLabel: string
+      urlHint: string
+      probing: string
+      probeError: string
+      signIn: string
+      signInWith: (provider: string) => string
+      passwordHint: string
+      oauthHint: (provider: string) => string
+      tokenLabel: string
+      tokenPlaceholder: string
+      tokenHint: string
+      connect: string
+      connecting: string
+      saveFailed: string
+      signInFailed: string
+      backToProviders: string
+      identityProvider: string
+    }
   }
 
   modelPicker: {

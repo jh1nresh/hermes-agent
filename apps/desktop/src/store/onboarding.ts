@@ -12,6 +12,7 @@ import {
   submitOAuthCode,
   validateProviderCredential
 } from '@/hermes'
+import { isThinClient } from '@/lib/build-mode'
 import { evaluateRuntimeReadiness, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { notify, notifyError } from '@/store/notifications'
 import type { ModelOptionProvider, OAuthProvider, OAuthStartResponse } from '@/types/hermes'
@@ -20,7 +21,7 @@ type PkceStart = Extract<OAuthStartResponse, { flow: 'pkce' }>
 type DeviceStart = Extract<OAuthStartResponse, { flow: 'device_code' }>
 type LoopbackStart = Extract<OAuthStartResponse, { flow: 'loopback' }>
 
-export type OnboardingMode = 'apikey' | 'oauth'
+export type OnboardingMode = 'apikey' | 'oauth' | 'gateway'
 
 export type OnboardingFlow =
   | { status: 'idle' }
@@ -34,6 +35,14 @@ export type OnboardingFlow =
   | { provider: OAuthProvider; start: OAuthStartResponse; status: 'submitting' }
   | { copied: boolean; provider: OAuthProvider; status: 'external_pending' }
   | { provider: OAuthProvider; status: 'success' }
+  | {
+      // Gateway onboarding: a remote gateway was configured (URL + auth),
+      // and the connection was saved+applied. The overlay shows a brief
+      // "connected" confirm before completing — the apply already reloads
+      // the window, so this is mostly a transitional state.
+      gatewayUrl: string
+      status: 'gateway_connected'
+    }
   | {
       // After successful credential acquisition, before completing
       // onboarding: show the user which model they're getting and let
@@ -77,6 +86,11 @@ export interface DesktopOnboardingState {
    *  custom endpoint"). Forces the API-key form with the local option
    *  preselected instead of the OAuth picker. */
   localEndpoint: boolean
+  /** True when the overlay should show the gateway-connection form instead
+   *  of the provider picker. Set on thin-client builds (where
+   *  there's no local backend to configure providers for), or when the user
+   *  picks "Connect to a remote gateway" from the thick-client picker. */
+  gatewayMode: boolean
 }
 
 export interface OnboardingContext {
@@ -156,7 +170,8 @@ const INITIAL: DesktopOnboardingState = {
   requested: false,
   firstRunSkipped: readCachedSkipped(),
   manual: false,
-  localEndpoint: false
+  localEndpoint: false,
+  gatewayMode: false
 }
 
 export const $desktopOnboarding = atom<DesktopOnboardingState>(INITIAL)
@@ -430,6 +445,105 @@ export function startManualLocalEndpoint(reason: null | string = null) {
   })
 }
 
+// Open the onboarding overlay on the gateway-connection form. Used on the
+// thin client's first run (no local backend → must configure a remote
+// gateway), and on the thick client when the user picks "Connect to a
+// remote gateway" from the provider picker. The form drives the same
+// desktop bridge IPC (probe / save / apply / oauth-login / test) as the
+// Settings → Gateway page — just wrapped in the onboarding chrome.
+export function startGatewayOnboarding(reason: null | string = null) {
+  pendingProviderOAuthId = null
+  patch({
+    gatewayMode: true,
+    manual: false,
+    mode: 'gateway',
+    requested: true,
+    localEndpoint: false,
+    reason: reason ? reason.trim() || DEFAULT_ONBOARDING_REASON : null,
+    flow: { status: 'idle' }
+  })
+}
+
+// Save + apply a remote gateway connection from the onboarding form. On
+// success, `applyConnectionConfig` reloads the window — so we just set the
+// transitional "gateway_connected" flow state and let the reload handle
+// the rest. On failure, surface the error in the form.
+export async function saveGatewayConnection(
+  url: string,
+  authMode: 'oauth' | 'token',
+  token: string | undefined
+): Promise<{ ok: boolean; message?: string }> {
+  const trimmedUrl = url.trim()
+
+  if (!trimmedUrl || !/^https?:\/\//i.test(trimmedUrl)) {
+    return { ok: false, message: 'Enter a valid gateway URL (https://…).' }
+  }
+
+  try {
+    await window.hermesDesktop?.saveConnectionConfig({
+      mode: 'remote',
+      remoteUrl: trimmedUrl,
+      remoteAuthMode: authMode,
+      remoteToken: authMode === 'token' ? token?.trim() || undefined : undefined
+    })
+    // applyConnectionConfig restarts the backend / reloads the window.
+    await window.hermesDesktop?.applyConnectionConfig({
+      mode: 'remote',
+      remoteUrl: trimmedUrl,
+      remoteAuthMode: authMode,
+      remoteToken: authMode === 'token' ? token?.trim() || undefined : undefined
+    })
+    setFlow({ status: 'gateway_connected', gatewayUrl: trimmedUrl })
+
+    return { ok: true }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+
+    return { ok: false, message: msg }
+  }
+}
+
+// Initiate OAuth sign-in against a remote gateway from the onboarding form.
+// Mirrors GatewaySettings.signIn: save the URL + oauth mode first (so the login
+// window has a target), then open the login window. On success, apply the
+// connection which reloads the window.
+export async function gatewayOauthLogin(
+  url: string
+): Promise<{ ok: boolean; connected: boolean; message?: string }> {
+  const trimmedUrl = url.trim()
+
+  if (!trimmedUrl) {
+    return { ok: false, connected: false, message: 'Enter a gateway URL first.' }
+  }
+
+  try {
+    await window.hermesDesktop?.saveConnectionConfig({
+      mode: 'remote',
+      remoteUrl: trimmedUrl,
+      remoteAuthMode: 'oauth'
+    })
+
+    const result = await window.hermesDesktop?.oauthLoginConnectionConfig(trimmedUrl)
+
+    if (result?.connected) {
+      await window.hermesDesktop?.applyConnectionConfig({
+        mode: 'remote',
+        remoteUrl: trimmedUrl,
+        remoteAuthMode: 'oauth'
+      })
+      setFlow({ status: 'gateway_connected', gatewayUrl: trimmedUrl })
+
+      return { ok: true, connected: true }
+    }
+
+    return { ok: false, connected: false, message: 'Sign-in was not completed.' }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+
+    return { ok: false, connected: false, message: msg }
+  }
+}
+
 // One-shot hand-off used when the dedicated Providers settings page launches a
 // specific provider's sign-in: we open the manual onboarding overlay AND
 // remember which provider to start, so the overlay drives that exact OAuth
@@ -461,7 +575,7 @@ export function clearPendingProviderOAuth() {
 export function closeManualOnboarding() {
   pendingProviderOAuthId = null
 
-  patch({ manual: false, requested: false, localEndpoint: false, flow: { status: 'idle' } })
+  patch({ manual: false, requested: false, localEndpoint: false, gatewayMode: false, flow: { status: 'idle' } })
 }
 
 export function completeDesktopOnboarding() {
@@ -479,7 +593,8 @@ export function completeDesktopOnboarding() {
     requested: false,
     firstRunSkipped: false,
     manual: false,
-    localEndpoint: false
+    localEndpoint: false,
+    gatewayMode: false
   })
 }
 
@@ -492,11 +607,19 @@ export function completeDesktopOnboarding() {
 export function dismissFirstRunOnboarding() {
   clearPoll()
   writeCachedSkipped(true)
-  patch({ firstRunSkipped: true, requested: false, manual: false, localEndpoint: false, flow: { status: 'idle' } })
+  patch({ firstRunSkipped: true, requested: false, manual: false, localEndpoint: false, gatewayMode: false, flow: { status: 'idle' } })
 }
 
 export function setOnboardingMode(mode: OnboardingMode) {
   patch({ mode })
+}
+
+// Exit the gateway connect form and return to the provider picker.
+// Only used on the thick client where the user can go back from the
+// gateway form to the provider list. On thin client the gateway form
+// is the only option, so the back button is hidden.
+export function exitGatewayMode() {
+  patch({ gatewayMode: false, mode: 'oauth', flow: { status: 'idle' } })
 }
 
 export async function refreshOnboarding(ctx: OnboardingContext) {
@@ -506,6 +629,34 @@ export async function refreshOnboarding(ctx: OnboardingContext) {
   // list is loaded and show the picker.
   if ($desktopOnboarding.get().manual) {
     await refreshProviders()
+
+    return false
+  }
+
+  // Thin client: there's no local backend, so the runtime check always
+  // fails. Instead of showing the provider picker, check if a remote
+  // gateway is already configured. If it is, the boot will succeed and
+  // onCompleted fires. If not, show the gateway connect form.
+  if (isThinClient()) {
+    const config = await window.hermesDesktop?.getConnectionConfig?.().catch(() => null)
+
+    if (config?.mode === 'remote' && config.remoteUrl) {
+      // A remote gateway is configured — let the boot proceed. The gateway
+      // boot hook will either connect or surface a reauth failure.
+      completeDesktopOnboarding()
+      ctx.onCompleted?.()
+
+      return true
+    }
+
+    // No remote gateway configured — show the gateway connect form.
+    writeCachedConfigured(false)
+    patch({
+      configured: false,
+      gatewayMode: true,
+      mode: 'gateway',
+      reason: 'Connect to a remote gateway to get started.'
+    })
 
     return false
   }

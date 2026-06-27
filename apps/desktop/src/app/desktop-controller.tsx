@@ -10,6 +10,7 @@ import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overla
 import { Pane, PaneMain } from '@/components/pane-shell'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { isThinClient } from '@/lib/build-mode'
 import { cn } from '@/lib/utils'
 import { useSkinCommand } from '@/themes/use-skin-command'
 
@@ -1108,7 +1109,7 @@ export function DesktopController() {
       {!isSecondaryWindow() && <DesktopInstallOverlay />}
       {!isSecondaryWindow() && (
         <DesktopOnboardingOverlay
-          enabled={gatewayState === 'open'}
+          enabled={isThinClient() || gatewayState === 'open'}
           onCompleted={() => {
             void refreshHermesConfig()
             void refreshCurrentModel()

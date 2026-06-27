@@ -1797,7 +1797,27 @@ export const zhHant = defineLocale({
     price: (input, output) => `${input} 輸入 / ${output} 輸出 每 Mtok`,
     change: '變更',
     startChatting: '開始',
-    docs: provider => `${provider} 文件`
+    docs: provider => `${provider} 文件`,
+    connectRemoteGateway: '連線到遠端閘道',
+    gateway: {
+      urlLabel: '閘道 URL',
+      urlHint: '遠端 Hermes 閘道的基礎 URL。支援路徑前綴，例如 /hermes。',
+      probing: '正在檢查閘道認證方式…',
+      probeError: '暫時無法連線到此閘道。請檢查 URL — 認證方式將在閘道回應後顯示。',
+      signIn: '登入',
+      signInWith: provider => `使用 ${provider} 登入`,
+      passwordHint: '此閘道使用使用者名稱和密碼。登入以授權此應用。',
+      oauthHint: provider => `此閘道使用 OAuth。使用 ${provider} 登入以授權此應用。`,
+      tokenLabel: '工作階段權杖',
+      tokenPlaceholder: '貼上工作階段權杖',
+      tokenHint: '用於 REST 和 WebSocket 存取的儀表板工作階段權杖。',
+      connect: '連線',
+      connecting: '正在連線',
+      saveFailed: '無法儲存閘道連線。',
+      signInFailed: '登入失敗。請重試。',
+      backToProviders: '返回提供商列表',
+      identityProvider: '閘道'
+    }
   },
 
   modelPicker: {

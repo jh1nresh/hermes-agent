@@ -8,9 +8,11 @@ import { Codicon } from '@/components/ui/codicon'
 import { ErrorIcon } from '@/components/ui/error-state'
 import { Input } from '@/components/ui/input'
 import { Loader } from '@/components/ui/loader'
+import type { DesktopConnectionProbeResult } from '@/global'
 import { getGlobalModelOptions } from '@/hermes'
 import { useI18n } from '@/i18n'
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KeyRound, Loader2, Terminal } from '@/lib/icons'
+import { isThinClient } from '@/lib/build-mode'
+import { AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Globe, KeyRound, Loader2, LogIn, Terminal } from '@/lib/icons'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { cn } from '@/lib/utils'
 import { $desktopBoot, type DesktopBootState } from '@/store/boot'
@@ -25,19 +27,24 @@ import {
   DEFAULT_MANUAL_ONBOARDING_REASON,
   DEFAULT_ONBOARDING_REASON,
   dismissFirstRunOnboarding,
+  exitGatewayMode,
+  gatewayOauthLogin,
   type OnboardingContext,
   type OnboardingFlow,
   peekPendingProviderOAuth,
   recheckExternalSignin,
   refreshOnboarding,
+  saveGatewayConnection,
   saveOnboardingApiKey,
   setOnboardingCode,
   setOnboardingMode,
   setOnboardingModel,
+  startGatewayOnboarding,
   startProviderOAuth,
   submitOnboardingCode
 } from '@/store/onboarding'
 import type { ModelOptionProvider, OAuthProvider } from '@/types/hermes'
+import { GatewayConnectForm } from './OnboardingGatewayConnection'
 
 interface DesktopOnboardingOverlayProps {
   enabled: boolean
@@ -267,7 +274,10 @@ export function DesktopOnboardingOverlay({ enabled, onCompleted, requestGateway 
   // The user chose "I'll choose a provider later" on first run. Stay out of the
   // way on every subsequent launch — they re-enter via Settings → Providers
   // (manual mode), which sets manual=true and bypasses this gate.
-  if (onboarding.firstRunSkipped && !onboarding.manual) {
+  // Thin client: never respect the skip — there's no "choose later" escape from
+  // the gateway form (it's the only path), and a skipped thin client has no
+  // working backend to fall back on.
+  if (onboarding.firstRunSkipped && !onboarding.manual && !isThinClient()) {
     return null
   }
 
@@ -288,7 +298,9 @@ export function DesktopOnboardingOverlay({ enabled, onCompleted, requestGateway 
   // In manual mode the app is already configured, so the flow is "ready"
   // immediately — no runtime gate needed. Otherwise wait for the readiness
   // check (configured === false) before showing the picker.
-  const ready = onboarding.manual || (enabled && onboarding.configured === false)
+  // Gateway mode (thin client or user picked "remote gateway") is also ready
+  // immediately — there's no provider list to wait for.
+  const ready = onboarding.manual || onboarding.gatewayMode || (enabled && onboarding.configured === false)
   const showPicker = flow.status === 'idle' || flow.status === 'success'
   // The final "you're in" screen drops the card chrome and floats centered on
   // the surface — same bare, cinematic treatment as the connecting overlay.
@@ -332,7 +344,11 @@ export function DesktopOnboardingOverlay({ enabled, onCompleted, requestGateway 
         <div className="grid gap-3 p-5">
           {reason ? <ReasonNotice reason={reason} /> : null}
           {ready ? (
-            showPicker ? (
+            onboarding.gatewayMode && showPicker ? (
+              <GatewayConnectForm
+                onBack={isThinClient() ? null : exitGatewayMode}
+              />
+            ) : showPicker ? (
               <Picker ctx={ctx} />
             ) : (
               <FlowPanel ctx={ctx} flow={flow} leaving={leaving} onBegin={finalizeOnboarding} />
@@ -396,6 +412,7 @@ function Header() {
     </div>
   )
 }
+
 
 export const FEATURED_ID = 'nous'
 const SHOW_ALL_KEY = 'hermes-onboarding-show-all-v1'
@@ -491,15 +508,27 @@ export function Picker({ ctx }: { ctx: OnboardingContext }) {
             In manual mode the overlay already has a close affordance, so the
             "choose later" escape would be redundant — hide it. */}
         {manual ? <span /> : <ChooseLaterLink />}
-        <Button
-          className="-mr-2 font-medium"
-          onClick={() => setOnboardingMode('apikey')}
-          size="xs"
-          type="button"
-          variant="text"
-        >
-          {t.onboarding.haveApiKey}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            className="font-medium"
+            onClick={() => startGatewayOnboarding()}
+            size="xs"
+            type="button"
+            variant="text"
+          >
+            <Globe className="size-3" />
+            {t.onboarding.connectRemoteGateway}
+          </Button>
+          <Button
+            className="-mr-2 font-medium"
+            onClick={() => setOnboardingMode('apikey')}
+            size="xs"
+            type="button"
+            variant="text"
+          >
+            {t.onboarding.haveApiKey}
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -809,6 +838,10 @@ function FlowPanel({
 
   if (flow.status === 'success') {
     return <DecodedLabel text={t.onboarding.connectedPicking(title)} />
+  }
+
+  if (flow.status === 'gateway_connected') {
+    return <Status>{t.onboarding.gateway.connecting}</Status>
   }
 
   if (flow.status === 'confirming_model') {

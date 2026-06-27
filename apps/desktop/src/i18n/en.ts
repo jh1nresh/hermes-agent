@@ -1735,7 +1735,27 @@ export const en: Translations = {
     price: (input, output) => `${input} in / ${output} out per Mtok`,
     change: 'Change',
     startChatting: 'Begin',
-    docs: provider => `${provider} docs`
+    docs: provider => `${provider} docs`,
+    connectRemoteGateway: 'Connect to a remote gateway',
+    gateway: {
+      urlLabel: 'Gateway URL',
+      urlHint: 'Base URL for the remote Hermes gateway. Path prefixes are supported, e.g. /hermes.',
+      probing: 'Checking how this gateway authenticates…',
+      probeError: 'Could not reach this gateway yet. Check the URL — the auth method will appear once it responds.',
+      signIn: 'Sign in',
+      signInWith: provider => `Sign in with ${provider}`,
+      passwordHint: 'This gateway uses a username and password. Sign in to authorize this app.',
+      oauthHint: provider => `This gateway uses OAuth. Sign in with ${provider} to authorize this app.`,
+      tokenLabel: 'Session token',
+      tokenPlaceholder: 'Paste session token',
+      tokenHint: 'The dashboard session token used for REST and WebSocket access.',
+      connect: 'Connect',
+      connecting: 'Connecting',
+      saveFailed: 'Could not save the gateway connection.',
+      signInFailed: 'Sign-in failed. Try again.',
+      backToProviders: 'Back to providers',
+      identityProvider: 'the gateway'
+    }
   },
 
   modelPicker: {

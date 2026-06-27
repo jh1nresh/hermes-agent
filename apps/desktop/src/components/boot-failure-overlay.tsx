@@ -38,10 +38,16 @@ export function BootFailureOverlay() {
   const [remoteReauth, setRemoteReauth] = useState<RemoteReauth | null>(null)
 
   const visible = Boolean(boot.error) && !boot.running
+
   // While first-run onboarding owns the picker/flow we let it surface its own
   // progress; the recovery overlay is for hard failures, which it covers via a
   // higher z-index regardless of onboarding state.
-  const suppressed = onboarding.flow.status !== 'idle' && onboarding.flow.status !== 'error'
+  // Thin client: when the gateway connect form is showing (no remote configured
+  // yet), suppress the boot-failure overlay — the "no remote" error is expected
+  // and the user is already looking at the form to fix it.
+  const suppressed =
+    (onboarding.flow.status !== 'idle' && onboarding.flow.status !== 'error') ||
+    onboarding.gatewayMode
 
   useEffect(() => {
     if (!visible) {
