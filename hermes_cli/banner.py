@@ -219,7 +219,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
         if is_shallow:
             fetch_args += ["--depth", "1"]
         fetch_args.append("--quiet")
-        subprocess.run(
+        _subprocess_compat.run(
             fetch_args,
             capture_output=True, timeout=10,
             cwd=str(repo_dir),

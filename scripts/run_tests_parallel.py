@@ -47,6 +47,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, Future
 from pathlib import Path
 from typing import Dict, List, Tuple
+from hermes_cli import _subprocess_compat
 
 
 # Default test discovery roots.
@@ -243,7 +244,7 @@ def _run_one_file(
     
     subproc_start = time.monotonic()
     # launch the pytest process
-    proc = subprocess.Popen(
+    proc = _subprocess_compat.popen(
         cmd,
         cwd=repo_root,
         stdout=subprocess.PIPE,

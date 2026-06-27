@@ -29,6 +29,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from hermes_cli import _subprocess_compat
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = REPO_ROOT / "hermes_cli" / "__init__.py"
@@ -1711,7 +1712,7 @@ AUTHOR_MAP = {
 
 def git(*args, cwd=None):
     """Run a git command and return stdout."""
-    result = subprocess.run(
+    result = _subprocess_compat.run(
         ["git"] + list(args),
         capture_output=True, text=True,
         cwd=cwd or str(REPO_ROOT),
@@ -1724,7 +1725,7 @@ def git(*args, cwd=None):
 
 def git_result(*args, cwd=None):
     """Run a git command and return the full CompletedProcess."""
-    return subprocess.run(
+    return _subprocess_compat.run(
         ["git"] + list(args),
         capture_output=True,
         text=True,
@@ -1862,7 +1863,7 @@ def build_release_artifacts(semver: str) -> list[Path]:
     else:
         cmd = [sys.executable, "-m", "build", "--sdist", "--wheel"]
 
-    result = subprocess.run(
+    result = _subprocess_compat.run(
         cmd,
         cwd=str(REPO_ROOT),
         capture_output=True,
@@ -2280,7 +2281,7 @@ def main():
 
         gh_bin = shutil.which("gh")
         if gh_bin:
-            result = subprocess.run(
+            result = _subprocess_compat.run(
                 gh_cmd,
                 capture_output=True, text=True,
                 cwd=str(REPO_ROOT),

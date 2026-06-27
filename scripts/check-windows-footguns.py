@@ -463,7 +463,9 @@ def _call_attr_name(node: ast.Call) -> str | None:
     return f.attr
 
 
-def _suppresses_window(node: ast.Call, func_name: str) -> bool:
+def _suppresses_window(
+    node: ast.Call, func_name: str, var_progs: dict[str, str] | None = None
+) -> bool:
     """True if this subprocess call cannot create a new console window.
 
     The honest invariant (corrected after review of PR #53791): capturing or
@@ -492,11 +494,11 @@ def _suppresses_window(node: ast.Call, func_name: str) -> bool:
         return True
     if any(kw.arg is None for kw in node.keywords):  # **kwargs spread
         return True
-    if _is_posix_only_program(node):
+    if _is_posix_only_program(node, var_progs):
         return True
     # Capture/redirect is only a safety boundary for programs that don't
     # allocate a Windows console — NOT for git/npm/node/python/ffmpeg/etc.
-    if not _is_windows_flashing_program(node):
+    if not _is_windows_flashing_program(node, var_progs):
         if func_name == "check_output":
             return True
         if explicit & {"stdout", "stderr", "capture_output"}:
@@ -504,41 +506,120 @@ def _suppresses_window(node: ast.Call, func_name: str) -> bool:
     return False
 
 
-def _argv_head(node: ast.Call) -> str | None:
-    """Return the path-stripped first argv element if it's a string literal."""
-    if not node.args:
+def _head_of_list_literal(seq) -> str | None:
+    """Path-stripped first element of a list/tuple literal, if a str constant.
+
+    Also recognises ``[sys.executable, ...]`` and ``[sys.executable, "-m", …]``
+    as the ``python`` program — the launcher interpreter flashes a console just
+    like a bare ``python`` does.
+    """
+    if not isinstance(seq, (ast.List, ast.Tuple)) or not seq.elts:
         return None
-    first = node.args[0]
-    if isinstance(first, (ast.List, ast.Tuple)) and first.elts:
-        head = first.elts[0]
-        if isinstance(head, ast.Constant) and isinstance(head.value, str):
-            return head.value.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    head = seq.elts[0]
+    if isinstance(head, ast.Constant) and isinstance(head.value, str):
+        return head.value.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    # sys.executable -> the running Python interpreter (a flashing console exe).
+    if (
+        isinstance(head, ast.Attribute)
+        and head.attr == "executable"
+        and isinstance(head.value, ast.Name)
+        and head.value.id == "sys"
+    ):
+        return "python"
     return None
 
 
-def _is_windows_flashing_program(node: ast.Call) -> bool:
+def _argv_head(node: ast.Call, var_progs: dict[str, str] | None = None) -> str | None:
+    """Return the path-stripped program name of the call's argv, or None.
+
+    Resolves three shapes so the rule sees through the indirection that real
+    update/build code uses (this was the blind spot behind the recurring
+    Windows flash storm — ``git_cmd = ["git", "-c", …]`` then
+    ``subprocess.run(git_cmd + ["fetch"], capture_output=True)`` was invisible):
+
+      * literal:   ``subprocess.run(["git", "status"])``
+      * variable:  ``cmd = ["git", …]; subprocess.run(cmd, …)``
+      * concat:    ``subprocess.run(git_cmd + ["fetch"], …)``  (BinOp Add)
+
+    ``var_progs`` maps a variable name to the program head inferred from its
+    nearest ``name = [<literal>, …]`` assignment in the same module. Dynamic
+    argv that can't be resolved still returns None (treated as unknown ->
+    flagged when not otherwise window-safe).
+    """
+    if not node.args:
+        return None
+    first = node.args[0]
+    # literal list/tuple
+    lit = _head_of_list_literal(first)
+    if lit is not None:
+        return lit
+    # bare variable: cmd
+    if isinstance(first, ast.Name) and var_progs:
+        return var_progs.get(first.id)
+    # concat: <var> + [...]  or  [...] + <var>
+    if isinstance(first, ast.BinOp) and isinstance(first.op, ast.Add):
+        left = first.left
+        if isinstance(left, ast.Name) and var_progs:
+            return var_progs.get(left.id)
+        lit_left = _head_of_list_literal(left)
+        if lit_left is not None:
+            return lit_left
+    return None
+
+
+def _build_var_progs(tree: ast.AST) -> dict[str, str]:
+    """Map variable names to the program head of the list literal assigned to
+    them, e.g. ``git_cmd = ["git", "-c", …]`` -> ``{"git_cmd": "git"}``.
+
+    A name assigned more than once with conflicting heads is dropped (we can't
+    prove which value reaches the call site, so we don't claim to know it).
+    Scans the whole module — call sites and their ``name = [...]`` definitions
+    are routinely in different functions, and the names used for command lists
+    (``git_cmd``, ``pip_cmd``, ``npm``…) don't collide across scopes in
+    practice. False positives here only ever ADD a flag, which an inline
+    ``# windows-footgun: ok`` can suppress.
+    """
+    progs: dict[str, str] = {}
+    conflicted: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        head = _head_of_list_literal(node.value)
+        if head is None:
+            continue
+        for tgt in node.targets:
+            if not isinstance(tgt, ast.Name):
+                continue
+            if tgt.id in conflicted:
+                continue
+            if tgt.id in progs and progs[tgt.id] != head:
+                # Conflicting definitions — give up on this name.
+                del progs[tgt.id]
+                conflicted.add(tgt.id)
+                continue
+            progs[tgt.id] = head
+    return progs
+
+
+def _is_windows_flashing_program(
+    node: ast.Call, var_progs: dict[str, str] | None = None
+) -> bool:
     """True if the call's program is a known cross-platform console exe that
     allocates a Windows console window (so capture is NOT a safe boundary)."""
-    prog = _argv_head(node)
+    prog = _argv_head(node, var_progs)
     return prog is not None and prog in _WINDOWS_FLASHING_PROGRAMS
 
 
-def _is_posix_only_program(node: ast.Call) -> bool:
+def _is_posix_only_program(
+    node: ast.Call, var_progs: dict[str, str] | None = None
+) -> bool:
     """True if the call's program is a statically-known POSIX-only executable.
 
-    Only inspects a literal list/tuple first arg whose first element is a
-    string constant (e.g. ``["launchctl", "bootout", target]``). Dynamic
-    argv (variables, f-strings) is treated as unknown and still flagged.
+    Resolves literal, variable, and concat argv shapes (see :func:`_argv_head`).
+    Dynamic argv that can't be resolved is treated as unknown and still flagged.
     """
-    if not node.args:
-        return False
-    first = node.args[0]
-    if isinstance(first, (ast.List, ast.Tuple)) and first.elts:
-        head = first.elts[0]
-        if isinstance(head, ast.Constant) and isinstance(head.value, str):
-            prog = head.value.rsplit("/", 1)[-1]
-            return prog in _POSIX_ONLY_PROGRAMS
-    return False
+    prog = _argv_head(node, var_progs)
+    return prog is not None and prog in _POSIX_ONLY_PROGRAMS
 
 
 def scan_subprocess_window_footguns(
@@ -555,6 +636,7 @@ def scan_subprocess_window_footguns(
     except SyntaxError:
         return []
     lines = text.splitlines()
+    var_progs = _build_var_progs(tree)
     rule = Footgun(
         name=SUBPROCESS_FOOTGUN_NAME,
         pattern=re.compile(r"^$"),  # unused; AST-driven
@@ -568,7 +650,7 @@ def scan_subprocess_window_footguns(
         func_name = _call_attr_name(node)
         if func_name is None:
             continue
-        if _suppresses_window(node, func_name):
+        if _suppresses_window(node, func_name, var_progs):
             continue
         lineno = node.lineno
         line = lines[lineno - 1] if 0 <= lineno - 1 < len(lines) else ""

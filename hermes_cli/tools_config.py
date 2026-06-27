@@ -229,6 +229,7 @@ def _checklist_toolset_keys(platform: str) -> Set[str]:
 # compatibility with existing ``PLATFORMS[key]["label"]`` access patterns.
 from hermes_cli.platforms import PLATFORMS as _PLATFORMS_REGISTRY
 from hermes_cli._subprocess_compat import windows_hide_flags
+from hermes_cli import _subprocess_compat
 
 PLATFORMS = {
     k: {"label": info.label, "default_toolset": info.default_toolset}
@@ -653,7 +654,7 @@ def _pip_install(
     pip_cmd = [sys.executable, "-m", "pip"]
     try:
         # Probe for pip; bootstrap via ensurepip if missing (uv venv lacks it).
-        probe = subprocess.run(
+        probe = _subprocess_compat.run(
             pip_cmd + ["--version"],
             capture_output=True, text=True, timeout=15,
         )
@@ -661,7 +662,7 @@ def _pip_install(
             raise FileNotFoundError("pip not in venv")
     except (subprocess.TimeoutExpired, FileNotFoundError):
         try:
-            subprocess.run(
+            _subprocess_compat.run(
                 [sys.executable, "-m", "ensurepip", "--upgrade", "--default-pip"],
                 capture_output=True, text=True, timeout=120, check=True,
             )
@@ -672,7 +673,7 @@ def _pip_install(
                 stderr=f"pip not available and ensurepip failed: {e}",
             )
 
-    return subprocess.run(
+    return _subprocess_compat.run(
         pip_cmd + ["install", *args],
         capture_output=capture_output, text=True, timeout=timeout,
     )
@@ -889,7 +890,7 @@ def _run_cua_driver_installer(label: str = "Installing", verbose: bool = True) -
         if verbose:
             result = subprocess.run(install_cmd, shell=use_shell, timeout=300, env=_cua_driver_env(), creationflags=windows_hide_flags())
         else:
-            result = subprocess.run(
+            result = _subprocess_compat.run(
                 install_cmd, shell=use_shell, timeout=300, env=_cua_driver_env(),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
@@ -1031,7 +1032,7 @@ def _run_post_setup(post_setup_key: str):
             else [npx_bin, "-y", "agent-browser", "install", "--with-deps"]
         )
         try:
-            result = subprocess.run(
+            result = _subprocess_compat.run(
                 install_cmd,
                 capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600,
             )

@@ -839,8 +839,26 @@ def _spawn_gateway_restart_watcher(old_pid: int, run_argv: list[str]) -> bool:
         respawn_env_literal=respawn_env_literal,
     )
 
+    # The watcher process itself must ALSO run under the windowless
+    # interpreter. ``sys.executable`` during ``hermes update`` is the venv's
+    # console ``python.exe``; uv's venv launcher re-execs the base console
+    # interpreter, which allocates a conhost that DETACHED_PROCESS /
+    # CREATE_NO_WINDOW cannot suppress. That persistent console then becomes
+    # the parent of the respawned gateway — so even though the gateway argv is
+    # rewritten to pythonw, closing the leftover console window kills the
+    # gateway. Resolve a windowless pythonw for the watcher too (no-op on
+    # POSIX, where sys.executable has no console problem).
+    watcher_python = sys.executable
+    if sys.platform == "win32":
+        try:
+            from hermes_cli.gateway_windows import _resolve_detached_python
+
+            watcher_python = _resolve_detached_python(sys.executable)[0]
+        except Exception:
+            watcher_python = sys.executable
+
     watcher_argv = [
-        sys.executable,
+        watcher_python,
         "-c",
         watcher,
         str(old_pid),

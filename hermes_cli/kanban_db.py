@@ -5339,7 +5339,7 @@ def _ensure_git_worktree(repo_root: Path, target: Path, branch_name: str) -> Non
             "git", "-C", str(repo_root), "worktree", "add", "-b", branch_name,
             str(target), "HEAD",
         ]
-    result = subprocess.run(
+    result = _subprocess_compat.run(
         cmd,
         capture_output=True,
         text=True,

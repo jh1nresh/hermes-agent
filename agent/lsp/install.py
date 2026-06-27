@@ -34,6 +34,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
+from hermes_cli import _subprocess_compat
 
 logger = logging.getLogger("agent.lsp.install")
 
@@ -343,7 +344,7 @@ def _install_pip(pkg: str, bin_name: str) -> Optional[str]:
     pip_target.mkdir(parents=True, exist_ok=True)
     try:
         logger.info("[install] pip install --target %s %s", pip_target, pkg)
-        proc = subprocess.run(
+        proc = _subprocess_compat.run(
             [sys.executable, "-m", "pip", "install", "--target", str(pip_target), "--quiet", pkg],
             check=False,
             capture_output=True,

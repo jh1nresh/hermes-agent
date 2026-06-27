@@ -161,6 +161,7 @@ from hermes_cli.cli_output import (  # noqa: E402
 )
 from hermes_cli.secret_prompt import masked_secret_prompt  # noqa: E402
 from hermes_cli._subprocess_compat import windows_hide_flags
+from hermes_cli import _subprocess_compat
 
 
 def is_interactive_stdin() -> bool:
@@ -1316,7 +1317,7 @@ def setup_terminal_backend(config: dict):
                         text=True,
                     )
                 else:
-                    result = subprocess.run(
+                    result = _subprocess_compat.run(
                         [sys.executable, "-m", "pip", "install", "modal"],
                         capture_output=True,
                         text=True,
@@ -1369,7 +1370,7 @@ def setup_terminal_backend(config: dict):
                     text=True,
                 )
             else:
-                result = subprocess.run(
+                result = _subprocess_compat.run(
                     [sys.executable, "-m", "pip", "install", "daytona"],
                     capture_output=True,
                     text=True,

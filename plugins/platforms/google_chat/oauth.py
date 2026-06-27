@@ -92,6 +92,7 @@ except (ModuleNotFoundError, ImportError):
             return str(home)
 
 from utils import atomic_replace
+from hermes_cli._subprocess_compat import windows_hide_flags
 
 
 def _hermes_home() -> Path:
@@ -382,6 +383,7 @@ def install_deps() -> bool:
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", "--quiet"] + _REQUIRED_PACKAGES,
             stdout=subprocess.DEVNULL,
+            creationflags=windows_hide_flags(),
         )
         print("Dependencies installed.")
         return True

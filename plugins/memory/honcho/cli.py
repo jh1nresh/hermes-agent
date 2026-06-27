@@ -13,6 +13,7 @@ from pathlib import Path
 from hermes_constants import get_hermes_home
 from plugins.memory.honcho.client import _host_block, profile_host_key, resolve_active_host, resolve_config_path, HOST
 from hermes_cli.config import cfg_get
+from hermes_cli import _subprocess_compat
 
 
 def clone_honcho_for_profile(profile_name: str) -> bool:
@@ -517,7 +518,7 @@ def _ensure_sdk_installed() -> bool:
 
     import subprocess
     print("  Installing honcho-ai...", flush=True)
-    result = subprocess.run(
+    result = _subprocess_compat.run(
         [sys.executable, "-m", "pip", "install", "honcho-ai>=2.0.1"],
         capture_output=True,
         text=True,

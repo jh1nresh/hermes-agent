@@ -78,6 +78,7 @@ import sysconfig
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
+from hermes_cli import _subprocess_compat
 
 logger = logging.getLogger(__name__)
 
@@ -635,7 +636,7 @@ def _venv_pip_install(specs: tuple[str, ...], *, timeout: int = 300) -> _Install
         # Tier 2: python -m pip (with ensurepip bootstrap if needed)
         pip_cmd = [sys.executable, "-m", "pip"]
         try:
-            probe = subprocess.run(
+            probe = _subprocess_compat.run(
                 pip_cmd + ["--version"],
                 capture_output=True, text=True, timeout=15,
                 stdin=subprocess.DEVNULL,
@@ -644,7 +645,7 @@ def _venv_pip_install(specs: tuple[str, ...], *, timeout: int = 300) -> _Install
                 raise FileNotFoundError("pip not in venv")
         except (subprocess.TimeoutExpired, FileNotFoundError):
             try:
-                subprocess.run(
+                _subprocess_compat.run(
                     [sys.executable, "-m", "ensurepip", "--upgrade", "--default-pip"],
                     capture_output=True, text=True, timeout=120, check=True,
                     stdin=subprocess.DEVNULL,
@@ -654,7 +655,7 @@ def _venv_pip_install(specs: tuple[str, ...], *, timeout: int = 300) -> _Install
                                       f"pip not available and ensurepip failed: {e}")
 
         try:
-            r = subprocess.run(
+            r = _subprocess_compat.run(
                 pip_cmd + ["install", *target_args, *constraint_args, *specs],
                 capture_output=True, text=True, timeout=timeout,
                 stdin=subprocess.DEVNULL,

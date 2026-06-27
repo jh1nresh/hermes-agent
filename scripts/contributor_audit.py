@@ -30,6 +30,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from release import resolve_author  # noqa: E402
+from hermes_cli import _subprocess_compat
 
 REPO_ROOT = SCRIPT_DIR.parent
 
@@ -78,7 +79,7 @@ def is_ignored(handle: str, email: str = "") -> bool:
 
 def git(*args, cwd=None):
     """Run a git command and return stdout."""
-    result = subprocess.run(
+    result = _subprocess_compat.run(
         ["git"] + list(args),
         capture_output=True,
         text=True,
