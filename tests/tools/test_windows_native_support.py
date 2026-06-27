@@ -972,6 +972,44 @@ class TestGatewayDetachedWatcherWindowsFlags:
             "near the helper call."
         )
 
+    def test_restart_watcher_leg_uses_windowless_interpreter_on_windows(self):
+        """The *watcher* process (the python -c poller, not just the respawned
+        gateway) must launch under the windowless base interpreter on Windows.
+
+        Root cause of the persistent "hermes update -> gateway restart flashes
+        and flurries" report: the watcher_argv led with bare ``sys.executable``
+        (the venv console ``python.exe``), which re-execs the base console
+        interpreter and allocates a conhost window even under CREATE_NO_WINDOW.
+        The respawned-gateway leg was rewritten to the windowless interpreter
+        (windowless_gateway_restart_spec) but the watcher leg that spawns it was
+        not — so it kept flashing. The fix resolves the same windowless base
+        python via _resolve_detached_python for watcher_argv[0].
+
+        Static check on the function source so a refactor can't silently revert
+        it back to bare sys.executable.
+        """
+        root = Path(__file__).resolve().parents[2]
+        text = (root / "hermes_cli" / "gateway.py").read_text(encoding="utf-8")
+        start = text.find("def _spawn_gateway_restart_watcher(")
+        assert start != -1, "_spawn_gateway_restart_watcher not found"
+        end = text.find("\ndef ", start + 1)
+        body = text[start:end if end != -1 else len(text)]
+        # The watcher interpreter must be resolved (not bare sys.executable).
+        assert "_resolve_detached_python" in body, (
+            "watcher leg must resolve the windowless base interpreter on Windows "
+            "via _resolve_detached_python, not launch bare sys.executable "
+            "(which re-execs the console python and flashes a conhost window)."
+        )
+        assert "watcher_python = windowless_python" in body, (
+            "watcher_argv[0] must be the resolved windowless interpreter."
+        )
+        # And the watcher must carry the env overlay so its own hermes_cli
+        # imports resolve under the base interpreter.
+        assert "watcher_env_overlay" in body and "PYTHONPATH" in body, (
+            "watcher leg must overlay VIRTUAL_ENV/PYTHONPATH so the base "
+            "interpreter can import hermes_cli in the inlined watcher snippet."
+        )
+
     def test_launch_detached_profile_gateway_restart_outer_popen_has_access_denied_fallback(
         self,
     ):

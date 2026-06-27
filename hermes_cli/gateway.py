@@ -839,8 +839,51 @@ def _spawn_gateway_restart_watcher(old_pid: int, run_argv: list[str]) -> bool:
         respawn_env_literal=respawn_env_literal,
     )
 
+    # The watcher process itself must ALSO launch under the windowless
+    # interpreter on Windows. Using the venv's console ``python.exe`` (the
+    # default ``sys.executable``) re-execs the base console interpreter, which
+    # allocates its own conhost window even under CREATE_NO_WINDOW — the flash
+    # users see on ``hermes update`` → gateway restart. The respawned *gateway*
+    # leg was already rewritten to the windowless base interpreter above
+    # (windowless_gateway_restart_spec); the *watcher* leg was not, so it kept
+    # flashing. Resolve the same base ``pythonw.exe`` + cwd/env overlay here —
+    # note the venv ``pythonw.exe`` is NOT enough for uv venvs (its launcher
+    # shim re-execs the base console python), which is exactly why we reuse
+    # _resolve_detached_python rather than _derive_venv_pythonw. No-op on POSIX.
+    watcher_python = sys.executable
+    watcher_cwd = ""
+    watcher_env_overlay: dict[str, str] = {}
+    if sys.platform == "win32":
+        try:
+            from hermes_cli.gateway_windows import _resolve_detached_python
+            from hermes_cli.config import get_hermes_home
+
+            windowless_python, venv_dir, extra_pythonpath = _resolve_detached_python(
+                sys.executable
+            )
+            watcher_python = windowless_python
+            # The base interpreter needs the venv's site config + hermes_cli on
+            # PYTHONPATH to import _subprocess_compat / gateway.status in the
+            # watcher snippet. Mirror windowless_gateway_restart_spec's overlay.
+            overlay: dict[str, str] = {"HERMES_GATEWAY_DETACHED": "1"}
+            if venv_dir:
+                overlay["VIRTUAL_ENV"] = str(venv_dir)
+            if extra_pythonpath:
+                existing = os.environ.get("PYTHONPATH", "")
+                joined = os.pathsep.join(
+                    p for p in (*extra_pythonpath, existing) if p
+                )
+                overlay["PYTHONPATH"] = joined
+            watcher_env_overlay = overlay
+        except Exception:
+            # Fall back to the console interpreter — a possible flash is worse
+            # than a watcher that never spawns, so keep the restart working.
+            watcher_python = sys.executable
+            watcher_cwd = ""
+            watcher_env_overlay = {}
+
     watcher_argv = [
-        sys.executable,
+        watcher_python,
         "-c",
         watcher,
         str(old_pid),
@@ -848,12 +891,21 @@ def _spawn_gateway_restart_watcher(old_pid: int, run_argv: list[str]) -> bool:
     ]
 
     # Same platform-aware detach for the watcher process itself — so
-    # closing the user's terminal doesn't kill the watcher.
+    # closing the user's terminal doesn't kill the watcher. When the watcher
+    # runs under the windowless base interpreter (Windows), it also needs the
+    # cwd + env overlay so its own `from hermes_cli...` imports resolve without
+    # the venv launcher's site config.
+    _watcher_popen_extra: dict = {}
+    if watcher_cwd:
+        _watcher_popen_extra["cwd"] = watcher_cwd
+    if watcher_env_overlay:
+        _watcher_popen_extra["env"] = {**os.environ, **watcher_env_overlay}
     try:
         subprocess.Popen(
             watcher_argv,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            **_watcher_popen_extra,
             **windows_detach_popen_kwargs(),
         )
     except OSError:
@@ -872,6 +924,7 @@ def _spawn_gateway_restart_watcher(old_pid: int, run_argv: list[str]) -> bool:
                 watcher_argv,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                **_watcher_popen_extra,
                 **fallback_kwargs,
             )
         except OSError:
