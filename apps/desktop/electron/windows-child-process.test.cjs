@@ -13,7 +13,7 @@ function readElectronFile(name) {
 
 function requireHiddenChildOptions(source, needle) {
   const match = needle instanceof RegExp ? needle.exec(source) : null
-  const index = needle instanceof RegExp ? match?.index ?? -1 : source.indexOf(needle)
+  const index = needle instanceof RegExp ? (match?.index ?? -1) : source.indexOf(needle)
   assert.notEqual(index, -1, `missing call site: ${needle}`)
   const snippet = source.slice(index, index + 700)
   assert.match(
@@ -51,6 +51,22 @@ test('desktop background child processes opt into hidden Windows consoles', () =
   assert.match(source, /function getVenvSitePackagesEntries\(venvRoot\)/)
   assert.match(source, /path\.join\(venvRoot, 'Lib', 'site-packages'\)/)
   assert.match(source, /args: \['-m', 'hermes_cli\.main', \.\.\.dashboardArgs\]/)
+})
+
+test('getNoConsoleVenvPython prefers base pythonw over the uv re-exec shim', () => {
+  const source = readElectronFile('main.cjs')
+  const body = source.slice(
+    source.indexOf('function getNoConsoleVenvPython(venvRoot)'),
+    source.indexOf('function getVenvSitePackagesEntries(venvRoot)')
+  )
+
+  // The venv Scripts\pythonw.exe re-execs a console python.exe (flashes a
+  // conhost); the base pythonw must be resolved first so it never runs.
+  const baseIdx = body.indexOf('basePythonw')
+  const shimIdx = body.indexOf("'Scripts', 'pythonw.exe'")
+  assert.notEqual(baseIdx, -1, 'base pythonw resolution missing')
+  assert.notEqual(shimIdx, -1, 'venv shim fallback missing')
+  assert.ok(baseIdx < shimIdx, 'base pythonw must be preferred before the venv Scripts shim')
 })
 
 test('intentional or interactive desktop child processes stay documented', () => {
