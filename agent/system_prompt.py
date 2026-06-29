@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY,
+    DISABLED_TOOL_GUIDANCE,
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     HERMES_AGENT_HELP_GUIDANCE,
     KANBAN_GUIDANCE,
@@ -183,6 +184,18 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # (default True) and only injected when tools are actually loaded.
     if getattr(agent, "_parallel_tool_call_guidance", True) and agent.valid_tool_names:
         stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
+
+    # Universal disabled/unavailable-capability guidance.  Tells the model that
+    # when the user names a capability with no available tool (disabled in this
+    # session's toolset, or never enabled), it should say so rather than
+    # substituting a different tool (e.g. shelling out via the terminal) to work
+    # around the user's explicit decision to turn that capability off.  The
+    # runtime already *enforces* that disabled tools can't be invoked; this
+    # supplies the behavioral steer so the model doesn't silently route around
+    # the missing tool.  Gated by config.yaml ``agent.disabled_tool_guidance``
+    # (default True) and only injected when tools are actually loaded.
+    if getattr(agent, "_disabled_tool_guidance", True) and agent.valid_tool_names:
+        stable_parts.append(DISABLED_TOOL_GUIDANCE)
 
     # Tool-aware behavioral guidance: only inject when the tools are loaded
     tool_guidance = []

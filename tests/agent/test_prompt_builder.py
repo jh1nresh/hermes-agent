@@ -28,6 +28,7 @@ from agent.prompt_builder import (
     TOOL_USE_ENFORCEMENT_MODELS,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
     PARALLEL_TOOL_CALL_GUIDANCE,
+    DISABLED_TOOL_GUIDANCE,
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     MEMORY_GUIDANCE,
     SESSION_SEARCH_GUIDANCE,
@@ -1602,6 +1603,47 @@ class TestParallelToolCallGuidance:
         # steer. The Google-only block must NOT carry its own copy, otherwise
         # Gemini/Gemma would receive the instruction twice in one prompt.
         assert "parallel tool call" not in GOOGLE_MODEL_OPERATIONAL_GUIDANCE.lower()
+
+
+class TestDisabledToolGuidance:
+    """Behavior contracts for the disabled/unavailable-capability guidance.
+
+    Asserts the invariants the block must satisfy (steer reporting a
+    named-but-unavailable capability instead of substituting another tool, stay
+    short for the cached prompt) rather than freezing its exact wording.
+    Ported from nearai/ironclaw#5307.
+    """
+
+    def test_is_nonempty_string(self):
+        assert isinstance(DISABLED_TOOL_GUIDANCE, str)
+        assert DISABLED_TOOL_GUIDANCE.strip()
+
+    def test_steers_reporting_unavailable(self):
+        text = DISABLED_TOOL_GUIDANCE.lower()
+        # Must tell the model to surface that a named capability is off rather
+        # than silently working around it — accept any phrasing meaning that.
+        assert "unavailable" in text or "disabled" in text
+
+    def test_forbids_substituting_another_tool(self):
+        text = DISABLED_TOOL_GUIDANCE.lower()
+        # The core steer: do NOT route around a disabled capability with a
+        # different tool. Must mention substitution/working-around and a
+        # negation.
+        assert "substitut" in text or "stand-in" in text or "work around" in text or "route around" in text
+        assert "not" in text or "don't" in text or "do not" in text
+
+    def test_preserves_general_purpose_tools(self):
+        # Must not over-rotate into telling the model to stop using terminal
+        # etc. for their own legitimate purposes — only as a stand-in.
+        text = DISABLED_TOOL_GUIDANCE.lower()
+        assert "general-purpose" in text or "legitimate" in text
+
+    def test_stays_short_for_cached_prompt(self):
+        # Shipped in every cached system prompt — keep it tight.
+        assert len(DISABLED_TOOL_GUIDANCE) < 900
+
+    def test_has_a_heading(self):
+        assert DISABLED_TOOL_GUIDANCE.lstrip().startswith("#")
 
 
 # =========================================================================

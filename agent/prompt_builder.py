@@ -366,6 +366,46 @@ PARALLEL_TOOL_CALL_GUIDANCE = (
     "in doubt and the calls are independent, batch them."
 )
 
+# Universal disabled/unavailable-capability guidance — applied to ALL models.
+#
+# Why this matters: when a user disables a tool via `hermes tools` (or runs a
+# restricted-toolset session — subagent, kanban worker, curated gateway), that
+# tool is removed from the model's tool schema. The runtime already *enforces*
+# this: a disabled tool cannot be invoked, including through the tool_search
+# bridge (model_tools.py rejects out-of-scope underlying calls). What was
+# missing is the *behavioral* steer. A model whose dedicated email tool is
+# disabled will happily shell out via `terminal` to send the mail anyway, or
+# curl an API to stand in for a disabled integration tool — silently routing
+# around the user's explicit decision to turn that capability off. The user
+# disabled it for a reason (cost, safety, privacy, scope); substituting a
+# different tool defeats that intent without telling them.
+#
+# This block tells the model: if the user names a capability that isn't in your
+# available tools, say it's unavailable/disabled — do NOT substitute another
+# tool as a workaround. It does not stop the model from using general-purpose
+# tools (terminal, etc.) for their own legitimate purposes; it stops the model
+# from using them as a stand-in for a capability the user deliberately removed.
+#
+# Short on purpose — shipped in the cached system prompt to every user, every
+# session. Token cost is paid once at install and amortised across all sessions
+# via prefix caching. Keep it tight.
+#
+# Ported from nearai/ironclaw#5307 ("discourage disabled tool workarounds"),
+# adapted from IronClaw's Rust capability-surface usage policy to hermes-agent's
+# Python prompt-assembly architecture.
+DISABLED_TOOL_GUIDANCE = (
+    "# Disabled or unavailable capabilities\n"
+    "Use only the tools available to you in this session. If the user asks you "
+    "to use a specific capability by name and no tool for it is available — "
+    "because it was disabled in this session's toolset, or never enabled — tell "
+    "the user that capability is unavailable or disabled. Do NOT route around it "
+    "by using a different tool as a substitute (e.g. shelling out via the "
+    "terminal to do what a disabled dedicated tool would have done). The user "
+    "turned it off deliberately; honor that rather than working around it. "
+    "General-purpose tools are still fine for their own legitimate tasks — just "
+    "don't use them as a stand-in for a capability the user removed."
+)
+
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 # where GPT models abandon work on partial results, skip prerequisite lookups,
 # hallucinate instead of using tools, and declare "done" without verification.

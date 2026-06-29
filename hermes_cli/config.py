@@ -969,6 +969,16 @@ DEFAULT_CONFIG = {
         # compounds over a long conversation.  Costs ~70 tokens in the cached
         # system prompt.  Set False to disable globally.
         "parallel_tool_call_guidance": True,
+        # Universal disabled/unavailable-capability guidance — short prompt
+        # block applied to all models that tells the model: when the user names
+        # a capability that has no available tool (disabled in this session's
+        # toolset, or never enabled), report it as unavailable/disabled instead
+        # of substituting a different tool (e.g. shelling out via the terminal)
+        # to route around the user's explicit decision to turn it off.  The
+        # runtime already enforces that disabled tools can't be invoked; this is
+        # the behavioral steer.  Costs ~80 tokens in the cached system prompt.
+        # Set False to disable globally.
+        "disabled_tool_guidance": True,
         # Local-environment toolchain probe — surfaces Python/pip/uv/PEP-668
         # state in the system prompt when something non-default is detected
         # (e.g. python3 has no pip module, pip→python version mismatch, PEP

@@ -1325,6 +1325,12 @@ def init_agent(
     # single turn; the runtime already executes such batches concurrently.
     agent._parallel_tool_call_guidance = bool(_agent_section.get("parallel_tool_call_guidance", True))
 
+    # Universal disabled/unavailable-capability guidance toggle.  Default True.
+    # Separate flag because a user may want the other guidance blocks but not
+    # this one.  Steers the model to report a named-but-unavailable capability
+    # as disabled rather than substituting a different tool to work around it.
+    agent._disabled_tool_guidance = bool(_agent_section.get("disabled_tool_guidance", True))
+
     # Local Python toolchain probe toggle.  Default True.  When False,
     # the probe is skipped entirely (no subprocess calls, no system-prompt
     # line).  Useful for users on exotic setups where the probe heuristics
