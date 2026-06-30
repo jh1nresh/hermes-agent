@@ -59,6 +59,7 @@ const {
 const { registerGitIpc } = require('./git-ipc.cjs')
 const { registerFsIpc } = require('./fs-ipc.cjs')
 const { registerTerminalIpc } = require('./terminal-ipc.cjs')
+const { registerUpdatesIpc } = require('./updates-ipc.cjs')
 const { OFFICIAL_REPO_HTTPS_URL, isOfficialSshRemote } = require('./update-remote.cjs')
 const { resolveBehindCount, shouldCountCommits } = require('./update-count.cjs')
 const { runRebuildWithRetry } = require('./update-rebuild.cjs')
@@ -6919,30 +6920,15 @@ registerTerminalIpc({
   terminalShellEnv
 })
 
-ipcMain.handle('hermes:updates:check', async () =>
-  checkUpdates().catch(error => ({
-    supported: true,
-    branch: readDesktopUpdateConfig().branch,
-    error: 'check-failed',
-    message: error?.message || String(error),
-    fetchedAt: Date.now()
-  }))
-)
-
-ipcMain.handle('hermes:updates:apply', async (_event, payload) =>
-  applyUpdates(payload || {}).catch(error => ({
-    ok: false,
-    error: 'apply-failed',
-    message: error?.message || String(error)
-  }))
-)
-
-ipcMain.handle('hermes:updates:branch:get', async () => readDesktopUpdateConfig())
-
-ipcMain.handle('hermes:updates:branch:set', async (_event, name) => {
-  const branch = typeof name === 'string' && name.trim() ? name.trim() : DEFAULT_UPDATE_BRANCH
-  writeDesktopUpdateConfig({ branch })
-  return { branch }
+// Auto-update IPC lives in updates-ipc.cjs; the update engine + on-disk
+// config stay in the main process and are injected.
+registerUpdatesIpc({
+  applyUpdates,
+  checkUpdates,
+  DEFAULT_UPDATE_BRANCH,
+  ipcMain,
+  readDesktopUpdateConfig,
+  writeDesktopUpdateConfig
 })
 
 // Resolve the canonical Hermes version (the one `release.py` bumps in
