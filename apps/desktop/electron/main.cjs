@@ -58,6 +58,7 @@ const {
 } = require('./update-relaunch.cjs')
 const { registerGitIpc } = require('./git-ipc.cjs')
 const { registerFsIpc } = require('./fs-ipc.cjs')
+const { registerTerminalIpc } = require('./terminal-ipc.cjs')
 const { OFFICIAL_REPO_HTTPS_URL, isOfficialSshRemote } = require('./update-remote.cjs')
 const { resolveBehindCount, shouldCountCommits } = require('./update-count.cjs')
 const { runRebuildWithRetry } = require('./update-rebuild.cjs')
@@ -6904,73 +6905,19 @@ registerFsIpc({ ipcMain, directoryExists, expandUserPath })
 // stay here (Windows PATH discovery) and are injected into the registrar.
 registerGitIpc({ ipcMain, resolveGitBinary, resolveGhBinary })
 
-ipcMain.handle('hermes:terminal:start', async (event, payload = {}) => {
-  if (!nodePty) {
-    throw new Error('PTY support is unavailable. Reinstall desktop dependencies and restart Hermes.')
-  }
-
-  ensureSpawnHelperExecutable()
-
-  const id = crypto.randomUUID()
-  const { args, command, name } = terminalShellCommand()
-  const cwd = safeTerminalCwd(payload?.cwd)
-  const cols = Math.max(2, Number.parseInt(String(payload?.cols || 80), 10) || 80)
-  const rows = Math.max(2, Number.parseInt(String(payload?.rows || 24), 10) || 24)
-  const ptyProcess = nodePty.spawn(command, args, {
-    cols,
-    cwd,
-    env: terminalShellEnv(),
-    name: 'xterm-256color',
-    rows
-  })
-
-  terminalSessions.set(id, { pty: ptyProcess, webContentsId: event.sender.id })
-
-  const send = (suffix, payload) => {
-    if (event.sender.isDestroyed()) {
-      return
-    }
-
-    event.sender.send(terminalChannel(id, suffix), payload)
-  }
-
-  ptyProcess.onData(data => send('data', data))
-  ptyProcess.onExit(({ exitCode, signal }) => {
-    terminalSessions.delete(id)
-    send('exit', { code: exitCode, signal: signal || null })
-  })
-  event.sender.once('destroyed', () => disposeTerminalSession(id))
-
-  return { cwd, id, shell: name }
+// Terminal/PTY IPC lives in terminal-ipc.cjs; the PTY runtime, session
+// registry, and shell helpers stay in the main process and are injected.
+registerTerminalIpc({
+  disposeTerminalSession,
+  ensureSpawnHelperExecutable,
+  ipcMain,
+  nodePty,
+  safeTerminalCwd,
+  terminalChannel,
+  terminalSessions,
+  terminalShellCommand,
+  terminalShellEnv
 })
-
-ipcMain.handle('hermes:terminal:write', (_event, id, data) => {
-  const sessionInfo = terminalSessions.get(String(id || ''))
-
-  if (!sessionInfo) {
-    return false
-  }
-
-  sessionInfo.pty.write(String(data || ''))
-
-  return true
-})
-
-ipcMain.handle('hermes:terminal:resize', (_event, id, size = {}) => {
-  const sessionInfo = terminalSessions.get(String(id || ''))
-
-  if (!sessionInfo) {
-    return false
-  }
-
-  const cols = Math.max(2, Number.parseInt(String(size?.cols || 80), 10) || 80)
-  const rows = Math.max(2, Number.parseInt(String(size?.rows || 24), 10) || 24)
-
-  sessionInfo.pty.resize(cols, rows)
-
-  return true
-})
-ipcMain.handle('hermes:terminal:dispose', (_event, id) => disposeTerminalSession(String(id || '')))
 
 ipcMain.handle('hermes:updates:check', async () =>
   checkUpdates().catch(error => ({
