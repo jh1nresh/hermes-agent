@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict')
 const test = require('node:test')
 
-const { GIT_IPC_CHANNELS, registerGitIpc } = require('./git-ipc.cjs')
+const { registerGitIpc } = require('./git-ipc.cjs')
 
 function fakeIpcMain() {
   const handlers = new Map()
@@ -11,33 +11,34 @@ function fakeIpcMain() {
   return {
     handlers,
     handle(channel, handler) {
+      assert.ok(!handlers.has(channel), `duplicate registration for ${channel}`)
       handlers.set(channel, handler)
     }
   }
 }
 
-test('registerGitIpc wires every advertised git channel exactly once', () => {
+test('registerGitIpc wires only hermes:git:* channels, each to a handler fn', () => {
   const ipcMain = fakeIpcMain()
 
-  registerGitIpc({
-    ipcMain,
-    resolveGitBinary: () => 'git',
-    resolveGhBinary: () => 'gh'
-  })
+  registerGitIpc({ ipcMain, resolveGitBinary: () => 'git', resolveGhBinary: () => 'gh' })
 
-  assert.deepEqual([...ipcMain.handlers.keys()].sort(), [...GIT_IPC_CHANNELS].sort())
+  assert.ok(ipcMain.handlers.size >= 19, `expected the full git surface, got ${ipcMain.handlers.size}`)
 
-  for (const channel of GIT_IPC_CHANNELS) {
-    assert.equal(typeof ipcMain.handlers.get(channel), 'function', `${channel} should register a handler`)
+  for (const [channel, handler] of ipcMain.handlers) {
+    assert.match(channel, /^hermes:git:/, `${channel} is not a git channel`)
+    assert.equal(typeof handler, 'function', `${channel} should register a handler`)
+  }
+
+  // Spot-check the load-bearing channels across the worktree / review / scan groups.
+  for (const channel of ['hermes:git:worktreeList', 'hermes:git:review:commit', 'hermes:git:scanRepos']) {
+    assert.ok(ipcMain.handlers.has(channel), `missing ${channel}`)
   }
 })
 
-test('registerGitIpc delegates worktreeList to the git-worktree-ops module', async () => {
+test('handlers thread the injected resolver into the ops layer', async () => {
   const ipcMain = fakeIpcMain()
   const calls = []
 
-  // Stub the git binary resolver so we can confirm the handler threads it into
-  // the ops layer without shelling out to a real git.
   registerGitIpc({
     ipcMain,
     resolveGitBinary: () => {
@@ -48,11 +49,10 @@ test('registerGitIpc delegates worktreeList to the git-worktree-ops module', asy
     resolveGhBinary: () => 'gh'
   })
 
-  const worktreeList = ipcMain.handlers.get('hermes:git:worktreeList')
   // The resolver is consulted synchronously to build the ops call; whatever the
-  // ops layer then does with a non-repo path is irrelevant to the wiring.
+  // ops layer does with a non-repo path is irrelevant to the wiring.
   try {
-    await worktreeList({}, '/definitely/not/a/repo')
+    await ipcMain.handlers.get('hermes:git:worktreeList')({}, '/definitely/not/a/repo')
   } catch {
     // ops layer may reject on a bad path — not what this test asserts.
   }

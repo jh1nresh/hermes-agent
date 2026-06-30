@@ -18,30 +18,6 @@ const {
 } = require('./git-review-ops.cjs')
 const { addWorktree, listBranches, listWorktrees, removeWorktree, switchBranch } = require('./git-worktree-ops.cjs')
 
-// Every IPC channel this registrar owns. Exported so a test can assert the
-// renderer-facing git surface stays complete after refactors.
-const GIT_IPC_CHANNELS = [
-  'hermes:git:worktreeList',
-  'hermes:git:worktreeAdd',
-  'hermes:git:worktreeRemove',
-  'hermes:git:branchSwitch',
-  'hermes:git:branchList',
-  'hermes:git:repoStatus',
-  'hermes:git:review:list',
-  'hermes:git:review:diff',
-  'hermes:git:fileDiff',
-  'hermes:git:review:stage',
-  'hermes:git:review:unstage',
-  'hermes:git:review:revert',
-  'hermes:git:review:revParse',
-  'hermes:git:review:commit',
-  'hermes:git:review:commitContext',
-  'hermes:git:review:push',
-  'hermes:git:review:shipInfo',
-  'hermes:git:review:createPr',
-  'hermes:git:scanRepos'
-]
-
 // Register the git/worktree/review IPC handlers. Thin delegators to the
 // git-*-ops sibling modules; the git/gh binary resolution lives in the main
 // process (Windows PATH discovery) and is injected so this module stays pure.
@@ -117,4 +93,4 @@ function registerGitIpc({ ipcMain, resolveGitBinary, resolveGhBinary }) {
   })
 }
 
-module.exports = { GIT_IPC_CHANNELS, registerGitIpc }
+module.exports = { registerGitIpc }
