@@ -63,6 +63,7 @@ const { registerLogsIpc } = require('./logs-ipc.cjs')
 const { registerProjectDirIpc } = require('./project-dir-ipc.cjs')
 const { registerVscodeThemeIpc } = require('./vscode-theme-ipc.cjs')
 const { registerUninstallIpc } = require('./uninstall-ipc.cjs')
+const { registerVersionIpc } = require('./version-ipc.cjs')
 const { OFFICIAL_REPO_HTTPS_URL, isOfficialSshRemote } = require('./update-remote.cjs')
 const { resolveBehindCount, shouldCountCommits } = require('./update-count.cjs')
 const { runRebuildWithRetry } = require('./update-rebuild.cjs')
@@ -6929,13 +6930,8 @@ function showAboutPanelFresh() {
   app.showAboutPanel()
 }
 
-ipcMain.handle('hermes:version', async () => ({
-  appVersion: resolveHermesVersion(),
-  electronVersion: process.versions.electron,
-  nodeVersion: process.versions.node,
-  platform: process.platform,
-  hermesRoot: resolveUpdateRoot()
-}))
+// App-version IPC lives in version-ipc.cjs; the version + root resolvers are injected.
+registerVersionIpc({ ipcMain, resolveHermesVersion, resolveUpdateRoot })
 
 // ===========================================================================
 // Uninstall — remove the Chat GUI (and optionally the agent / user data).
