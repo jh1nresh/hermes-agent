@@ -61,6 +61,7 @@ const { registerFsIpc } = require('./fs-ipc.cjs')
 const { registerTerminalIpc } = require('./terminal-ipc.cjs')
 const { registerUpdatesIpc } = require('./updates-ipc.cjs')
 const { registerLogsIpc } = require('./logs-ipc.cjs')
+const { registerProjectDirIpc } = require('./project-dir-ipc.cjs')
 const { OFFICIAL_REPO_HTTPS_URL, isOfficialSshRemote } = require('./update-remote.cjs')
 const { resolveBehindCount, shouldCountCommits } = require('./update-count.cjs')
 const { runRebuildWithRetry } = require('./update-rebuild.cjs')
@@ -6663,42 +6664,14 @@ ipcMain.handle('hermes:openPreviewInBrowser', async (_event, url) => {
 // settings mount and seeds the value into the picker; writing back persists
 // it via writeDefaultProjectDir so resolveHermesCwd picks it up on the next
 // session spawn (no app restart needed).
-ipcMain.handle('hermes:setting:defaultProjectDir:get', async () => ({
-  dir: readDefaultProjectDir(),
-  defaultLabel: app.getPath('home'),
-  resolvedCwd: resolveHermesCwd()
-}))
-
-ipcMain.handle('hermes:workspace:sanitize', async (_event, cwd) => sanitizeWorkspaceCwd(cwd))
-
-ipcMain.handle('hermes:setting:defaultProjectDir:set', async (_event, dir) => {
-  const next = typeof dir === 'string' && dir.trim() ? dir.trim() : null
-
-  if (next) {
-    try {
-      fs.mkdirSync(next, { recursive: true })
-    } catch (error) {
-      throw new Error(`Could not create directory: ${error.message}`)
-    }
-  }
-
-  writeDefaultProjectDir(next)
-
-  return { dir: next }
-})
-
-ipcMain.handle('hermes:setting:defaultProjectDir:pick', async () => {
-  const result = await dialog.showOpenDialog({
-    title: 'Choose default project directory',
-    properties: ['openDirectory', 'createDirectory'],
-    defaultPath: readDefaultProjectDir() || app.getPath('home')
-  })
-
-  if (result.canceled || result.filePaths.length === 0) {
-    return { canceled: true, dir: null }
-  }
-
-  return { canceled: false, dir: result.filePaths[0] }
+// Default-project-dir + workspace settings IPC lives in project-dir-ipc.cjs;
+// config readers/writers + cwd resolvers are injected.
+registerProjectDirIpc({
+  ipcMain,
+  readDefaultProjectDir,
+  resolveHermesCwd,
+  sanitizeWorkspaceCwd,
+  writeDefaultProjectDir
 })
 
 ipcMain.handle('hermes:fetchLinkTitle', (_event, url) => fetchLinkTitle(url))
