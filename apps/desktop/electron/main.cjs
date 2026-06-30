@@ -60,6 +60,7 @@ const { registerGitIpc } = require('./git-ipc.cjs')
 const { registerFsIpc } = require('./fs-ipc.cjs')
 const { registerTerminalIpc } = require('./terminal-ipc.cjs')
 const { registerUpdatesIpc } = require('./updates-ipc.cjs')
+const { registerLogsIpc } = require('./logs-ipc.cjs')
 const { OFFICIAL_REPO_HTTPS_URL, isOfficialSshRemote } = require('./update-remote.cjs')
 const { resolveBehindCount, shouldCountCommits } = require('./update-count.cjs')
 const { runRebuildWithRetry } = require('./update-rebuild.cjs')
@@ -6702,20 +6703,8 @@ ipcMain.handle('hermes:setting:defaultProjectDir:pick', async () => {
 
 ipcMain.handle('hermes:fetchLinkTitle', (_event, url) => fetchLinkTitle(url))
 
-ipcMain.handle('hermes:logs:reveal', async () => {
-  try {
-    await fs.promises.mkdir(path.dirname(DESKTOP_LOG_PATH), { recursive: true })
-    if (!fileExists(DESKTOP_LOG_PATH)) {
-      await fs.promises.appendFile(DESKTOP_LOG_PATH, '')
-    }
-    shell.showItemInFolder(DESKTOP_LOG_PATH)
-    return { ok: true, path: DESKTOP_LOG_PATH }
-  } catch (error) {
-    return { ok: false, path: DESKTOP_LOG_PATH, error: error.message }
-  }
-})
-
-ipcMain.handle('hermes:logs:recent', async () => ({ path: DESKTOP_LOG_PATH, lines: hermesLog.slice(-200) }))
+// Desktop-log IPC lives in logs-ipc.cjs; log path + ring buffer are injected.
+registerLogsIpc({ DESKTOP_LOG_PATH, fileExists, hermesLog, ipcMain })
 
 function isExecutableFile(filePath) {
   if (!filePath || !path.isAbsolute(filePath)) {
