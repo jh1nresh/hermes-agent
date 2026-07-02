@@ -1833,18 +1833,6 @@ _NOUS_STALE_PORTAL_HOSTS: FrozenSet[str] = frozenset({
 # "localhost" / "127.0.0.1" are valid for local development and testing.
 _NOUS_PORTAL_ALLOWED_HOSTS: FrozenSet[str] = frozenset({
     "portal.nousresearch.com",
-    # Staging portal — hosted agents provisioned by nous-account-service on the
-    # `staging` Vercel environment persist this host to auth.json's
-    # portal_base_url (see buildBootstrapAuthJson / env.BASE_URL there). Without
-    # it, resolve_nous_access_token's allowlist guard silently rewrites
-    # portal_base_url back to prod on the very first refresh, so a
-    # staging-issued refresh token gets replayed against the PROD token
-    # endpoint. Prod correctly rejects it with invalid_grant, which then
-    # triggers _quarantine_nous_oauth_state and wipes the credential pool
-    # entirely — turning a config mismatch into a full relogin requirement.
-    # Same failure shape as the NOUS_INFERENCE_BASE_URL/_ALLOWED_NOUS_INFERENCE_HOSTS
-    # fix below; this closes the sibling gap on the portal host.
-    "portal.staging-nousresearch.com",
     "localhost",
     "127.0.0.1",
 })
@@ -1936,6 +1924,28 @@ def _nous_inference_env_override() -> Optional[str]:
     the env var is unset/blank.
     """
     return _optional_base_url(os.getenv("NOUS_INFERENCE_BASE_URL"))
+
+
+def _nous_portal_env_override() -> Optional[str]:
+    """Return the user/deployment-set Portal base URL override, if any.
+
+    Mirrors ``_nous_inference_env_override()``: ``HERMES_PORTAL_BASE_URL`` /
+    ``NOUS_PORTAL_BASE_URL`` are the documented dev/staging escape hatch for
+    pointing Hermes at a non-production Nous Portal (e.g. a hosted agent
+    provisioned on nous-account-service's `staging` environment, which stamps
+    ``HERMES_PORTAL_BASE_URL=https://portal.staging-nousresearch.com`` into
+    the container env). The env source is trusted (the OS user/deployment
+    set it themselves), so — like the inference override — it must NOT be
+    gated by ``_NOUS_PORTAL_ALLOWED_HOSTS``: that allowlist exists to reject
+    an untrusted NETWORK-provided value (a poisoned portal_base_url
+    persisted to auth.json), not a value the operator explicitly configured.
+
+    Returns a trailing-slash-stripped non-empty string, or ``None`` when
+    neither env var is set/blank.
+    """
+    return _optional_base_url(
+        os.getenv("HERMES_PORTAL_BASE_URL") or os.getenv("NOUS_PORTAL_BASE_URL")
+    )
 
 
 def _decode_jwt_claims(token: Any) -> Dict[str, Any]:
@@ -5398,20 +5408,29 @@ def resolve_nous_access_token(
                 relogin_required=True,
             )
 
-        portal_base_url = (
-            _optional_base_url(state.get("portal_base_url"))
-            or os.getenv("HERMES_PORTAL_BASE_URL")
-            or os.getenv("NOUS_PORTAL_BASE_URL")
-            or DEFAULT_NOUS_PORTAL_URL
-        ).rstrip("/")
+        # HERMES_PORTAL_BASE_URL / NOUS_PORTAL_BASE_URL is the trusted
+        # operator/deployment override (mirrors NOUS_INFERENCE_BASE_URL) and
+        # must win OUTRIGHT — including over a stored value — and bypass the
+        # host allowlist entirely, since the allowlist exists to reject an
+        # untrusted network-provided value, not one the operator configured.
+        # Only fall through to the stored/default value + allowlist gate when
+        # no override is set.
+        env_portal_override = _nous_portal_env_override()
+        if env_portal_override:
+            portal_base_url = env_portal_override.rstrip("/")
+        else:
+            portal_base_url = (
+                _optional_base_url(state.get("portal_base_url"))
+                or DEFAULT_NOUS_PORTAL_URL
+            ).rstrip("/")
 
-        parsed_portal_url = urlparse(portal_base_url)
-        if parsed_portal_url.hostname and parsed_portal_url.hostname not in _NOUS_PORTAL_ALLOWED_HOSTS:
-            logger.warning(
-                "auth: ignoring invalid portal_base_url %r (host %r not in allowlist), using default",
-                portal_base_url, parsed_portal_url.hostname,
-            )
-            portal_base_url = DEFAULT_NOUS_PORTAL_URL
+            parsed_portal_url = urlparse(portal_base_url)
+            if parsed_portal_url.hostname and parsed_portal_url.hostname not in _NOUS_PORTAL_ALLOWED_HOSTS:
+                logger.warning(
+                    "auth: ignoring invalid portal_base_url %r (host %r not in allowlist), using default",
+                    portal_base_url, parsed_portal_url.hostname,
+                )
+                portal_base_url = DEFAULT_NOUS_PORTAL_URL
 
         client_id = str(state.get("client_id") or DEFAULT_NOUS_CLIENT_ID)
         verify = _resolve_verify(insecure=insecure, ca_bundle=ca_bundle, auth_state=state)
@@ -5730,13 +5749,22 @@ def resolve_nous_runtime_credentials(
         # A persisted/stale portal_base_url is where the refresh token gets
         # POSTed on refresh — reject any host outside the allowlist so a
         # poisoned value can't exfiltrate the bearer, healing to the default.
-        parsed_portal_url = urlparse(portal_base_url)
-        if parsed_portal_url.hostname and parsed_portal_url.hostname not in _NOUS_PORTAL_ALLOWED_HOSTS:
-            logger.warning(
-                "auth: ignoring invalid portal_base_url %r (host %r not in allowlist), using default",
-                portal_base_url, parsed_portal_url.hostname,
-            )
-            portal_base_url = DEFAULT_NOUS_PORTAL_URL
+        # The trusted operator/deployment env override (HERMES_PORTAL_BASE_URL /
+        # NOUS_PORTAL_BASE_URL) bypasses this gate entirely — mirrors
+        # NOUS_INFERENCE_BASE_URL's treatment below; the allowlist exists to
+        # reject an untrusted NETWORK-provided value, not one the operator
+        # explicitly configured.
+        env_portal_override = _nous_portal_env_override()
+        if env_portal_override:
+            portal_base_url = env_portal_override.rstrip("/")
+        else:
+            parsed_portal_url = urlparse(portal_base_url)
+            if parsed_portal_url.hostname and parsed_portal_url.hostname not in _NOUS_PORTAL_ALLOWED_HOSTS:
+                logger.warning(
+                    "auth: ignoring invalid portal_base_url %r (host %r not in allowlist), using default",
+                    portal_base_url, parsed_portal_url.hostname,
+                )
+                portal_base_url = DEFAULT_NOUS_PORTAL_URL
 
         # Persisted value: validated network-provenance only. The stored
         # inference_base_url is re-validated on read so a poisoned/stale
