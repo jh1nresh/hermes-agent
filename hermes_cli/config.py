@@ -548,12 +548,14 @@ def recommended_update_command() -> str:
 #
 # pip/PyPI and Homebrew are NOT an officially supported distribution method
 # (see website/docs/getting-started/platform-support.md, "Unsupported"
-# section). pip exists on PyPI for internal/CI reasons, not end-user installs;
-# Homebrew is a legacy packaging path. Unlike NixOS/Homebrew "managed mode"
-# (which hard-blocks config writes), this is a warn-don't-block deprecation
-# notice surfaced everywhere the user might see install-method state: the CLI
-# banner, the TUI/desktop session info panel, and ``hermes update``. NixOS
-# stays fully supported (Tier 2) and must never hit this path.
+# section). Hermes Agent is no longer published to PyPI or packaged for
+# Homebrew — existing installs from either keep running on whatever version
+# they last pulled, but will never see a newer one. Unlike NixOS/Homebrew
+# "managed mode" (which hard-blocks config writes), this is a warn-don't-block
+# deprecation notice surfaced everywhere the user might see install-method
+# state: the CLI banner, the TUI/desktop session info panel, and
+# ``hermes update``. NixOS stays fully supported (Tier 2) and must never hit
+# this path.
 
 PLATFORM_SUPPORT_DOCS_URL = "https://hermes-agent.nousresearch.com/docs/getting-started/platform-support"
 

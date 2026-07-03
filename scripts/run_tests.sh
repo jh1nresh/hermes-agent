@@ -37,22 +37,25 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+if [ -z "$HERMES_PYTHON" ]; then
 # ── Activate venv ───────────────────────────────────────────────────────────
-VENV=""
-for candidate in "$REPO_ROOT/.venv" "$REPO_ROOT/venv" "$HOME/.hermes/hermes-agent/venv"; do
-  if [ -f "$candidate/bin/activate" ]; then
-    VENV="$candidate"
-    break
+  VENV=""
+  for candidate in "$REPO_ROOT/.venv" "$REPO_ROOT/venv" "$HOME/.hermes/hermes-agent/venv"; do
+    if [ -f "$candidate/bin/activate" ]; then
+      VENV="$candidate"
+      break
+    fi
+  done
+
+  if [ -z "$VENV" ]; then
+    echo "error: no virtualenv found in $REPO_ROOT/.venv or $REPO_ROOT/venv" >&2
+    exit 1
   fi
-done
 
-if [ -z "$VENV" ]; then
-  echo "error: no virtualenv found in $REPO_ROOT/.venv or $REPO_ROOT/venv" >&2
-  exit 1
+  PYTHON="$VENV/bin/python"
+else
+  PYTHON=$HERMES_PYTHON
 fi
-
-PYTHON="$VENV/bin/python"
-
 
 # ── Live-gateway plugin (computed before we drop env) ───────────────────────
 EXTRA_PYTHONPATH=""

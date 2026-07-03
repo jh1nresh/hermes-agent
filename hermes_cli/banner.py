@@ -1,3 +1,5 @@
+
+
 """Welcome banner, ASCII art, skills summary, and update check for the CLI.
 
 Pure display functions with no HermesCLI state dependency.
@@ -882,6 +884,7 @@ def build_welcome_banner(console: "Console", model: str, cwd: str,
         from hermes_cli.config import (
             detect_install_method,
             format_unsupported_install_warning,
+            get_project_root,
             is_unsupported_install_method,
             get_project_root
         )
