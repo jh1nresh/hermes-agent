@@ -426,6 +426,8 @@ class TestGeneratedSystemdUnits:
         assert "ExecStart=" in unit
         assert "ExecStop=" not in unit
         assert "ExecReload=/bin/kill -USR1 $MAINPID" in unit
+        assert "Restart=on-failure" in unit
+        assert "Restart=always" not in unit
         assert f"RestartForceExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}" in unit
         # TimeoutStopSec must exceed the default drain_timeout (60s) so
         # systemd doesn't SIGKILL the cgroup before post-interrupt cleanup
@@ -537,6 +539,8 @@ class TestGeneratedSystemdUnits:
         assert "ExecStart=" in unit
         assert "ExecStop=" not in unit
         assert "ExecReload=/bin/kill -USR1 $MAINPID" in unit
+        assert "Restart=on-failure" in unit
+        assert "Restart=always" not in unit
         assert f"RestartForceExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}" in unit
         # TimeoutStopSec must exceed the default drain_timeout (60s) so
         # systemd doesn't SIGKILL the cgroup before post-interrupt cleanup
@@ -664,7 +668,10 @@ class TestLaunchdServiceRecovery:
 
         label = gateway_cli.get_launchd_label()
         domain = gateway_cli._launchd_domain()
-        assert "--replace" in plist_path.read_text(encoding="utf-8")
+        plist_text = plist_path.read_text(encoding="utf-8")
+        # The generator is stubbed above; assert the repair path rewrote the
+        # plist with the (synthetic) generator output.
+        assert plist_text == gateway_cli.generate_launchd_plist()
         # The calls list includes launchctl print probes from _launchd_domain()
         # before the bootout/bootstrap calls. Filter to only bootout/bootstrap.
         service_calls = [c for c in calls if "bootout" in c or "bootstrap" in c]
@@ -2412,10 +2419,10 @@ class TestProfileArg:
         unit = gateway_cli.generate_systemd_unit(system=False)
         assert "--profile mybot" in unit
         assert "gateway run" in unit
-        # Under a process supervisor (Restart=always), --replace makes each
-        # restart kill its predecessor → self-kill loop. The systemd unit must
-        # NOT use --replace; the supervisor owns the lifecycle. (--replace stays
-        # on the manual launchd fallback path — see test_launchd_plist_includes_profile.)
+        # Under a process supervisor, --replace makes each restart kill its
+        # predecessor → self-kill loop. Neither the systemd unit nor the
+        # launchd plist may use --replace; the supervisor owns the lifecycle.
+        # (--replace stays on the manual/detached fallback paths only.)
         assert "--replace" not in unit
 
     def test_systemd_unit_for_target_user_includes_named_profile(self, tmp_path, monkeypatch):
@@ -2450,6 +2457,24 @@ class TestProfileArg:
         plist = gateway_cli.generate_launchd_plist()
         assert "<string>--profile</string>" in plist
         assert "<string>mybot</string>" in plist
+        assert "<string>--replace</string>" not in plist
+
+    def test_gateway_run_args_for_profile_omit_replace(self, monkeypatch):
+        monkeypatch.setattr(gateway_cli, "get_python_path", lambda: "/venv/bin/python")
+
+        default_args = gateway_cli._gateway_run_args_for_profile("default")
+        named_args = gateway_cli._gateway_run_args_for_profile("mybot")
+
+        assert default_args == ["/venv/bin/python", "-m", "hermes_cli.main", "gateway", "run"]
+        assert named_args == [
+            "/venv/bin/python",
+            "-m",
+            "hermes_cli.main",
+            "--profile",
+            "mybot",
+            "gateway",
+            "run",
+        ]
 
     def test_launchd_plist_supports_aqua_and_background_sessions(self):
         # macOS 26+ only loads the agent in non-Aqua sessions when the plist
