@@ -142,7 +142,7 @@ export function GatewaySettings() {
   }
 
   // Hermes Cloud is beta-gated: the selector ModeCard only appears when the main
-  // process reports the BETA env flag is enabled. Default hidden until the async
+  // process reports the HERMESCLOUD_BETA env flag is enabled. Default hidden until the async
   // check resolves, so it never flashes in for non-beta users.
   const [cloudBetaEnabled, setCloudBetaEnabled] = useState(false)
   useEffect(() => {

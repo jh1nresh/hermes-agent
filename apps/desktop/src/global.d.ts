@@ -59,7 +59,7 @@ declare global {
       // sign-in (cloud-auto-discovery Phase 3).
       cloud: {
         status: () => Promise<DesktopCloudStatus>
-        // Whether the BETA env flag enables the Hermes Cloud gateway selector.
+        // Whether the HERMESCLOUD_BETA env flag enables the Hermes Cloud gateway selector.
         betaEnabled: () => Promise<boolean>
         login: () => Promise<DesktopCloudStatus & { ok: boolean }>
         logout: () => Promise<DesktopCloudStatus & { ok: boolean }>
