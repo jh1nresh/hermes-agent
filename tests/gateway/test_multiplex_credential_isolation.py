@@ -156,3 +156,55 @@ class TestProfilePathResolutionUnderMultiplexScope:
             t.join()
 
         assert seen["home"] == str(prof_b)
+
+
+class TestResolveProfileHomeMissingProfileFallback:
+    """_resolve_profile_home_for_source must not scope a turn into a missing home.
+
+    A routed source.profile that names a profile whose directory has been
+    deleted (stale relay binding / URL prefix) must fall back to the active/
+    default home rather than returning <root>/profiles/<ghost> — a nonexistent
+    HERMES_HOME that would make config/skills/secret-scope resolve against a
+    missing dir. get_profile_dir returns a path regardless of existence and does
+    NOT raise for a valid-but-absent name, so the resolver needs an explicit
+    profile_exists() check.
+    """
+
+    def _runner(self):
+        from gateway.run import GatewayRunner
+        return GatewayRunner.__new__(GatewayRunner)
+
+    def _source(self, profile):
+        from types import SimpleNamespace
+        return SimpleNamespace(profile=profile)
+
+    def test_existing_routed_profile_resolves_to_its_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        (tmp_path / "profiles" / "coder").mkdir(parents=True)
+        runner = self._runner()
+        home = runner._resolve_profile_home_for_source(self._source("coder"))
+        assert home == tmp_path / "profiles" / "coder"
+
+    def test_missing_routed_profile_falls_back_to_default(self, tmp_path, monkeypatch):
+        # HERMES_HOME is the default (pre-profile) home; no profiles/ghost dir.
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        runner = self._runner()
+        home = runner._resolve_profile_home_for_source(self._source("ghost"))
+        # Falls back to the active/default home, NOT tmp_path/profiles/ghost.
+        assert home != tmp_path / "profiles" / "ghost"
+        assert home == tmp_path
+
+    def test_empty_routed_profile_uses_active_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        runner = self._runner()
+        for empty in (None, "", "   "):
+            home = runner._resolve_profile_home_for_source(self._source(empty))
+            assert home == tmp_path
+
+    def test_missing_profile_does_not_raise(self, tmp_path, monkeypatch):
+        # The whole resolver is wrapped in try/except → get_hermes_home; the
+        # fallback must land on a real dir, never propagate an exception.
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        runner = self._runner()
+        home = runner._resolve_profile_home_for_source(self._source("nope"))
+        assert home.exists()
