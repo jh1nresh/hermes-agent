@@ -11,6 +11,7 @@ Routes messages to the appropriate destination based on:
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -57,6 +58,7 @@ def _is_silence_narration(content: Optional[str]) -> bool:
 from .config import Platform, GatewayConfig
 from .session import SessionSource
 from .dead_targets import DeadTargetRegistry
+from .delivery_outbox import DeliveryOutbox, UnknownDeliveryError
 
 
 def looks_like_telegram_private_chat_id(chat_id: Optional[str]) -> bool:
@@ -242,6 +244,9 @@ class DeliveryRouter:
         self.adapters = adapters or {}
         self.output_dir = get_hermes_home() / "cron" / "output"
         self.dead_targets = dead_targets or DeadTargetRegistry()
+        self.outbox = DeliveryOutbox(
+            get_hermes_home() / "gateway" / "delivery_outbox.sqlite3"
+        )
     
     async def deliver(
         self,
@@ -399,6 +404,25 @@ class DeliveryRouter:
         
         if not target.chat_id:
             raise ValueError(f"No chat ID for {target.platform.value} delivery")
+
+        # Cron supplies a stable id so a restart addresses the same record.
+        # Other callers retain one-shot behavior via a generated id.
+        metadata = dict(metadata or {})
+        delivery_id = str(metadata.get("delivery_id") or uuid.uuid4())
+        origin = str(metadata.get("delivery_origin") or metadata.get("job_id") or "gateway")
+        record = self.outbox.create(
+            delivery_id, origin, target.to_string(), content,
+        )
+        if record.state == "confirmed":
+            return {
+                "success": True,
+                "deduplicated": True,
+                "provider_receipt": record.provider_receipt,
+            }
+        if record.state in {"dispatched", "unknown"}:
+            raise UnknownDeliveryError(
+                f"delivery {delivery_id} may already have been sent and is not retried automatically"
+            )
         
         # Guard: handle oversized cron output.
         #
@@ -465,6 +489,8 @@ class DeliveryRouter:
                 target.chat_id,
                 content[:40],
             )
+            receipt = {"filtered": "silence_narration", "delivered": False}
+            self.outbox.mark_confirmed(delivery_id, receipt)
             return {
                 "success": True,
                 "filtered": "silence_narration",
@@ -524,32 +550,60 @@ class DeliveryRouter:
                 send_metadata["telegram_dm_topic_reply_fallback"] = True
             elif "thread_id" not in send_metadata and "message_thread_id" not in send_metadata and not has_explicit_direct_topic:
                 send_metadata["thread_id"] = target_thread_id
-        result = await adapter.send(target.chat_id, content, metadata=send_metadata or None)
-        if _send_result_failed(result):
-            if (
-                is_named_telegram_private_topic
-                and named_telegram_private_topic_name
-                and _is_thread_not_found_delivery_error(result)
-            ):
-                ensure_dm_topic = getattr(adapter, "ensure_dm_topic", None)
-                if ensure_dm_topic is None:
-                    raise RuntimeError(
-                        "Telegram adapter cannot refresh named private DM topics"
-                    )
-                refreshed_thread_id = await ensure_dm_topic(
-                    target.chat_id,
-                    named_telegram_private_topic_name,
-                    force_create=True,
-                )
-                if not refreshed_thread_id:
-                    raise RuntimeError(
-                        f"Failed to refresh Telegram private DM topic '{named_telegram_private_topic_name}'"
-                    )
-                send_metadata["thread_id"] = str(refreshed_thread_id)
-                send_metadata["telegram_dm_topic_created_for_send"] = True
-                result = await adapter.send(target.chat_id, content, metadata=send_metadata or None)
+        self.outbox.mark_dispatched(delivery_id)
+        try:
+            result = await adapter.send(target.chat_id, content, metadata=send_metadata or None)
             if _send_result_failed(result):
-                raise RuntimeError(_send_result_error(result) or f"{target.platform.value} delivery failed")
+                if (
+                    is_named_telegram_private_topic
+                    and named_telegram_private_topic_name
+                    and _is_thread_not_found_delivery_error(result)
+                ):
+                    ensure_dm_topic = getattr(adapter, "ensure_dm_topic", None)
+                    if ensure_dm_topic is None:
+                        raise RuntimeError(
+                            "Telegram adapter cannot refresh named private DM topics"
+                        )
+                    refreshed_thread_id = await ensure_dm_topic(
+                        target.chat_id,
+                        named_telegram_private_topic_name,
+                        force_create=True,
+                    )
+                    if not refreshed_thread_id:
+                        raise RuntimeError(
+                            f"Failed to refresh Telegram private DM topic '{named_telegram_private_topic_name}'"
+                        )
+                    send_metadata["thread_id"] = str(refreshed_thread_id)
+                    send_metadata["telegram_dm_topic_created_for_send"] = True
+                    result = await adapter.send(target.chat_id, content, metadata=send_metadata or None)
+                if _send_result_failed(result):
+                    error = _send_result_error(result) or f"{target.platform.value} delivery failed"
+                    self.outbox.mark_failed(delivery_id, error)
+                    raise RuntimeError(error)
+        except BaseException as exc:
+            # Cancellation means the non-idempotent send may already have reached
+            # the provider. Never convert that uncertainty into an automatic retry.
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            current = self.outbox.get(delivery_id)
+            if current and current.state == "dispatched":
+                if isinstance(exc, Exception):
+                    self.outbox.mark_failed(delivery_id, str(exc))
+                else:
+                    self.outbox.mark_unknown(delivery_id, type(exc).__name__)
+            raise
+
+        receipt = {
+            "message_id": (
+                result.get("message_id") if isinstance(result, dict)
+                else getattr(result, "message_id", None)
+            ),
+            "raw_response": (
+                result.get("raw_response") if isinstance(result, dict)
+                else getattr(result, "raw_response", None)
+            ),
+        }
+        self.outbox.mark_confirmed(delivery_id, receipt)
         return result
 
 

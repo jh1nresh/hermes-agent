@@ -12,6 +12,7 @@ import asyncio
 import atexit
 import concurrent.futures
 import contextvars
+import hashlib
 import json
 import logging
 import os
@@ -1401,6 +1402,20 @@ def _is_channel_dm_topic(
     return is_channel
 
 
+def _cron_delivery_id(job: dict, platform: str, chat_id: str, payload: str) -> str:
+    """Stable identity for one cron run's text fan-out target."""
+    identity = "\0".join(
+        (
+            str(job.get("id", "unknown")),
+            str(job.get("last_run_at") or job.get("next_run_at") or "unscheduled"),
+            platform,
+            chat_id,
+            hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        )
+    )
+    return "cron-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+
+
 def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Optional[str]:
     """
     Deliver job output to the configured target(s) (origin chat, specific platform, etc.).
@@ -1697,6 +1712,12 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
                         thread_id=route_thread_id,
                         is_explicit=True,
                     )
+                    # A stable per-run/per-target identity makes cron fan-out
+                    # restart-aware without conflating distinct destinations.
+                    route_metadata["delivery_id"] = _cron_delivery_id(
+                        job, platform_name, str(chat_id), text_to_send,
+                    )
+                    route_metadata["delivery_origin"] = f"cron:{job['id']}"
                     # Pass thread routing via the target (not a bare metadata
                     # "thread_id"): the router only applies its Telegram DM-topic
                     # detection when "thread_id"/"message_thread_id" are absent
