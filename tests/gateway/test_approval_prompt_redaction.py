@@ -122,7 +122,9 @@ class TestApprovalCommandWiring:
 
         self._assert_redacts_then_uses(run, "_approval_notify_sync", "send_exec_approval")
 
-    def test_sse_api_path_redacts_before_enqueue(self):
+    def test_sse_api_path_redacts_before_publish(self):
         from gateway.platforms import api_server
 
-        self._assert_redacts_then_uses(api_server, "_approval_notify", "put_nowait")
+        self._assert_redacts_then_uses(
+            api_server, "_approval_notify", "_publish_run_event"
+        )
