@@ -66,12 +66,28 @@ runtime/
 
 # ---------- Not needed inside the Docker image ----------
 
-# Desktop app source (Tauri/Electron); never installed in the container.
-# apps/shared is the dashboard↔desktop websocket helper and is linked from
-# web/package.json as a file: workspace dep — keep it in the build context.
+# Desktop app source (Tauri/Electron): only apps/shared and apps/desktop are
+# needed in the container.
+# - apps/shared is the dashboard↔desktop websocket helper, linked from
+#   web/package.json as a file: workspace dep.
+# - apps/desktop is the desktop renderer, built browser-only inside the image
+#   (`npm run build:web`) and served at /app (HERMES_APP_DIST). Its local
+#   build outputs are re-excluded below so a developer's stale dist can't
+#   overwrite the image-built one via `COPY . .` (same failure mode as
+#   ui-tui/dist/ above), and release/ (packaged Electron apps, ~GBs) never
+#   belongs in a build context.
 apps/
 !apps/shared/
 !apps/shared/**
+!apps/desktop/
+!apps/desktop/**
+# Re-exclusions: !apps/desktop/** above re-includes ANYTHING under the tree —
+# including node_modules already excluded by the global rule at the top
+# (last matching rule wins). Each build output must be re-excluded here.
+apps/desktop/node_modules/
+apps/desktop/dist/
+apps/desktop/build/
+apps/desktop/release/
 
 # Test suite — not shipped in production images
 tests/

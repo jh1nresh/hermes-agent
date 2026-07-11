@@ -92,7 +92,7 @@ try:
         WebSocket, WebSocketDisconnect,
     )
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
     from starlette.concurrency import run_in_threadpool
@@ -108,7 +108,7 @@ except ImportError:
             WebSocket, WebSocketDisconnect,
         )
         from fastapi.middleware.cors import CORSMiddleware
-        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
         from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel
         from starlette.concurrency import run_in_threadpool
@@ -119,6 +119,13 @@ except ImportError:
         )
 
 WEB_DIST = Path(os.environ["HERMES_WEB_DIST"]) if "HERMES_WEB_DIST" in os.environ else Path(__file__).parent / "web_dist"
+
+# The desktop renderer built for the browser (apps/desktop `npm run build:web`).
+# Mounted at /app ONLY when HERMES_APP_DIST is explicitly set and the dist
+# exists — the Docker image sets it; local testing sets it per-session. No env
+# var means /app is never mounted, so a regular desktop build leaving a dist at
+# apps/desktop/dist can't silently turn this on.
+APP_DIST = Path(os.environ["HERMES_APP_DIST"]) if "HERMES_APP_DIST" in os.environ else None
 _log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -15699,6 +15706,99 @@ def _normalise_prefix(raw: Optional[str]) -> str:
     return normalise_prefix(raw)
 
 
+def mount_app(application: FastAPI):
+    """Mount the desktop renderer's web build at ``/app``.
+
+    The same UI the Electron desktop ships, built browser-only
+    (``apps/desktop`` ``npm run build:web``) and served same-origin by this
+    gateway, so a Nous Portal user can open a hosted instance with no install
+    (docs/plans/2026-07-10-001). The renderer's web bridge reads the same
+    bootstrap globals as the dashboard SPA (session token / auth-required /
+    base path), so both auth modes work unchanged:
+
+    * loopback / token: ``__HERMES_SESSION_TOKEN__`` injected below.
+    * gated / OAuth: no token; the auth gate has already required a session
+      cookie before this handler runs (``/app`` is NOT in the gate's public
+      prefixes), and the bridge mints WS tickets over that cookie.
+
+    The desktop bundle is built with vite ``base: './'`` (relative asset
+    URLs), so under ``/app/`` the browser requests ``/app/assets/...`` — no
+    absolute-URL rewriting needed. Skipped entirely when headless, when
+    ``HERMES_APP_DIST`` is unset (``APP_DIST is None`` — the default for every
+    install that isn't the Docker image), or when the dist was never built:
+    regular installs never see these routes.
+    """
+    _headless = os.environ.get("HERMES_SERVE_HEADLESS") == "1"
+    if _headless or APP_DIST is None:
+        return
+    _index_path = APP_DIST / "index.html"
+    if not _index_path.exists():
+        # Env set but no dist: the operator asked for /app (e.g. the Docker
+        # image sets HERMES_APP_DIST unconditionally) but the build isn't
+        # there. Warn loudly instead of silently not mounting — otherwise
+        # a broken image build surfaces as an unexplained 404 on /app.
+        _log.warning(
+            "HERMES_APP_DIST is set but no dist found at %s — /app will not "
+            "be served. Build it with: cd apps/desktop && npm run build:web",
+            APP_DIST,
+        )
+        return
+
+    def _serve_app_index() -> HTMLResponse:
+        html = _index_path.read_text(encoding="utf-8")
+        gated = bool(getattr(app.state, "auth_required", False))
+        gated_js = "true" if gated else "false"
+        if gated:
+            bootstrap_script = (
+                f"<script>"
+                f'window.__HERMES_BASE_PATH__="";'
+                f"window.__HERMES_AUTH_REQUIRED__={gated_js};"
+                f"</script>"
+            )
+        else:
+            bootstrap_script = (
+                f'<script>window.__HERMES_SESSION_TOKEN__="{_SESSION_TOKEN}";'
+                f'window.__HERMES_BASE_PATH__="";'
+                f"window.__HERMES_AUTH_REQUIRED__={gated_js};"
+                f"</script>"
+            )
+        html = html.replace("</head>", f"{bootstrap_script}</head>", 1)
+        return HTMLResponse(
+            html,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )
+
+    application.mount(
+        "/app/assets", StaticFiles(directory=APP_DIST / "assets"), name="app-assets"
+    )
+
+    @application.get("/app")
+    async def serve_app_bare():
+        # The bundle uses relative asset URLs (vite base './'), which resolve
+        # against the document URL: at /app they'd hit the dashboard's
+        # /assets/. Canonicalize to /app/ so they resolve to /app/assets/.
+        return RedirectResponse(url="/app/", status_code=307)
+
+    @application.get("/app/")
+    async def serve_app_root():
+        return _serve_app_index()
+
+    @application.get("/app/{full_path:path}")
+    async def serve_app(full_path: str):
+        file_path = APP_DIST / full_path
+        # Same traversal guard as the dashboard SPA mount below.
+        if (
+            full_path
+            and file_path.resolve().is_relative_to(APP_DIST.resolve())
+            and file_path.exists()
+            and file_path.is_file()
+        ):
+            return FileResponse(file_path)
+        # HashRouter: every client route lives after '#', so any non-file path
+        # is just the shell.
+        return _serve_app_index()
+
+
 def mount_spa(application: FastAPI):
     """Mount the built SPA. Falls back to index.html for client-side routing.
 
@@ -16859,6 +16959,7 @@ _mount_plugin_api_routes()
 from hermes_cli.dashboard_auth.routes import router as _dashboard_auth_router  # noqa: E402
 app.include_router(_dashboard_auth_router)
 
+mount_app(app)
 mount_spa(app)
 
 

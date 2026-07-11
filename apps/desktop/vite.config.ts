@@ -27,6 +27,14 @@ const fsAllow = [
 
 export default defineConfig({
   base: './',
+  // The renderer's own package version, for surfaces with no Electron main
+  // process to ask (the web bridge's getVersion). Electron ignores this and
+  // reports the running app's version over IPC.
+  define: {
+    __HERMES_RENDERER_VERSION__: JSON.stringify(
+      JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).version ?? ''
+    )
+  },
   plugins: [react(), tailwindcss()],
   css: {
     // Pin an explicit (empty) PostCSS config. Tailwind is handled entirely by

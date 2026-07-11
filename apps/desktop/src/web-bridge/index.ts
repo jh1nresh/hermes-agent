@@ -43,14 +43,13 @@ export const WEB_STUBBED_SURFACE: Record<string, string> = {
   fetchLinkTitle: 'needs a cross-origin fetch proxy; PrettyLink falls back to the URL',
   getRecentLogs: 'main-process log buffer does not exist on web',
   normalizePreviewTarget: 'main-process path/URL normalization; preview falls back',
-  notify: 'delivered via the Notification API when permitted',
+  notify: 'delivered via the Notification API (permission requested at first use)',
   oauthLoginConnectionConfig: 'sign-in happens on the gateway login page itself',
   oauthLogoutConnectionConfig: 'sign-out happens on the gateway login page itself',
   onBackendExit: 'no child process to observe',
   onBootProgress: 'no main-process boot pipeline; snapshot comes from getBootProgress',
   onBootstrapEvent: 'no first-launch bootstrap in a browser',
   onPreviewFileChanged: 'no file watcher on web (Phase 2 candidate)',
-  petOverlay: 'no OS overlay windows in a browser',
   probeConnectionConfig: 'connection is fixed to the serving origin',
   profile: 'a hosted instance serves one profile',
   repairBootstrap: 'no first-launch bootstrap in a browser',
@@ -61,11 +60,7 @@ export const WEB_STUBBED_SURFACE: Record<string, string> = {
   selectPaths: 'native file picker; gateway-fs picker is Phase 2',
   settings: 'default project dir is a local-machine concept',
   stopPreviewFileWatch: 'no file watcher on web (Phase 2 candidate)',
-  terminal: 'PTY-over-WebSocket lands in Phase 2 (/api/pty)',
   testConnectionConfig: 'connection is fixed to the serving origin',
-  themes: 'marketplace fetch needs a proxy endpoint; deferred (RFC D6)',
-  uninstall: 'nothing installed locally',
-  updates: 'the instance updates server-side',
   watchPreviewFile: 'no file watcher on web (Phase 2 candidate)'
 }
 
@@ -86,13 +81,18 @@ export const WEB_OMITTED_SURFACE: Record<string, string> = {
   onOpenUpdatesRequested: 'no app menu to emit it',
   onPowerResume: "browsers have no resume signal; the boot path's online/visibilitychange listeners cover wake",
   onWindowStateChanged: 'no native window chrome to report',
+  petOverlay: 'no OS overlay windows in a browser; the overlay app never mounts (?win=overlay is Electron-launched)',
   renamePath: 'no gateway rename endpoint yet; project-tree rename hides',
   revealPath: 'no OS file manager to reveal into',
   setNativeTheme: 'no native window chrome to theme',
   setPreviewShortcutActive: 'no global shortcut registration',
   setTitleBarTheme: 'no native title bar',
   setTranslucency: 'no compositor-backed window translucency',
+  terminal: 'PTY-over-WebSocket lands in Phase 2 (/api/pty); absence renders terminal tabs as closed',
+  themes: 'marketplace fetch needs a proxy endpoint; deferred (RFC D6); absence empties the theme search',
   trashPath: 'no OS trash; destructive delete needs its own web decision',
+  uninstall: 'nothing installed locally; UninstallSection self-hides without the bridge',
+  updates: 'the instance updates server-side; About hides the update controls on web',
   zoom: 'the browser owns page zoom (Ctrl +/-)'
 }
 
@@ -290,7 +290,9 @@ export function createWebBridge(): HermesDesktopBridge {
       remoteUrl: `${window.location.origin}${basePath()}`
     }),
     getVersion: async () => ({
-      appVersion: 'web',
+      // Vite-define'd renderer package version; guarded so a non-vite harness
+      // (node --test, plain vitest transform) doesn't throw on the bare const.
+      appVersion: typeof __HERMES_RENDERER_VERSION__ === 'string' ? __HERMES_RENDERER_VERSION__ : 'web',
       electronVersion: 'web',
       hermesRoot: '',
       nodeVersion: 'web',
@@ -455,8 +457,18 @@ export function createWebBridge(): HermesDesktopBridge {
       set: async () => ({ profile: null })
     },
     notify: async payload => {
-      if (!('Notification' in window) || Notification.permission !== 'granted') {
+      if (!('Notification' in window) || Notification.permission === 'denied') {
         return false
+      }
+
+      // Point-of-use permission: the first real notification asks. 'default'
+      // (never asked) resolves here; a denial simply reports undelivered.
+      if (Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission()
+
+        if (permission !== 'granted') {
+          return false
+        }
       }
 
       new Notification(payload.title ?? 'Hermes', { body: payload.body, silent: payload.silent })
@@ -476,60 +488,13 @@ export function createWebBridge(): HermesDesktopBridge {
     },
     revealLogs: async () => ({ error: 'Not available on web.', ok: false, path: '' }),
     getRecentLogs: async () => ({ lines: [], path: '' }),
-    petOverlay: {
-      close: async () => ({ ok: false }),
-      control: () => {},
-      onControl: unsubscribe,
-      onState: unsubscribe,
-      open: async () => ({ ok: false }),
-      pushState: () => {},
-      setBounds: () => {},
-      setFocusable: () => {},
-      setIgnoreMouse: () => {}
-    },
-    terminal: {
-      dispose: async () => false,
-      onData: unsubscribe,
-      onExit: unsubscribe,
-      resize: async () => false,
-      start: async () => {
-        throw new Error('The embedded terminal is not available on web yet.')
-      },
-      write: async () => false
-    },
     onPreviewFileChanged: unsubscribe,
     onBackendExit: unsubscribe,
     onBootProgress: unsubscribe,
     onBootstrapEvent: unsubscribe,
     resetBootstrap: async () => ({ ok: false }),
     repairBootstrap: async () => ({ ok: false }),
-    cancelBootstrap: async () => ({ cancelled: false, ok: false }),
-    updates: {
-      apply: async () => ({ error: 'Updates are managed server-side on web.', ok: false }),
-      check: async () => ({ reason: 'web', supported: false }),
-      getBranch: async () => ({ branch: '' }),
-      onProgress: unsubscribe,
-      setBranch: async name => ({ branch: name })
-    },
-    uninstall: {
-      run: async () => ({ error: 'Not available on web.', ok: false }),
-      summary: async () => ({
-        agent_installed: false,
-        gui_installed: false,
-        hermes_home: '',
-        packaged_app_paths: [],
-        platform: 'web',
-        source_built_artifacts: [],
-        userdata_dir: '',
-        userdata_exists: false
-      })
-    },
-    themes: {
-      fetchMarketplace: async () => {
-        throw new Error('Theme marketplace is not available on web yet.')
-      },
-      searchMarketplace: async () => []
-    }
+    cancelBootstrap: async () => ({ cancelled: false, ok: false })
   }
 
   return bridge

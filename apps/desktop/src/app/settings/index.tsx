@@ -8,6 +8,7 @@ import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { Archive, Bell, Download, Globe, Info, KeyRound, RefreshCw, Settings2, Upload, Wrench, Zap } from '@/lib/icons'
 import { notifyError } from '@/store/notifications'
+import { isWebHost } from '@/web-bridge'
 
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
 import { OverlayIconButton } from '../overlays/overlay-chrome'
@@ -156,13 +157,19 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       label: t.settings.nav.providers,
       onSelect: () => setActiveView('providers')
     },
-    {
-      active: activeView === 'gateway',
-      icon: Globe,
-      id: 'gateway',
-      label: t.settings.nav.gateway,
-      onSelect: () => setActiveView('gateway')
-    },
+    // On web the connection IS the serving origin — there is nothing to
+    // configure, so the Gateway panel is absent (RFC D7 stubbed-surface gating).
+    ...(isWebHost()
+      ? []
+      : [
+          {
+            active: activeView === 'gateway',
+            icon: Globe,
+            id: 'gateway',
+            label: t.settings.nav.gateway,
+            onSelect: () => setActiveView('gateway')
+          }
+        ]),
     {
       active: activeView === 'keys',
       children: [

@@ -118,6 +118,7 @@ WORKDIR /opt/hermes
 COPY package.json package-lock.json ./
 COPY web/package.json web/
 COPY ui-tui/package.json ui-tui/
+COPY apps/desktop/package.json apps/desktop/
 COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 # apps/shared/ is copied IN FULL because web/package.json references it as a
 # `file:` workspace dependency (same pattern as hermes-ink above).
@@ -134,6 +135,14 @@ COPY apps/shared/ apps/shared/
 # runtime `npm install` that then failed with EACCES.  Keeping the env
 # guards against a future regression if the source npm version changes.
 ENV npm_config_install_links=false
+
+# `ELECTRON_SKIP_BINARY_DOWNLOAD=1`: the desktop workspace lists `electron` as
+# a devDependency, but the image only ever runs its *renderer* as a browser
+# bundle (`build:web` below) — the ~100MB Electron runtime binary would be
+# downloaded, never executed, and baked into the layer. Skipping the download
+# keeps the postinstall a no-op; node-pty's native compile still runs (the
+# gcc/make toolchain is already present for python-olm above).
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 
 RUN npm install --prefer-offline --no-audit && \
     npx playwright install --with-deps chromium --only-shell && \
@@ -188,8 +197,14 @@ RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra 
 COPY web/ web/
 COPY ui-tui/ ui-tui/
 COPY apps/shared/ apps/shared/
+# The desktop renderer, built browser-only (no Electron packaging steps) and
+# served by the gateway at /app — HERMES_APP_DIST below points at this dist.
+# .dockerignore excludes any local dist/build/release so this build is always
+# from source.
+COPY apps/desktop/ apps/desktop/
 RUN cd web && npm run build && \
-    cd ../ui-tui && npm run build
+    cd ../ui-tui && npm run build && \
+    cd ../apps/desktop && npm run build:web
 
 # ---------- Source code ----------
 # .dockerignore excludes node_modules, so the installs above survive.
@@ -274,6 +289,13 @@ COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-r
 
 # ---------- Runtime ----------
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
+# The desktop renderer web build (Layer above: `apps/desktop && npm run
+# build:web`), served by the gateway at /app. Explicitly opting in via this
+# env var is the ONLY thing that mounts /app — web_server.py has no path
+# fallback — so the browser UI is a fact of the image, never of a source
+# checkout. The dist survives `COPY . .` because .dockerignore excludes
+# apps/desktop/dist from the build context.
+ENV HERMES_APP_DIST=/opt/hermes/apps/desktop/dist
 # Point the TUI launcher at the prebuilt bundle baked at build time (Layer 8:
 # `ui-tui && npm run build`). This makes _make_tui_argv take the prebuilt-bundle
 # fast path (`node --expose-gc /opt/hermes/ui-tui/dist/entry.js`) and skip the
@@ -282,13 +304,14 @@ ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 #
 # Why this is required (not just an optimization): the root package-lock.json
 # describes the WHOLE monorepo workspace set (root + web + ui-tui + apps/*),
-# but the image only installs root/web/ui-tui (apps/* — the desktop app — is
-# never `npm install`ed here). So the actualized node_modules permanently
-# disagrees with the canonical lock, _tui_need_npm_install() returns True on
-# every launch, and the runtime `npm install` it triggers (a) can never
-# converge against the partial monorepo and (b) races itself across concurrent
-# embedded-chat (/api/pty) connections → ENOTEMPTY → the chat tab dies with a
-# 502 / "[session ended]". Pointing at the prebuilt bundle sidesteps the whole
+# but the image's npm install only actualizes the workspaces present in the
+# build context (apps/desktop joined for the /app renderer build; any other
+# apps/* stay excluded). So the actualized node_modules can disagree with the
+# canonical lock, _tui_need_npm_install() returns True on every launch, and
+# the runtime `npm install` it triggers (a) can never converge against the
+# partial monorepo and (b) races itself across concurrent embedded-chat
+# (/api/pty) connections → ENOTEMPTY → the chat tab dies with a 502 /
+# "[session ended]". Pointing at the prebuilt bundle sidesteps the whole
 # check. (A separate launcher hardening is tracked independently.)
 ENV HERMES_TUI_DIR=/opt/hermes/ui-tui
 ENV HERMES_HOME=/opt/data
