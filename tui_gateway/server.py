@@ -1751,7 +1751,7 @@ def _ensure_session_db_row(session: dict) -> None:
         db.create_session(
             key,
             source=_session_source(session),
-            model=row_model,
+            model=row_model or None,
             model_config=model_config or None,
             parent_session_id=parent_session_id,
             cwd=_session_cwd(session) if session.get("explicit_cwd") else None,
@@ -2096,7 +2096,10 @@ def _resolve_model() -> str:
         return str(m.get("default", "") or "").strip()
     if isinstance(m, str) and m:
         return m.strip()
-    return "anthropic/claude-sonnet-4"
+    # Empty means no user-selected model. Keep it unset so a corrected config
+    # can self-heal this session on the next resolution instead of persisting a
+    # provider-specific placeholder that may 404 forever.
+    return ""
 
 
 def _resolve_session_platform() -> str:
@@ -8062,7 +8065,7 @@ def _(rid, params: dict) -> dict:
         db.create_session(
             new_key,
             source=source,
-            model=_resolve_model(),
+            model=_resolve_model() or None,
             # Stable _branched_from marker so list_sessions_rich() keeps the
             # branch visible in /resume and /sessions. The TUI branch leaves
             # the parent live (no end_reason='branched'), so the legacy
