@@ -1878,7 +1878,8 @@ Control how Hermes handles potentially dangerous commands:
 
 ```yaml
 approvals:
-  mode: smart   # smart | manual | off
+  mode: smart        # smart | manual | off
+  write_file: allow  # allow | ask; applies to write_file and patch
 ```
 
 | Mode | Behavior |
@@ -1888,6 +1889,8 @@ approvals:
 | `off` | Skip all approval checks. Equivalent to `HERMES_YOLO_MODE=true`. **Use with caution.** |
 
 Smart mode is particularly useful for reducing approval fatigue — it lets the agent work more autonomously on safe operations while still catching genuinely destructive commands.
+
+`approvals.write_file` is a separate, narrow file-mutation policy. Its default is `allow` for backward compatibility. Set it to `ask` to route both `write_file` and `patch` through the shared CLI/gateway/Desktop/TUI human gate, even in YOLO mode. It does not affect `read_file`, `search_files`, memory or skill write approval. Protected-path, cross-profile, traversal, malformed-request, and fail-closed syntax checks run before any prompt and are repeated where applicable at the mutation boundary.
 
 :::warning
 Setting `approvals.mode: off` disables all safety checks for terminal commands. Only use this in trusted, sandboxed environments.

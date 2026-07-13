@@ -108,6 +108,12 @@ class TestConfigYamlRouting:
         assert "docker" in config
         assert "terminal" not in _read_env(_isolated_hermes_home)
 
+    @pytest.mark.parametrize("value", ["deny", "always", "off", "true", "ASK "])
+    def test_write_file_approval_rejects_noncanonical_values(self, value, _isolated_hermes_home):
+        with pytest.raises(SystemExit):
+            set_config_value("approvals.write_file", value)
+        assert not (_isolated_hermes_home / "config.yaml").exists()
+
     def test_terminal_image_goes_to_config(self, _isolated_hermes_home):
         """TERMINAL_DOCKER_IMAGE doesn't match _API_KEY or _TOKEN, so config.yaml."""
         set_config_value("terminal.docker_image", "python:3.12")

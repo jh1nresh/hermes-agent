@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+from collections.abc import MutableSet
 from typing import Optional
 from hermes_cli.config import cfg_get
 
@@ -1478,7 +1479,51 @@ _lock = threading.Lock()
 _pending: dict[str, dict] = {}
 _session_approved: dict[str, set] = {}
 _session_yolo: set[str] = set()
-_permanent_approved: set = set()
+
+
+class _ProfileScopedPermanentApprovals(MutableSet):
+    """Set-compatible permanent grants isolated by context-local Hermes home."""
+
+    def __init__(self):
+        self._by_home: dict[str, set] = {}
+
+    @staticmethod
+    def _key() -> str:
+        from hermes_constants import get_hermes_home
+        try:
+            return str(get_hermes_home().resolve())
+        except OSError:
+            return str(get_hermes_home().absolute())
+
+    def _current(self) -> set:
+        return self._by_home.setdefault(self._key(), set())
+
+    def __contains__(self, value):
+        return value in self._current()
+
+    def __iter__(self):
+        return iter(tuple(self._current()))
+
+    def __len__(self):
+        return len(self._current())
+
+    def add(self, value):
+        self._current().add(value)
+
+    def discard(self, value):
+        self._current().discard(value)
+
+    def clear(self):
+        self._current().clear()
+
+    def update(self, values):
+        self._current().update(values)
+
+    def copy(self) -> set:
+        return self._current().copy()
+
+
+_permanent_approved = _ProfileScopedPermanentApprovals()
 
 # =========================================================================
 # Blocking gateway approval (mirrors CLI's synchronous input() flow)
@@ -1652,8 +1697,9 @@ def approve_permanent(pattern_key: str):
 
 
 def load_permanent(patterns: set):
-    """Bulk-load permanent allowlist entries from config."""
+    """Replace permanent entries with the active profile's allowlist."""
     with _lock:
+        _permanent_approved.clear()
         _permanent_approved.update(patterns)
 
 
@@ -1709,15 +1755,16 @@ def load_permanent_allowlist() -> set:
         from hermes_cli.config import load_config
         config = load_config()
         patterns = set(config.get("command_allowlist", []) or [])
-        if patterns:
-            load_permanent(patterns)
+        load_permanent(patterns)
         return patterns
     except Exception as e:
+        # Profile transition/load failure must not retain the previous profile's grants.
+        load_permanent(set())
         logger.warning("Failed to load permanent allowlist: %s", e)
         return set()
 
 
-def save_permanent_allowlist(patterns: set):
+def save_permanent_allowlist(patterns):
     """Save permanently allowed command patterns to config."""
     try:
         from hermes_cli.config import load_config, save_config
@@ -2107,6 +2154,7 @@ def _run_approval_gate(
     autoapprove_log_prefix: str,
     fail_closed_when_no_human: bool = False,
     no_human_block_message: str = "",
+    honor_yolo: bool = True,
 ) -> dict:
     """Shared human-approval gate for a flagged action (command or tool).
 
@@ -2151,7 +2199,7 @@ def _run_approval_gate(
     # --yolo bypasses all approval prompts (session- or process-scoped).
     # Hardline blocks are handled by the caller BEFORE this gate, so yolo
     # here only skips the recoverable approval layer.
-    if _YOLO_MODE_FROZEN or is_current_session_yolo_enabled():
+    if honor_yolo and (_YOLO_MODE_FROZEN or is_current_session_yolo_enabled()):
         return {"approved": True, "message": None}
 
     session_key = get_current_session_key()
@@ -2269,7 +2317,7 @@ def _run_approval_gate(
                 approve_session(session_key, pattern_key)
                 approve_permanent(pattern_key)
                 save_permanent_allowlist(_permanent_approved)
-            return {"approved": True, "message": None}
+            return {"approved": True, "message": None, "approval_scope": choice}
 
         # No notify callback (e.g. API server without an attached chat):
         # queue for /approve /deny review, agent sees approval_required.
@@ -2312,7 +2360,7 @@ def _run_approval_gate(
         approve_permanent(pattern_key)
         save_permanent_allowlist(_permanent_approved)
 
-    return {"approved": True, "message": None}
+    return {"approved": True, "message": None, "approval_scope": choice}
 
 
 def _should_skip_container_guards(env_type: str, has_host_access: bool = False) -> bool:
@@ -2405,14 +2453,14 @@ def request_tool_approval(
     *,
     rule_key: str = "",
     approval_callback=None,
+    honor_yolo: bool = True,
 ) -> dict:
     """Escalate an arbitrary tool call to the human-approval gate.
 
-    This is the entry point for a plugin ``pre_tool_call`` hook that returns
-    ``{"action": "approve", "message": ...}``: instead of the plugin vetoing
-    the call (``action: block``) or silently allowing it, it asks the SAME
-    human gate that Tier-2 dangerous shell patterns use. The LLM cannot skip
-    or bypass this — the tool call is intercepted before execution.
+    This is the entry point for any tool-specific policy (including a plugin
+    ``pre_tool_call`` hook returning ``{"action": "approve", ...}``) that must
+    use the SAME human gate as Tier-2 dangerous shell patterns. The LLM cannot
+    skip this — the tool call is intercepted before execution.
 
     It reuses the existing approval primitives (session/permanent allowlist,
     ``prompt_dangerous_approval`` for CLI, ``submit_pending`` for the gateway
@@ -2432,6 +2480,8 @@ def request_tool_approval(
             on the same tool).
         approval_callback: Optional CLI callback for interactive prompts
             (same contract as ``check_dangerous_command``).
+        honor_yolo: When false, this explicit policy still asks under process-
+            or session-scoped YOLO. Used by ``approvals.write_file: ask``.
 
     Returns:
         ``{"approved": True, "message": None}`` when allowed, or
@@ -2481,8 +2531,9 @@ def request_tool_approval(
         no_human_block_message=(
             f"BLOCKED: Tool '{tool_name}' requires approval ({description}) "
             "but no interactive user or gateway is present to approve it. "
-            "A plugin flagged this action for human confirmation."
+            "This action requires human confirmation."
         ),
+        honor_yolo=honor_yolo,
     )
 
 

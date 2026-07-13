@@ -2259,10 +2259,35 @@ def resolve_pre_tool_block(
     if details.action == "approve":
         try:
             from tools.approval import request_tool_approval
+            is_core_file_mutation = False
+            if tool_name in {"write_file", "patch"}:
+                from tools.file_tools import (
+                    is_core_file_mutation_entry,
+                    preflight_file_mutation,
+                )
+                is_core_file_mutation = is_core_file_mutation_entry(tool_name)
+                if is_core_file_mutation:
+                    from hermes_cli.config import cfg_get, load_config
+                    is_core_file_mutation = (
+                        cfg_get(load_config(), "approvals", "write_file", default="allow")
+                        == "ask"
+                    )
+            if is_core_file_mutation:
+                validation_error = preflight_file_mutation(
+                    tool_name, args or {}, task_id or "default"
+                )
+                if validation_error:
+                    return validation_error
             result = request_tool_approval(
                 tool_name,
                 details.message or "",
-                rule_key=details.rule_key or tool_name,
+                # A file-mutation plugin escalation shares the built-in policy
+                # grain so one session/always choice satisfies both gates.
+                rule_key=(
+                    "write_file"
+                    if is_core_file_mutation
+                    else (details.rule_key or tool_name)
+                ),
             )
         except Exception:
             # Fail-closed: if the gate itself errors, block rather than
@@ -2272,6 +2297,12 @@ def resolve_pre_tool_block(
             return str(
                 result.get("message")
                 or f"BLOCKED: plugin approval required for {tool_name}"
+            )
+        if is_core_file_mutation and result.get("approval_scope") == "once":
+            from tools.file_tools import grant_file_mutation_once_capability, registry
+            entry = registry.get_entry(tool_name)
+            grant_file_mutation_once_capability(
+                entry, tool_name, args or {}, tool_call_id=tool_call_id or ""
             )
     return None
 

@@ -1216,16 +1216,28 @@ def handle_function_call(
         # ACP/Zed edit approval runs before any file mutation.  The requester
         # is bound via ContextVar only for ACP sessions, so CLI/gateway paths
         # are unaffected when it is unset.
+        edit_block_message = None
+        edit_dispatch_allowed = False
         try:
             from acp_adapter.edit_approval import maybe_require_edit_approval
 
             edit_block_message = maybe_require_edit_approval(function_name, function_args)
             if edit_block_message is not None:
                 return edit_block_message
+            edit_dispatch_allowed = True
         except Exception as _edit_approval_err:
             logger.debug("ACP edit approval guard error: %s", _edit_approval_err)
             if function_name in {"write_file", "patch"}:
                 return json.dumps({"error": "Edit approval denied: approval guard failed"}, ensure_ascii=False)
+        finally:
+            # If this downstream guard did not hand off to core dispatch, revoke
+            # the plugin-approved one-shot even when the guard itself raised.
+            if not edit_dispatch_allowed:
+                try:
+                    from tools.file_tools import revoke_file_mutation_once_capability
+                    revoke_file_mutation_once_capability(tool_call_id or "")
+                except Exception:
+                    pass
 
         # Notify the read-loop tracker when a non-read/search tool runs,
         # so the *consecutive* counter resets (reads after other work are fine).
@@ -1295,6 +1307,11 @@ def handle_function_call(
                     reset_current_observability_context(_approval_tokens)
                 except Exception:
                     pass
+            try:
+                from tools.file_tools import revoke_file_mutation_once_capability
+                revoke_file_mutation_once_capability(tool_call_id or "")
+            except Exception:
+                pass
         duration_ms = int((time.monotonic() - _dispatch_start) * 1000)
 
         _emit_post_tool_call_hook(

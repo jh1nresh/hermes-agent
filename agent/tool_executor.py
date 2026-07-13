@@ -423,6 +423,19 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
             tool_call_id=getattr(tool_call, "id", "") or "",
         )
 
+        # Bind approval observability/capability identity while this call's
+        # pre-gates run. The resulting per-call capability map is propagated
+        # into its worker context below.
+        _approval_tokens = None
+        try:
+            from tools.approval import set_current_observability_context
+            _approval_tokens = set_current_observability_context(
+                turn_id=getattr(agent, "_current_turn_id", "") or "",
+                tool_call_id=getattr(tool_call, "id", "") or "",
+            )
+        except Exception:
+            pass
+
         # ── Block evaluation (BEFORE checkpoint preflight) ───────────
         # We must know whether the tool will execute before touching
         # checkpoint state (dedup slot, real snapshots).
@@ -514,6 +527,19 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                         )
                 except Exception:
                     pass
+
+        if block_result is not None:
+            try:
+                from tools.file_tools import revoke_file_mutation_once_capability
+                revoke_file_mutation_once_capability(getattr(tool_call, "id", "") or "")
+            except Exception:
+                pass
+        if _approval_tokens is not None:
+            try:
+                from tools.approval import reset_current_observability_context
+                reset_current_observability_context(_approval_tokens)
+            except Exception:
+                pass
 
         parsed_calls.append((tool_call, function_name, function_args, middleware_trace, block_result, blocked_by_guardrail))
 
@@ -814,6 +840,16 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                     cancel_futures=abandon_executor,
                 )
     finally:
+        # Revoke every call slot after normal completion and, critically, on
+        # timeout/interrupt/submit abort. Capabilities are shared objects across
+        # copied worker contexts, so revocation here also invalidates a worker
+        # that has not yet reached registry dispatch.
+        try:
+            from tools.file_tools import revoke_file_mutation_once_capability
+            for tc, *_rest in parsed_calls:
+                revoke_file_mutation_once_capability(getattr(tc, "id", "") or "")
+        except Exception:
+            pass
         if spinner:
             # Build a summary message for the spinner stop
             completed = sum(1 for r in results if r is not None)
@@ -1126,9 +1162,13 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
         _execution_blocked = _block_msg is not None or _guardrail_block_decision is not None
 
         if _execution_blocked:
-            # Tool blocked by plugin or guardrail policy — skip counters,
-            # callbacks, checkpointing, activity mutation, and real execution.
-            pass
+            # Tool blocked after plugin approval: revoke this call's one-shot
+            # before any copied context or later retry can redeem it.
+            try:
+                from tools.file_tools import revoke_file_mutation_once_capability
+                revoke_file_mutation_once_capability(getattr(tool_call, "id", "") or "")
+            except Exception:
+                pass
         # Reset nudge counters when the relevant tool is actually used
         elif function_name == "memory":
             agent._turns_since_memory = 0

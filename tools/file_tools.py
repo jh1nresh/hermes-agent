@@ -8,6 +8,10 @@ import os
 import posixpath
 import sys
 import threading
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+import hashlib
+import json as _json
 from pathlib import Path, PurePosixPath
 
 from agent.file_safety import get_read_block_error
@@ -1664,9 +1668,207 @@ def _mark_verification_stale(
         logger.debug("verification stale marker failed", exc_info=True)
 
 
+def preflight_file_mutation(tool_name: str, args: dict, task_id: str = "default") -> str | None:
+    """Run native file safety/shape checks without performing a mutation."""
+    args = args if isinstance(args, dict) else {}
+    cross_profile = bool(args.get("cross_profile", False))
+    if tool_name == "write_file":
+        path, content = args.get("path"), args.get("content")
+        if not isinstance(path, str) or not path:
+            return "path required"
+        if not isinstance(content, str):
+            return "content must be a string"
+        paths = [path]
+        if _is_internal_file_tool_content(content):
+            return "Refusing to write internal read_file display text as file content."
+        from tools.file_operations import LINTERS_INPROC, _FAIL_CLOSED_INPROC_EXTS
+        ext = os.path.splitext(path)[1].lower()
+        linter = LINTERS_INPROC.get(ext) if ext in _FAIL_CLOSED_INPROC_EXTS else None
+        if linter is not None:
+            ok, lint_err = linter(content)
+            if not ok and lint_err != "__SKIP__":
+                return f"Refusing to write '{path}': candidate content fails {ext} syntax validation ({lint_err})."
+    elif tool_name == "patch":
+        mode = args.get("mode", "replace")
+        if mode == "replace":
+            path = args.get("path")
+            if not isinstance(path, str) or not path:
+                return "path required"
+            if args.get("old_string") is None or args.get("new_string") is None:
+                return "old_string and new_string required"
+            paths = [path]
+        elif mode == "patch":
+            patch_content = args.get("patch")
+            if not isinstance(patch_content, str) or not patch_content:
+                return "patch content required"
+            from tools.patch_parser import parse_v4a_patch
+            operations, parse_error = parse_v4a_patch(patch_content)
+            if parse_error:
+                return f"Failed to parse patch: {parse_error}"
+            paths = []
+            for operation in operations:
+                for attr in ("path", "new_path"):
+                    value = getattr(operation, attr, None)
+                    if value:
+                        paths.append(str(value))
+            from tools.path_security import has_traversal_component
+            for candidate in paths:
+                if has_traversal_component(candidate):
+                    return f"V4A patch header contains '..' traversal: {candidate!r}."
+        else:
+            return f"Unknown mode: {mode}"
+    else:
+        return None
+    for candidate in paths:
+        sensitive_err = _check_sensitive_path(candidate, task_id)
+        if sensitive_err:
+            return sensitive_err
+        if not cross_profile:
+            cross_warning = _check_cross_profile_path(candidate, task_id)
+            if cross_warning:
+                return cross_warning
+    return None
+
+
+def _mutation_args_fingerprint(args: dict) -> bytes:
+    encoded = _json.dumps(
+        args, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=repr
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).digest()
+
+
+@dataclass
+class _FileMutationOnceCapability:
+    entry: object
+    handler: object
+    tool_name: str
+    args: dict
+    fingerprint: bytes
+    consumed: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def consume(self, entry: object, tool_name: str, args: dict) -> bool:
+        with self.lock:
+            if self.consumed:
+                return False
+            if (
+                entry is not self.entry
+                or getattr(entry, "handler", None) is not self.handler
+                or tool_name != self.tool_name
+                or args is not self.args
+                or _mutation_args_fingerprint(args) != self.fingerprint
+            ):
+                return False
+            self.consumed = True
+            return True
+
+    def revoke(self) -> None:
+        with self.lock:
+            self.consumed = True
+
+
+_file_mutation_once_capabilities: ContextVar[dict[str, _FileMutationOnceCapability]] = ContextVar(
+    "file_mutation_once_capabilities", default={}
+)
+
+
+def _file_mutation_dispatch_id(tool_call_id: str = "") -> str:
+    if tool_call_id:
+        return tool_call_id
+    try:
+        from tools.approval import _approval_tool_call_id
+        return _approval_tool_call_id.get() or "__direct_dispatch__"
+    except Exception:
+        return "__direct_dispatch__"
+
+
+def grant_file_mutation_once_capability(
+    entry, tool_name: str, args: dict, tool_call_id: str = ""
+):
+    """Grant one capability in a call-specific slot shared with copied contexts."""
+    capability = _FileMutationOnceCapability(
+        entry=entry,
+        handler=getattr(entry, "handler", None),
+        tool_name=tool_name,
+        args=args,
+        fingerprint=_mutation_args_fingerprint(args),
+    )
+    capabilities = dict(_file_mutation_once_capabilities.get())
+    capabilities[_file_mutation_dispatch_id(tool_call_id)] = capability
+    return _file_mutation_once_capabilities.set(capabilities)
+
+
+def reset_file_mutation_once_capability(token) -> None:
+    for capability in _file_mutation_once_capabilities.get().values():
+        capability.revoke()
+    _file_mutation_once_capabilities.reset(token)
+
+
+def revoke_file_mutation_once_capability(tool_call_id: str = "") -> None:
+    capability = _file_mutation_once_capabilities.get().get(
+        _file_mutation_dispatch_id(tool_call_id)
+    )
+    if capability is not None:
+        capability.revoke()
+
+
+def _consume_file_mutation_once_capability(entry, tool_name: str, args: dict) -> bool:
+    dispatch_id = _file_mutation_dispatch_id()
+    capabilities = _file_mutation_once_capabilities.get()
+    capability = capabilities.get(dispatch_id)
+    consumed = bool(capability and capability.consume(entry, tool_name, args))
+    if consumed:
+        remaining = dict(capabilities)
+        remaining.pop(dispatch_id, None)
+        _file_mutation_once_capabilities.set(remaining)
+    return consumed
+
+
+def is_core_file_mutation_entry(tool_name: str) -> bool:
+    """Identify the actual core registry entry, not a same-named replacement."""
+    expected = {"write_file": _handle_write_file, "patch": _handle_patch}.get(tool_name)
+    entry = registry.get_entry(tool_name)
+    return expected is not None and entry is not None and entry.handler is expected
+
+
+def _require_file_mutation_approval(tool_name: str, args: dict) -> str | None:
+    """Apply the narrow write policy after validation and before mutation."""
+    try:
+        from hermes_cli.config import cfg_get, load_config
+        mode = str(
+            cfg_get(load_config(), "approvals", "write_file", default="allow")
+        ).strip().lower()
+    except Exception as exc:
+        return f"BLOCKED: could not resolve approvals.write_file setting: {exc}"
+    if mode not in {"allow", "ask"}:
+        return (
+            f"BLOCKED: invalid approvals.write_file mode {mode!r}; "
+            "expected 'allow' or 'ask'"
+        )
+    if mode == "allow":
+        return None
+    entry = registry.get_entry(tool_name)
+    if entry is not None and _consume_file_mutation_once_capability(entry, tool_name, args):
+        return None
+    try:
+        from tools.approval import request_tool_approval
+        result = request_tool_approval(
+            tool_name,
+            f"File mutation requested via {tool_name}",
+            rule_key="write_file",
+            honor_yolo=False,
+        )
+    except Exception as exc:
+        return f"BLOCKED: write tool approval gate failed for {tool_name}: {exc}"
+    if result.get("approved"):
+        return None
+    return str(result.get("message") or f"BLOCKED: approval required for {tool_name}")
+
+
 def write_file_tool(path: str, content: str, task_id: str = "default",
                     cross_profile: bool = False,
-                    session_id: str | None = None) -> str:
+                    session_id: str | None = None,
+                    _dispatch_args: dict | None = None) -> str:
     """Write content to a file.
 
     ``cross_profile`` opts out of the soft cross-Hermes-profile guard. The
@@ -1688,6 +1890,21 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
             "Strip read_file line-number prefixes or reconstruct the intended "
             "file contents before writing."
         )
+    # Native syntax validation precedes the approval prompt. The lower-level
+    # writer repeats this at the side-effect boundary (defense in depth).
+    from tools.file_operations import LINTERS_INPROC, _FAIL_CLOSED_INPROC_EXTS
+    ext = os.path.splitext(path)[1].lower()
+    inproc_linter = LINTERS_INPROC.get(ext) if ext in _FAIL_CLOSED_INPROC_EXTS else None
+    if inproc_linter is not None:
+        ok, lint_err = inproc_linter(content)
+        if not ok and lint_err != "__SKIP__":
+            return tool_error(
+                f"Refusing to write '{path}': candidate content fails {ext} "
+                f"syntax validation ({lint_err}). The file was NOT created or modified."
+            )
+    approval_error = _require_file_mutation_approval("write_file", _dispatch_args or {})
+    if approval_error:
+        return tool_error(approval_error)
     try:
         # Resolve once for the registry lock + stale check.  Failures here
         # fall back to the legacy path — write proceeds, per-task staleness
@@ -1698,6 +1915,13 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
             _resolved = None
 
         if _resolved is None:
+            final_error = preflight_file_mutation(
+                "write_file",
+                {"path": path, "content": content, "cross_profile": cross_profile},
+                task_id,
+            )
+            if final_error:
+                return tool_error(final_error)
             stale_warning = _check_file_staleness(path, task_id)
             file_ops = _get_file_ops(task_id)
             result = file_ops.write_file(path, content)
@@ -1713,6 +1937,13 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
         # subagents can't interleave on the same file.  Different paths
         # remain fully parallel.
         with file_state.lock_path(_resolved):
+            final_error = preflight_file_mutation(
+                "write_file",
+                {"path": path, "content": content, "cross_profile": cross_profile},
+                task_id,
+            )
+            if final_error:
+                return tool_error(final_error)
             # Cross-agent staleness wins over per-task warning when both
             # fire — its message names the sibling subagent.
             cross_warning = file_state.check_stale(task_id, _resolved)
@@ -1750,7 +1981,8 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
 def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                new_string: str = None, replace_all: bool = False, patch: str = None,
                task_id: str = "default", cross_profile: bool = False,
-               session_id: str | None = None) -> str:
+               session_id: str | None = None,
+               _dispatch_args: dict | None = None) -> str:
     """Patch a file using replace mode or V4A patch format.
 
     ``cross_profile`` opts out of the soft cross-Hermes-profile guard for
@@ -1810,6 +2042,25 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
             cross_warning = _check_cross_profile_path(_p, task_id)
             if cross_warning:
                 return tool_error(cross_warning)
+    # Parse/shape checks above and protected/cross-profile checks must all fail
+    # before asking. No file side effect has occurred yet.
+    if mode == "replace":
+        if not path:
+            return tool_error("path required")
+        if old_string is None or new_string is None:
+            return tool_error("old_string and new_string required")
+    elif mode == "patch":
+        if not patch:
+            return tool_error("patch content required")
+        from tools.patch_parser import parse_v4a_patch
+        _operations, parse_error = parse_v4a_patch(patch)
+        if parse_error:
+            return tool_error(f"Failed to parse patch: {parse_error}")
+    else:
+        return tool_error(f"Unknown mode: {mode}")
+    approval_error = _require_file_mutation_approval("patch", _dispatch_args or {})
+    if approval_error:
+        return tool_error(approval_error)
     try:
         # Resolve paths for locking.  Ordered + deduplicated so concurrent
         # callers lock in the same order — prevents deadlock on overlapping
@@ -1833,6 +2084,15 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
         with ExitStack() as _locks:
             for _r in _resolved_paths:
                 _locks.enter_context(file_state.lock_path(_r))
+
+            final_args = {
+                "mode": mode, "path": path, "old_string": old_string,
+                "new_string": new_string, "replace_all": replace_all,
+                "patch": patch, "cross_profile": cross_profile,
+            }
+            final_error = preflight_file_mutation("patch", final_args, task_id)
+            if final_error:
+                return tool_error(final_error)
 
             # Collect warnings — cross-agent registry first (names sibling),
             # then per-task tracker as a fallback.
@@ -1870,7 +2130,25 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
             elif mode == "patch":
                 if not patch:
                     return tool_error("patch content required")
-                result = file_ops.patch_v4a(patch)
+                from tools.patch_parser import parse_v4a_patch
+                operations, parse_error = parse_v4a_patch(patch)
+                if parse_error:
+                    return tool_error(f"Failed to parse patch: {parse_error}")
+                for operation in operations:
+                    operation.file_path = (
+                        _path_to_resolved.get(operation.file_path) or operation.file_path
+                    )
+                    if operation.new_path:
+                        operation.new_path = (
+                            _path_to_resolved.get(operation.new_path) or operation.new_path
+                        )
+                apply_operations = getattr(type(file_ops), "patch_v4a_operations", None)
+                if apply_operations is None:
+                    # Compatibility for third-party/test FileOperations doubles
+                    # that still implement only the historical text API.
+                    result = file_ops.patch_v4a(patch)
+                else:
+                    result = apply_operations(file_ops, operations)
             else:
                 return tool_error(f"Unknown mode: {mode}")
 
@@ -2171,6 +2449,7 @@ def _handle_write_file(args, **kw):
         path=args["path"], content=args["content"], task_id=tid,
         cross_profile=bool(args.get("cross_profile", False)),
         session_id=kw.get("session_id"),
+        _dispatch_args=args,
     )
 
 
@@ -2182,6 +2461,7 @@ def _handle_patch(args, **kw):
         replace_all=args.get("replace_all", False), patch=args.get("patch"), task_id=tid,
         cross_profile=bool(args.get("cross_profile", False)),
         session_id=kw.get("session_id"),
+        _dispatch_args=args,
     )
 
 

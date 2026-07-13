@@ -2350,17 +2350,24 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
 
     from hermes_cli.middleware import run_tool_execution_middleware
 
-    return run_tool_execution_middleware(
-        function_name,
-        function_args,
-        lambda next_args: _execute(next_args if isinstance(next_args, dict) else function_args),
-        original_args=function_args,
-        task_id=effective_task_id or "",
-        session_id=getattr(agent, "session_id", "") or "",
-        tool_call_id=tool_call_id or "",
-        turn_id=getattr(agent, "_current_turn_id", "") or "",
-        api_request_id=getattr(agent, "_current_api_request_id", "") or "",
-    )
+    try:
+        return run_tool_execution_middleware(
+            function_name,
+            function_args,
+            lambda next_args: _execute(next_args if isinstance(next_args, dict) else function_args),
+            original_args=function_args,
+            task_id=effective_task_id or "",
+            session_id=getattr(agent, "session_id", "") or "",
+            tool_call_id=tool_call_id or "",
+            turn_id=getattr(agent, "_current_turn_id", "") or "",
+            api_request_id=getattr(agent, "_current_api_request_id", "") or "",
+        )
+    finally:
+        try:
+            from tools.file_tools import revoke_file_mutation_once_capability
+            revoke_file_mutation_once_capability(tool_call_id or "")
+        except Exception:
+            pass
 
 
 

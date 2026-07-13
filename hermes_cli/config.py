@@ -2534,6 +2534,10 @@ DEFAULT_CONFIG = {
         "mode": "smart",
         "timeout": 60,
         "cron_mode": "deny",
+        # File mutation tools (write_file and patch):
+        #   allow — run normally (default; preserves existing behavior)
+        #   ask   — require the shared human approval gate, even under YOLO
+        "write_file": "allow",
         # User-defined deny rules: fnmatch globs matched against terminal
         # commands. A match blocks the command unconditionally — BEFORE the
         # --yolo / /yolo / mode=off bypass — making this the user-editable
@@ -8129,6 +8133,12 @@ def set_config_value(key: str, value: str):
         print(
             f"Cannot set '{key}': it is managed by your administrator ({src}) "
             f"and cannot be changed. Contact your administrator to modify it.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if key == "approvals.write_file" and value not in {"allow", "ask"}:
+        print(
+            "Invalid value for approvals.write_file: expected exactly 'allow' or 'ask'.",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -1697,9 +1697,12 @@ class ShellFileOperations(FileOperations):
         if parse_error:
             return PatchResult(error=f"Failed to parse patch: {parse_error}")
         
-        # Apply operations
-        result = apply_v4a_operations(operations, self)
-        return result
+        return self.patch_v4a_operations(operations)
+
+    def patch_v4a_operations(self, operations) -> PatchResult:
+        """Apply already parsed operations whose paths may be canonicalized."""
+        from tools.patch_parser import apply_v4a_operations
+        return apply_v4a_operations(operations, self)
     
     def _check_lint(self, path: str, content: Optional[str] = None) -> LintResult:
         """
