@@ -128,6 +128,7 @@ export function ChatBar({
 
   const { t } = useI18n()
   const gatewayState = useStore($gatewayState)
+  const gatewayConnected = gatewayState === 'open'
   const reconnecting = gatewayState === 'closed' || gatewayState === 'error'
   const inputDisabled = disabled && !reconnecting
 
@@ -178,6 +179,7 @@ export function ChatBar({
     clearDraft,
     draftRef,
     focusInput,
+    gatewayConnected,
     loadIntoComposer,
     onCancel,
     onSubmit,
@@ -567,7 +569,14 @@ export function ChatBar({
       const editorText = editorRef.current ? composerPlainText(editorRef.current) : draftRef.current
       const hasLivePayload = editorText.trim().length > 0 || attachments.length > 0
 
+      // Gateway down (a post-boot reconnect keeps the composer editable): don't
+      // silently swallow the Enter. Route a real draft into submitDraft, which
+      // queues it so the auto-drain flushes it the instant the socket reopens.
       if (disabled) {
+        if (hasLivePayload) {
+          submitDraft()
+        }
+
         return
       }
 
