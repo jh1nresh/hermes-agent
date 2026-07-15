@@ -181,9 +181,9 @@ def wait_for_container_ready(
     container: str,
     *,
     deadline_s: float = 30.0,
-    interval_s: float = 0.25,  # noqa: ARG001 — kept for API compat
+    interval_s: float = 0.25,
 ) -> None:
-    """Block until the container has finished s6 cont-init (stage2 + reconcile).
+    """Poll until the container has finished s6 cont-init (stage2 + reconcile).
 
     The readiness signal is ``profile=default`` appearing in
     ``/opt/data/logs/container-boot.log``, which the 02-reconcile-profiles
@@ -192,53 +192,32 @@ def wait_for_container_ready(
     cont-init chain (UID remap, chown, config seeding, skills sync,
     browser discovery, config migration) has run.
 
-    Implementation: a single ``docker exec`` that runs an ``until`` loop
-    *inside* the container, sleeping 0.1s between checks. This replaces
-    the previous N-times-docker-exec polling loop, eliminating (N-1)
-    docker exec fork/connect round-trips and (N-1) host-side sleeps
-    per container.
+    Raises ``TimeoutError`` if the container never becomes ready — much
+    better than a fixed ``time.sleep()`` that either wastes time on fast
+    machines or flakes on slow ones.
 
-    Uses ``stdout=DEVNULL, stderr=DEVNULL`` (instead of capture_output)
-    so the docker daemon doesn't have to manage stdio pipe buffers for
-    the duration of the blocking call. The probe only needs the exit
-    code, not the output.
-
-    Runs as ``user="root"`` because PUID/PGID remap tests change the
-    hermes user's UID during cont-init — ``docker exec -u hermes``
-    would block until the remap completes, creating a deadlock (exec
-    waits for user, user is being remapped as part of cont-init, cont-init
-    is what we're waiting for). root always exists.
-
-    Raises ``TimeoutError`` if the container never becomes ready.
-
-    Note: a previous iteration tried this with ``capture_output=True``
-    and it regressed on CI (+135s). The hypothesis is that the daemon's
-    stdio pipe management for long-lived exec sessions added overhead
-    under 8-way parallelism. This retry uses ``DEVNULL`` to test whether
-    lighter pipe handling avoids that regression.
+    Note: an earlier iteration tried a single blocking ``docker exec``
+    with an in-container ``until`` loop to eliminate polling overhead.
+    That was a net regression on CI: the per-``docker exec`` connection
+    overhead on shared runners (~0.7–1s) is higher than the cost of
+    3–7 quick poll calls (0.27s each), so the blocking approach traded
+    fewer calls for longer per-call duration and lost. The poll loop
+    is kept because it's better suited to CI's docker exec cost profile.
     """
-    probe = (
-        'until grep -q "profile=default" /opt/data/logs/container-boot.log'
-        " 2>/dev/null; do sleep 0.1; done"
+    end = time.monotonic() + deadline_s
+    while time.monotonic() < end:
+        r = docker_exec(
+            container,
+            "sh", "-c",
+            "cat /opt/data/logs/container-boot.log 2>/dev/null",
+            timeout=5,
+        )
+        if r.returncode == 0 and "profile=default" in r.stdout:
+            return
+        time.sleep(interval_s)
+    raise TimeoutError(
+        f"container {container} did not finish cont-init within {deadline_s}s"
     )
-    import subprocess as _sp
-    try:
-        r = _sp.run(
-            ["docker", "exec", "-u", "root", container,
-             "sh", "-c", probe],
-            stdout=_sp.DEVNULL,
-            stderr=_sp.DEVNULL,
-            timeout=int(deadline_s),
-        )
-    except _sp.TimeoutExpired:
-        raise TimeoutError(
-            f"container {container} did not finish cont-init within {deadline_s}s"
-        )
-    if r.returncode != 0:
-        raise TimeoutError(
-            f"container {container} cont-init probe exited {r.returncode} "
-            f"within {deadline_s}s"
-        )
 
 
 def start_container(
