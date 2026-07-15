@@ -246,6 +246,73 @@ def test_queue_promote_interrupt_forwards_to_agent(server):
     assert len(q) == 2
 
 
+def test_queue_promote_idle_session_drains_immediately(server):
+    """Send-now on an idle session must fire the entry, not just reorder it —
+    there's no turn about to unwind and trigger the end-of-turn drain."""
+    sid = "s1"
+    session = _make_session(server, sid, running=False)
+    q = session["agent"].turn_queue
+    q.enqueue("a")
+    b = q.enqueue("b")
+    drained = threading.Event()
+    submitted = {}
+
+    def fake_submit(rid, s, sess, text):
+        submitted["text"] = text
+        drained.set()
+
+    with patch.object(server, "_run_prompt_submit", side_effect=fake_submit), \
+         patch.object(server, "_emit"):
+        resp = server.handle_request({
+            "id": "r1", "method": "session.queue.promote",
+            "params": {"session_id": sid, "entry_id": b.id},
+        })
+        assert resp["result"]["promoted"] is True
+        assert drained.wait(timeout=5), "idle promote should drain immediately"
+
+    assert submitted["text"] == "b"
+    session["agent"].interrupt.assert_not_called()
+
+
+def test_drain_dispatch_failure_requeues_entry_at_head(server):
+    """A drained entry whose dispatch raises must go back to the queue head
+    (same id) instead of being lost — and queue.drained must NOT be emitted,
+    or the client would paint a user turn that never ran."""
+    sid = "s1"
+    session = _make_session(server, sid, running=False)
+    entry = session["agent"].turn_queue.enqueue("precious words", source="queue")
+    events = []
+
+    with patch.object(server, "_run_prompt_submit", side_effect=RuntimeError("boom")), \
+         patch.object(server, "_emit", side_effect=lambda ev, s, p=None: events.append((ev, p))):
+        assert server._drain_queued_prompt("rid", sid, session) is True
+
+    kinds = [ev for ev, _ in events]
+    assert "queue.drained" not in kinds
+    (requeued,) = session["agent"].turn_queue.peek()
+    assert requeued.id == entry.id
+    assert requeued.text == "precious words"
+    assert session["running"] is False
+
+
+def test_interrupt_clears_queue(server):
+    """Stop discards pending next-turn prompts — they'd otherwise fire the
+    instant the turn unwinds, the opposite of what Stop means."""
+    sid = "s1"
+    session = _make_session(server, sid, running=True)
+    session["agent"].turn_queue.enqueue("stale follow-up")
+    session["queued_prompt"] = None
+    session["_run_thread"] = None
+
+    with patch.object(server, "_emit"):
+        server.handle_request({
+            "id": "r1", "method": "session.interrupt",
+            "params": {"session_id": sid},
+        })
+
+    assert len(session["agent"].turn_queue) == 0
+
+
 def test_queue_rpcs_unknown_session(server):
     for method in (
         "session.queue.list",

@@ -27,7 +27,6 @@ interface UseComposerQueueArgs {
   onQueue: ChatBarProps['onQueue']
   queueEditRef: RefObject<QueueEditState | null>
   queueSessionKey: ChatBarProps['queueSessionKey']
-  sessionId: string | null | undefined
 }
 
 /**
@@ -47,8 +46,7 @@ export function useComposerQueue({
   loadIntoComposer,
   onQueue,
   queueEditRef,
-  queueSessionKey,
-  sessionId: _sessionId
+  queueSessionKey
 }: UseComposerQueueArgs) {
   const scope = useComposerScope()
 
@@ -176,10 +174,11 @@ export function useComposerQueue({
     return true
   }, [activeQueueSessionKey, attachments, clearDraft, draftRef, onQueue, scope.attachments])
 
-  // "Send now": promote the entry to the queue head and interrupt the live
-  // turn on the gateway (queue preserved). The gateway drains the promoted
-  // entry the moment the turn unwinds — no client-side send at all. When
-  // idle the gateway drains promoted entries on the same RPC.
+  // "Send now": promote the entry to the queue head on the gateway. While a
+  // turn is live, also interrupt it (queue preserved) — the gateway drains
+  // the promoted entry the moment the turn unwinds. When idle, the gateway
+  // drains the promoted entry immediately on the same RPC. No client-side
+  // send in either case.
   const sendQueuedNow = useCallback(
     (id: string) => {
       if (!activeQueueSessionKey || id === queueEdit?.entryId) {

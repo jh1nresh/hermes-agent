@@ -1931,6 +1931,8 @@ export const zh: Translations = {
     queueSendNext: '下一个',
     queueSend: '发送',
     queueDelete: '删除',
+    queueRejectedTitle: '消息未加入队列',
+    queueRejectedBody: '网关未接受该排队消息。草稿未变 — 请重试。',
     steerPending: '正在引导 — 将在下一个工具步骤生效',
     previewUnavailable: '预览不可用',
     previewLabel: label => `预览 ${label}`,

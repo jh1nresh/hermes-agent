@@ -1755,6 +1755,8 @@ export const en: Translations = {
     queueSendNext: 'Next',
     queueSend: 'Send',
     queueDelete: 'Delete',
+    queueRejectedTitle: 'Message not queued',
+    queueRejectedBody: 'The gateway did not accept the queued message. Your draft is unchanged — try again.',
     steerPending: 'Steering — lands at the next tool step',
     previewUnavailable: 'Preview unavailable',
     previewLabel: label => `Preview ${label}`,

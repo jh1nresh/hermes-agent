@@ -15,7 +15,10 @@
 
 import { atom } from 'nanostores'
 
+import { translateNow } from '@/i18n'
+
 import type { ComposerAttachment } from './composer'
+import { notify } from './notifications'
 
 export type GatewayRequester = <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>
 
@@ -139,6 +142,16 @@ export const enqueueQueuedPrompt = async (
   })
 
   if (result?.status !== 'queued') {
+    // Surface the reject (gateway unreachable, or a session whose agent
+    // isn't built yet → 4010) instead of silently no-oping; the caller
+    // keeps the draft either way, so the words survive.
+    notify({
+      id: 'composer-queue-rejected',
+      kind: 'error',
+      title: translateNow('composer.queueRejectedTitle'),
+      message: translateNow('composer.queueRejectedBody')
+    })
+
     return null
   }
 
@@ -332,7 +345,9 @@ export const addPendingSteer = (key: string | null | undefined, text: string) =>
 
 /** Settle pending steers covered by an applied/dropped gateway event. The
  *  agent concatenates queued-up steers with newlines before injecting, so one
- *  event can cover several pending entries — match by containment. */
+ *  event can cover several pending entries — and each entry can itself be
+ *  multi-line (Cmd+Enter on a multi-line draft), so line-set matching would
+ *  miss it. Match by whole-entry containment in the applied text instead. */
 export const settlePendingSteer = (key: string | null | undefined, text: string) => {
   const sid = sidOf(key)
 
@@ -340,16 +355,15 @@ export const settlePendingSteer = (key: string | null | undefined, text: string)
     return
   }
 
-  const settled = new Set(
-    text
-      .split('\n')
-      .map(line => line.trim())
-      .filter(Boolean)
-  )
+  const applied = text.trim()
 
   writeSteers(
     sid,
-    steersFor(sid).filter(entry => !settled.has(entry.text.trim()))
+    steersFor(sid).filter(entry => {
+      const entryText = entry.text.trim()
+
+      return entryText.length === 0 || !applied.includes(entryText)
+    })
   )
 }
 

@@ -163,5 +163,13 @@ describe('composer-queue (gateway-backed)', () => {
 
       expect(getPendingSteers(SESSION_KEY).map(s => s.text)).toEqual(['stay'])
     })
+
+    it('settles a multi-line steer entry (Cmd+Enter on a multi-line draft)', () => {
+      addPendingSteer(SESSION_KEY, 'line one\nline two')
+
+      settlePendingSteer(SESSION_KEY, 'line one\nline two')
+
+      expect(getPendingSteers(SESSION_KEY)).toEqual([])
+    })
   })
 })

@@ -1446,6 +1446,8 @@ export interface Translations {
     queueSendNext: string
     queueSend: string
     queueDelete: string
+    queueRejectedTitle: string
+    queueRejectedBody: string
     steerPending: string
     previewUnavailable: string
     previewLabel: (label: string) => string

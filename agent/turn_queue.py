@@ -28,10 +28,8 @@ class QueuedTurn:
 
     id: str
     text: str
-    mode: str = "queue"  # "queue" | "interrupt" | "steer"
     transport: Any = None  # pinned transport for the drained turn
     queued_at: float = field(default_factory=time.time)
-    attachments: list = field(default_factory=list)
     # Where the entry came from: "queue" (explicit session.queue.add — the
     # client shows it in a queue panel, not the transcript) or "busy_submit"
     # (a prompt.submit that landed mid-turn — the client already echoed it
@@ -44,9 +42,7 @@ class QueuedTurn:
         return {
             "id": self.id,
             "text": self.text,
-            "mode": self.mode,
             "queued_at": self.queued_at,
-            "attachments": self.attachments,
             "source": self.source,
         }
 
@@ -69,9 +65,7 @@ class TurnQueue:
     def enqueue(
         self,
         text: str,
-        mode: str = "queue",
         transport: Any = None,
-        attachments: list | None = None,
         source: str = "queue",
     ) -> QueuedTurn:
         """Add a prompt to the back of the queue.
@@ -86,30 +80,21 @@ class TurnQueue:
         entry = QueuedTurn(
             id=str(uuid.uuid4()),
             text=text,
-            mode=mode,
             transport=transport,
-            attachments=list(attachments) if attachments else [],
             source=source,
         )
         with self._lock:
             self._entries.append(entry)
         return entry
 
-    def enqueue_front(
-        self,
-        text: str,
-        mode: str = "queue",
-        transport: Any = None,
-        attachments: list | None = None,
-    ) -> QueuedTurn:
-        """Add a prompt to the *front* of the queue (priority send)."""
-        entry = QueuedTurn(
-            id=str(uuid.uuid4()),
-            text=text,
-            mode=mode,
-            transport=transport,
-            attachments=list(attachments) if attachments else [],
-        )
+    def requeue_front(self, entry: QueuedTurn) -> QueuedTurn:
+        """Put a drained entry back at the *front* of the queue.
+
+        Used by the gateway when the turn dispatch for a drained entry raises
+        — the pop already happened, so the entry (same id, so client mirrors
+        stay consistent) is restored to the head for the next drain attempt
+        instead of being silently lost.
+        """
         with self._lock:
             self._entries.insert(0, entry)
         return entry

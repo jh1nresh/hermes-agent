@@ -15,7 +15,7 @@ import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
 import { clearClarifyRequest, setClarifyRequest } from '@/store/clarify'
 import { setSessionCompacting } from '@/store/compaction'
-import { setSessionQueue, settlePendingSteer } from '@/store/composer-queue'
+import { clearPendingSteers, setSessionQueue, settlePendingSteer } from '@/store/composer-queue'
 import { refreshBackgroundProcesses } from '@/store/composer-status'
 import { $gateway } from '@/store/gateway'
 import { dispatchNativeNotification } from '@/store/native-notifications'
@@ -380,6 +380,12 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
         // last item stuck pending/in_progress. Finished lists keep their linger.
         clearActiveSessionTodos(sessionId)
         setSessionCompacting(sessionId, false)
+        // A steer cannot outlive its turn: it was either injected
+        // (steer.applied settled it), dropped by an interrupt
+        // (steer.dropped), or handed back as pending_steer and re-queued as
+        // the next turn by the gateway. Sweep any stragglers so a missed
+        // event can't pin a "Steering…" row forever.
+        clearPendingSteers(sessionId)
 
         flushQueuedDeltas(sessionId)
 

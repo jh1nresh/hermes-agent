@@ -5198,6 +5198,7 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
         # Drain from the agent's TurnQueue (preferred), falling back to the
         # legacy session-dict slot (populated only when no agent existed at
         # enqueue time).
+        entry = None
         queued = None
         if agent is not None and hasattr(agent, "turn_queue"):
             entry = agent.turn_queue.drain()
@@ -5221,15 +5222,6 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
         if queued.get("transport") is not None:
             session["transport"] = queued["transport"]
     _emit_queue_update(sid, session)
-    # Tell clients the drained text is becoming the next user turn so they
-    # can move it from their queue panel into the transcript. `source` lets
-    # them skip painting text they already echoed optimistically
-    # (busy_submit) vs panel-queued entries that were never in the transcript.
-    _emit(
-        "queue.drained",
-        sid,
-        {"text": queued.get("text") or "", "source": queued.get("source") or "queue"},
-    )
     try:
         _run_prompt_submit(rid, sid, session, queued["text"])
     except Exception as exc:
@@ -5240,6 +5232,31 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
         )
         with session["history_lock"]:
             session["running"] = False
+            # The pop already happened but the turn never dispatched — put the
+            # entry back at the head (same id, so client mirrors stay
+            # consistent) instead of silently losing the user's words. The
+            # next drain trigger (end-of-turn, queue.add, promote) retries it.
+            if entry is not None:
+                agent.turn_queue.requeue_front(entry)
+            else:
+                session["queued_prompt"] = {
+                    "text": queued.get("text"),
+                    "transport": queued.get("transport"),
+                }
+        _emit_queue_update(sid, session)
+        return True
+    # Tell clients the drained text is becoming the next user turn so they
+    # can move it from their queue panel into the transcript. Emitted only
+    # after a successful dispatch — a failed dispatch requeues the entry
+    # above, and painting a user row for a turn that never ran would lie.
+    # `source` lets clients skip painting text they already echoed
+    # optimistically (busy_submit) vs panel-queued entries that were never
+    # in the transcript.
+    _emit(
+        "queue.drained",
+        sid,
+        {"text": queued.get("text") or "", "source": queued.get("source") or "queue"},
+    )
     return True
 
 
@@ -8236,13 +8253,11 @@ def _(rid, params: dict) -> dict:
         session["_turn_cancel_requested"] = True
         # Stop discards pending next-turn prompts too (they'd otherwise fire
         # the instant the turn unwinds — the opposite of what Stop means).
-        # `keep_queue` opts out for the promote-then-interrupt "send queued
-        # entry now" flow, where the queued entry must survive to be drained
-        # as the next turn.
-        if not params.get("keep_queue"):
-            agent = (session or {}).get("agent")
-            if agent is not None and hasattr(agent, "turn_queue"):
-                agent.turn_queue.clear()
+        # The "send queued entry now" flow is unaffected: session.queue.promote
+        # interrupts via agent.interrupt() directly, never through this RPC.
+        agent = (session or {}).get("agent")
+        if agent is not None and hasattr(agent, "turn_queue"):
+            agent.turn_queue.clear()
         session["queued_prompt"] = None
     _emit_queue_update(str(params.get("session_id", "")), session or {})
     if not run_thread_alive:
@@ -8611,7 +8626,9 @@ def _(rid, params: dict) -> dict:
 
     With ``interrupt=True``, also interrupts the live turn (keeping the
     queue intact) so the promoted entry fires as soon as the turn unwinds —
-    the "send now" gesture.
+    the "send now" gesture. On an idle session there is no turn to wait for:
+    the promoted entry is drained immediately (same as an idle
+    session.queue.add), so "send now" never silently no-ops.
     """
     entry_id = str(params.get("entry_id") or "")
     if not entry_id:
@@ -8635,6 +8652,17 @@ def _(rid, params: dict) -> dict:
                 agent.interrupt()
             except Exception:
                 pass
+    # Idle session → nothing will unwind and trigger the end-of-turn drain,
+    # so fire it now (in a thread; the drain runs a whole turn and this RPC
+    # must return promptly). Also the retry path for a head entry stranded
+    # by a failed drain attempt (which requeues it and leaves the session
+    # idle).
+    if promoted and not session.get("running"):
+        threading.Thread(
+            target=_drain_queued_prompt,
+            args=(rid, sid, session),
+            daemon=True,
+        ).start()
     return _ok(rid, {"promoted": promoted})
 
 
@@ -9178,8 +9206,8 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
     # steer.applied arrives, so the transcript reflects what the model
     # actually saw, when it saw it.
     try:
-        agent._on_steer_event = lambda kind, text: _emit(
-            f"steer.{kind}", sid, {"text": text}
+        agent._on_steer_event = lambda kind, steer_text: _emit(
+            f"steer.{kind}", sid, {"text": steer_text}
         )
     except Exception:
         pass

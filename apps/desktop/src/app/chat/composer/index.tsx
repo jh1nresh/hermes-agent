@@ -204,8 +204,7 @@ export function ChatBar({
     loadIntoComposer,
     onQueue,
     queueEditRef,
-    queueSessionKey,
-    sessionId
+    queueSessionKey
   })
 
   const statusStackVisible = queuedPrompts.length > 0 || statusPresent
