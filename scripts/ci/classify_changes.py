@@ -56,7 +56,11 @@ def _is_docs(p: str) -> bool:
 
 
 def _py_irrelevant(p: str) -> bool:
-    return _is_docs(p) or p in _ROOT_NPM or p.startswith(_PY_SKIP) or p.startswith(_DOCKER_META)
+    # Root npm manifests are NOT python-irrelevant: several Python invariant
+    # tests read package.json / package-lock.json (tap-cluster, electron pin,
+    # lazy-deps, lockfile churn), so a lockfile-only change can break the Python
+    # suite. Omitting them here is what let #63970 merge green then redden main.
+    return _is_docs(p) or p.startswith(_PY_SKIP) or p.startswith(_DOCKER_META)
 
 
 def _is_scan(p: str) -> bool:

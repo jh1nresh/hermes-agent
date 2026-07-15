@@ -50,8 +50,10 @@ CASES = {
     "uv.lock → python": (["uv.lock"], _lanes(python=True)),
     "ts package → frontend": (["apps/desktop/src/app.tsx"], _lanes(frontend=True)),
     "ui-tui → frontend": (["ui-tui/src/entry.ts"], _lanes(frontend=True)),
-    # Lockfile bump shifts every TS package's tree, but not the Python suite.
-    "root lockfile → frontend, not python": (["package-lock.json"], _lanes(frontend=True)),
+    # Lockfile bump shifts every TS package's tree AND feeds Python invariant
+    # tests that read package-lock.json (tap-cluster, electron pin, lazy-deps).
+    "root lockfile → frontend + python": (["package-lock.json"], _lanes(frontend=True, python=True)),
+    "root package.json → frontend + python": (["package.json"], _lanes(frontend=True, python=True)),
     "website → site": (["website/docs/intro.md"], _lanes(site=True)),
     # SKILL.md reads like docs, but the skill-doc tests read skills/, so a
     # skill edit must still run Python.
