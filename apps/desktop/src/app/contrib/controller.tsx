@@ -21,6 +21,7 @@ import {
   registerLayoutResetHandler,
   registerPaneCloser,
   registerPaneOpener,
+  registerPaneOpenGetter,
   resetLayoutTree,
   revealTreePane,
   setPaneCollapsed,
@@ -468,6 +469,7 @@ function bindPaneCollapse(
   $open.listen(isOpen => setPaneCollapsed(paneId, !isOpen))
   registerPaneCloser(paneId, close)
   registerPaneOpener(paneId, open)
+  registerPaneOpenGetter(paneId, () => $open.get())
 }
 
 // SIDES have one source of truth: the TREE. The legacy $panesFlipped flag is
