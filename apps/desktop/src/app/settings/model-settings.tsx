@@ -316,15 +316,6 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
     return moa.presets[selectedMoaPreset] || moa.presets[moa.default_preset] || Object.values(moa.presets)[0] || null
   }, [moa, selectedMoaPreset])
 
-  // Mirror of `moa` so inline edits compute the next state purely (outside the
-  // setState updater) and hand it straight to the debounced autosave.
-  const moaRef = useRef<MoaConfigResponse | null>(null)
-
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
-  useEffect(() => {
-    moaRef.current = moa
-  }, [moa])
-
   const moaSaveTimer = useRef<number | null>(null)
 
   useEffect(
@@ -379,23 +370,23 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
 
   const updateMoaPreset = useCallback(
     (updater: (preset: NonNullable<typeof currentMoaPreset>) => NonNullable<typeof currentMoaPreset>) => {
-      const prev = moaRef.current
-
-      if (!prev || !selectedMoaPreset || !prev.presets[selectedMoaPreset]) {
-        return
-      }
-
-      const next: MoaConfigResponse = {
-        ...prev,
-        presets: {
-          ...prev.presets,
-          [selectedMoaPreset]: updater(prev.presets[selectedMoaPreset])
+      setMoa(prev => {
+        if (!prev || !selectedMoaPreset || !prev.presets[selectedMoaPreset]) {
+          return prev
         }
-      }
 
-      moaRef.current = next
-      setMoa(next)
-      scheduleMoaSave(next)
+        const next: MoaConfigResponse = {
+          ...prev,
+          presets: {
+            ...prev.presets,
+            [selectedMoaPreset]: updater(prev.presets[selectedMoaPreset])
+          }
+        }
+
+        scheduleMoaSave(next)
+
+        return next
+      })
     },
     [scheduleMoaSave, selectedMoaPreset]
   )

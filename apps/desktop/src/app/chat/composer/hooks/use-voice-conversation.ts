@@ -45,31 +45,22 @@ export function useVoiceConversation({
   const responseIdRef = useRef<string | null>(null)
   const spokenSourceLengthRef = useRef(0)
   const speechBufferRef = useRef('')
+
+  // Props/state mirrored into refs synchronously during render (NOT via useEffect)
+  // so callbacks that fire after an await read values that are current as of the
+  // last render, not lagged by one effect tick. The atom-mirrored-ref eslint rule
+  // bans useEffect-based mirroring; these synchronous writes are the correct
+  // pattern for props that must be read inside stable callbacks.
   const enabledRef = useRef(enabled)
   const mutedRef = useRef(muted)
   const busyRef = useRef(busy)
-  const statusRef = useRef<ConversationStatus>('idle')
+  const statusRef = useRef<ConversationStatus>(status)
   const wasEnabledRef = useRef(enabled)
 
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
-  useEffect(() => {
-    enabledRef.current = enabled
-  }, [enabled])
-
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
-  useEffect(() => {
-    mutedRef.current = muted
-  }, [muted])
-
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
-  useEffect(() => {
-    busyRef.current = busy
-  }, [busy])
-
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
-  useEffect(() => {
-    statusRef.current = status
-  }, [status])
+  enabledRef.current = enabled
+  mutedRef.current = muted
+  busyRef.current = busy
+  statusRef.current = status
 
   const clearTurnTimeout = () => {
     if (turnTimeoutRef.current) {
@@ -331,7 +322,7 @@ export function useVoiceConversation({
 
   // Drive the loop: after a voice-submitted turn, speak stable chunks as the
   // assistant stream grows. Otherwise start listening when idle between turns.
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
+  // eslint-disable-next-line no-restricted-syntax -- staging buffers + state flags, not atom mirrors
   useEffect(() => {
     if (!enabled || muted) {
       return
@@ -389,7 +380,7 @@ export function useVoiceConversation({
     }
   }, [busy, consumePendingResponse, enabled, muted, pendingResponse, speak, startListening, status])
 
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
+  // eslint-disable-next-line no-restricted-syntax -- prev-value tracking for edge detection, not atom mirror
   useEffect(() => {
     if (enabled && !wasEnabledRef.current) {
       void start()
