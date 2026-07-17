@@ -1,14 +1,14 @@
 ---
-title: "Comfyui"
+title: "Comfyui — ComfyUI image/video/audio generation — local or Comfy Cloud"
 sidebar_label: "Comfyui"
-description: "Generate images, video, and audio with ComfyUI — install, launch, manage nodes/models, run workflows with parameter injection"
+description: "ComfyUI image/video/audio generation — local or Comfy Cloud"
 ---
 
 {/* This page is auto-generated from the skill's SKILL.md by website/scripts/generate-skill-docs.py. Edit the source SKILL.md, not this page. */}
 
 # Comfyui
 
-Generate images, video, and audio with ComfyUI — install, launch, manage nodes/models, run workflows with parameter injection. Uses the official comfy-cli for lifecycle and direct REST/WebSocket API for execution.
+ComfyUI image/video/audio generation — local or Comfy Cloud.
 
 ## Skill metadata
 
@@ -80,30 +80,27 @@ SDXL inpaint, ESRGAN upscale, AnimateDiff video, Wan T2V. See
 
 ## Route First: Comfy Cloud MCP vs. This Skill
 
-Hermes can also drive Comfy Cloud through the `comfy-cloud` MCP server from
-the Nous-approved catalog (`hermes mcp install comfy-cloud`) — a hosted
-remote server with browser OAuth sign-in, no API keys to copy around, and no
-local compute. Decide which surface to use **before** running anything from
-this skill:
+For **remote/cloud** generation, prefer the `comfy-cloud` MCP server from
+the Nous-approved catalog over this skill's API-key path:
 
-1. **Default to the Comfy Cloud MCP.** It is the easiest path — one-command
-   install, OAuth on first connect, nothing to run locally. Recommend it
-   especially when the machine is a Mac or the local GPU has less than
-   24 GB VRAM.
-2. **Offer a choice only when local is genuinely viable**: the local GPU has
-   24 GB+ VRAM AND a local ComfyUI setup already exists. Then ask the user
-   whether they want to run Comfy locally or on cloud.
-3. **If the user chooses local**, remind them it takes a bit longer, and use
-   this skill to handle the rest — it will find or set up the ComfyUI
-   instance (`comfyui_setup.sh`) and install any missing models/nodes
-   (`auto_fix_deps.py`) if they don't have them already.
-4. **The MCP and this skill are alternatives, not layers.** Pick one for the
-   task at hand; don't mix MCP tool calls with this skill's CLI/REST scripts
-   against the same job.
+```bash
+hermes mcp install comfy-cloud   # browser OAuth on first connect, no API keys
+```
 
-The API-key Cloud path in this skill (**Path A** below) remains the right
-choice for headless / CI / scripted use where a browser OAuth flow isn't
-available.
+Hosted, zero local compute, a curated tool subset enabled by default
+(`hermes mcp configure comfy-cloud` to adjust). Its tool schemas add ~10k
+tokens to every request while enabled — right for regular Comfy work, heavy
+for a one-off generation.
+
+Use this skill instead when:
+
+- The user wants to run ComfyUI **locally** — this skill handles setup
+  (`comfyui_setup.sh`), models/nodes (`auto_fix_deps.py`), and execution.
+- **Headless / CI / scripted** cloud use where browser OAuth isn't
+  available — **Path A** below (API key).
+
+Pick one surface per task; don't mix MCP tool calls with this skill's
+CLI/REST scripts against the same job.
 
 ## Architecture: Two Layers
 
@@ -261,15 +258,10 @@ The scripts emit JSON to stdout describing every output file:
 
 ## Setup & Onboarding
 
-When a user asks to set up ComfyUI, **the FIRST thing to do is ask whether
-they want Comfy Cloud (hosted, zero install, API key) or Local (install
-ComfyUI on their machine)**. Don't start running install commands or hardware
-checks until they've answered.
-
-(If you haven't already routed between the Comfy Cloud MCP and this skill,
-do that first — see **Route First** above. Interactive cloud users are
-usually better served by `hermes mcp install comfy-cloud` than by this
-skill's API-key path.)
+Route first (see **Route First** above) — interactive cloud users are usually
+better served by `hermes mcp install comfy-cloud` than by this skill. If the
+user is setting up *this skill*, **ask whether they want Comfy Cloud
+(API key) or Local before running any install commands or hardware checks**.
 
 **Official docs:** https://docs.comfy.org/installation
 **CLI docs:** https://docs.comfy.org/comfy-cli/getting-started
@@ -278,20 +270,14 @@ skill's API-key path.)
 
 ### Step 0: Ask Local vs Cloud (ALWAYS FIRST)
 
-Suggested script:
+Offer the choice plainly:
 
-> "Do you want to run ComfyUI locally on your machine, or use Comfy Cloud?
->
-> - **Comfy Cloud** — hosted on RTX 6000 Pro GPUs, all common models pre-installed,
->   zero setup. Requires an API key (paid subscription required to actually run
->   workflows; free tier is read-only). Best if you don't have a capable GPU.
-> - **Local** — free, but your machine MUST meet the hardware requirements:
->   - NVIDIA GPU with **≥6 GB VRAM** (≥8 GB for SDXL, ≥12 GB for Flux/video), OR
->   - AMD GPU with ROCm support (Linux), OR
->   - Apple Silicon Mac (M1+) with **≥16 GB unified memory** (≥32 GB recommended).
->   - Intel Macs and machines with no GPU will NOT work — use Cloud instead.
->
-> Which would you like?"
+- **Comfy Cloud** — hosted (RTX 6000 Pro), common models pre-installed, zero
+  setup. Needs an API key; paid subscription required to run workflows
+  (free tier is read-only). Best without a capable GPU.
+- **Local** — free, but requires: NVIDIA ≥6 GB VRAM (≥8 GB SDXL, ≥12 GB
+  Flux/video), OR AMD ROCm (Linux), OR Apple Silicon ≥16 GB unified
+  (≥32 GB recommended). Intel Macs / no-GPU machines will NOT work.
 
 Routing:
 
@@ -380,24 +366,14 @@ required for `/api/prompt`, `/api/upload/*`, `/api/view`, etc.
 
 ### Path B: ComfyUI Desktop (Windows / macOS)
 
-One-click installer for non-technical users. Currently Beta.
-
-**Docs:** https://docs.comfy.org/installation/desktop
-- **Windows (NVIDIA):** https://download.comfy.org/windows/nsis/x64
-- **macOS (Apple Silicon):** https://comfy.org
-
-Linux is **not supported** for Desktop — use Path D.
-
----
+One-click Beta installer for non-technical users. Not available on Linux —
+use Path D. **Docs:** https://docs.comfy.org/installation/desktop
 
 ### Path C: ComfyUI Portable (Windows Only)
 
-**Docs:** https://docs.comfy.org/installation/comfyui_portable_windows
-
 Download from https://github.com/comfyanonymous/ComfyUI/releases, extract,
 run `run_nvidia_gpu.bat`. Update via `update/update_comfyui_stable.bat`.
-
----
+**Docs:** https://docs.comfy.org/installation/comfyui_portable_windows
 
 ### Path D: comfy-cli (All Platforms — Recommended for Agents)
 
@@ -463,26 +439,15 @@ python main.py
 ### Post-Install: Download Models
 
 ```bash
-# SDXL (general purpose, ~6.5 GB)
+# SDXL (general purpose, ~6.5 GB). Same pattern for SD 1.5 / Flux fp8 —
+# any direct HuggingFace .safetensors URL works.
 comfy model download \
   --url "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors" \
   --relative-path models/checkpoints
 
-# SD 1.5 (lighter, ~4 GB, good for 6 GB cards)
-comfy model download \
-  --url "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors" \
-  --relative-path models/checkpoints
-
-# Flux Dev fp8 (smaller variant, ~12 GB)
-comfy model download \
-  --url "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors" \
-  --relative-path models/checkpoints
-
-# CivitAI (set token first):
-comfy model download \
-  --url "https://civitai.com/api/download/models/128713" \
-  --relative-path models/checkpoints \
-  --set-civitai-api-token "YOUR_TOKEN"
+# CivitAI needs a token:
+comfy model download --url "https://civitai.com/api/download/models/128713" \
+  --relative-path models/checkpoints --set-civitai-api-token "YOUR_TOKEN"
 ```
 
 List installed: `comfy model list`.
