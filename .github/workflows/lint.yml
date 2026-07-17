@@ -177,29 +177,19 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Require ci-reviewed label
-        id: label-check
+      - name: Fetch ci-reviewed label
+        id: labels
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: ./.github/actions/gh-pr-labels
+        with:
+          pr: ${{ github.event.pull_request.number }}
+          required-label: ci-reviewed
+      - name: Require ci-reviewed label
+        id: label-check
         run: |
           set -euo pipefail
-          PR="${{ github.event.pull_request.number }}"
-          # Retry the label fetch: a transient API blip must not read as
-          # "label absent" (which hard-fails the job below on a PR that
-          # actually carries the label).
-          LABELS=""
-          for i in 1 2 3; do
-            if LABELS=$(gh pr view "$PR" --json labels --jq '.labels[].name'); then
-              break
-            fi
-            if [ "$i" = 3 ]; then
-              echo "::error::Could not fetch PR labels after 3 attempts (GitHub API failure — re-run this job)."
-              exit 1
-            fi
-            echo "::warning::gh pr view failed (attempt $i); retrying in 10s"
-            sleep 10
-          done
-          if echo "$LABELS" | grep -Fxq 'ci-reviewed'; then
+          if [ "${{ steps.labels.outputs.has-label }}" = "true" ]; then
             echo "reviewed=true" >> "$GITHUB_OUTPUT"
             echo "ci-reviewed label present."
             exit 0

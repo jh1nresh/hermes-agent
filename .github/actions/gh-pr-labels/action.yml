@@ -1,0 +1,80 @@
+name: Fetch PR labels (retried)
+description: >-
+  Fetch a PR's labels via `gh pr view`, retrying on transient GitHub API
+  failures so a network blip is never misread as "label absent". Distinguishes
+  an API failure (hard error after N attempts) from a genuinely-missing label
+  (clean output that simply doesn't contain the required label), and exposes a
+  ready-made `has-label` output for the required-label gate.
+
+inputs:
+  pr:
+    description: PR number to read labels from.
+    required: true
+  required-label:
+    description: >-
+      Label to check for. When set, the `has-label` output is 'true'/'false'.
+      When empty, only `labels` is populated.
+    required: false
+    default: ""
+  attempts:
+    description: Max attempts before treating it as a hard API failure.
+    required: false
+    default: "3"
+  delay:
+    description: Seconds to wait between attempts.
+    required: false
+    default: "10"
+
+outputs:
+  labels:
+    description: Newline-separated list of label names on the PR.
+    value: ${{ steps.fetch.outputs.labels }}
+  has-label:
+    description: >-
+      'true' if `required-label` is present, 'false' otherwise. Empty when
+      no `required-label` was supplied.
+    value: ${{ steps.fetch.outputs.has-label }}
+
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: bash
+      env:
+        _PR: ${{ inputs.pr }}
+        _REQUIRED: ${{ inputs.required-label }}
+        _ATTEMPTS: ${{ inputs.attempts }}
+        _DELAY: ${{ inputs.delay }}
+      run: |
+        set -euo pipefail
+        # Retry the label fetch: a transient API blip must not read as
+        # "label absent" (which would hard-fail the required-label gate on a
+        # PR that actually carries the label). A hard API failure after all
+        # attempts is a distinct exit-1 (re-runnable); a clean fetch that
+        # simply lacks the label is a normal 'false'.
+        labels=""
+        for i in $(seq 1 "$_ATTEMPTS"); do
+          if labels=$(gh pr view "$_PR" --json labels --jq '.labels[].name'); then
+            break
+          fi
+          if [ "$i" = "$_ATTEMPTS" ]; then
+            echo "::error::Could not fetch PR labels after $_ATTEMPTS attempts (GitHub API failure — re-run this job)."
+            exit 1
+          fi
+          echo "::warning::gh pr view failed (attempt $i); retrying in ${_DELAY}s"
+          sleep "$_DELAY"
+        done
+
+        {
+          echo "labels<<__HERMES_LABELS__"
+          echo "$labels"
+          echo "__HERMES_LABELS__"
+        } >> "$GITHUB_OUTPUT"
+
+        if [ -n "$_REQUIRED" ]; then
+          if echo "$labels" | grep -Fxq "$_REQUIRED"; then
+            echo "has-label=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-label=false" >> "$GITHUB_OUTPUT"
+          fi
+        fi

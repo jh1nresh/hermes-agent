@@ -134,8 +134,13 @@ ENV npm_config_install_links=false
 
 RUN npm install --prefer-offline --no-audit --fetch-retries=5 && \
     for i in 1 2 3; do \
-        npx playwright install --with-deps chromium --only-shell && break || \
-        { [ "$i" = 3 ] && exit 1; echo "playwright install failed (attempt $i); retrying in 10s"; sleep 10; }; \
+        npx playwright install --with-deps chromium --only-shell && break; \
+        if [ "$i" = 3 ]; then \
+            echo "playwright install failed after 3 attempts" >&2; \
+            exit 1; \
+        fi; \
+        echo "playwright install failed (attempt $i); retrying in 10s"; \
+        sleep 10; \
     done && \
     npm cache clean --force
 

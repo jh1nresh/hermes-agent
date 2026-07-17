@@ -238,27 +238,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch mcp-catalog-reviewed label
+        id: labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: ./.github/actions/gh-pr-labels
+        with:
+          pr: ${{ github.event.pull_request.number }}
+          required-label: mcp-catalog-reviewed
+
       - name: Require explicit MCP catalog review label
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          PR="${{ github.event.pull_request.number }}"
-          # Retry the label fetch so an API blip doesn't read as "label
-          # absent" and falsely block the PR.
-          LABELS=""
-          for i in 1 2 3; do
-            if LABELS=$(gh pr view "$PR" --json labels --jq '.labels[].name'); then
-              break
-            fi
-            if [ "$i" = 3 ]; then
-              echo "::error::Could not fetch PR labels after 3 attempts (GitHub API failure — re-run this job)."
-              exit 1
-            fi
-            echo "::warning::gh pr view failed (attempt $i); retrying in 10s"
-            sleep 10
-          done
-          if echo "$LABELS" | grep -Fxq 'mcp-catalog-reviewed'; then
+          if [ "${{ steps.labels.outputs.has-label }}" = "true" ]; then
             echo "MCP catalog review label present."
             exit 0
           fi
