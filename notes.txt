@@ -261,3 +261,52 @@ duck-typed access.
 
 all 190 are ty being unable to track either cross-module attribute init
 (186) or duck-typed hasattr-guarded access (4). no logic bugs found.
+
+### remaining 6 unresolved-attribute (post class-level annotation fix)
+
+1. **line 2162** (`object.function` ×2): duck-typed access to OpenAI SDK
+   `ChatCompletionMessageToolCall` objects. `hasattr` guard makes it safe.
+   ty can't infer the list element type through `hasattr`. not a bug.
+
+2. **lines 3586-3587** (`iteration_budget.used` / `.max_total`): `iteration_budget`
+   is `Optional[IterationBudget]` but `init_agent` always sets it to a non-None
+   value (`iteration_budget or IterationBudget(max_iterations)`). the annotation
+   says `| None` but the code guarantees non-None at runtime. not a bug — but
+   the annotation could be tightened to just `IterationBudget` (without Optional).
+
+3. **lines 4677 + 4799** (`_anthropic_client.close()`): `_anthropic_client` is
+   `Any | None` — could be None if the anthropic path was never taken. but both
+   call sites are wrapped in `try/except Exception: pass`, so even if it IS None,
+   the AttributeError is caught. safe.
+
+---
+
+## plugins/platforms/discord/adapter.py — unresolved-attribute analysis (269 errors)
+
+### root cause: ty resolving the wrong Python environment
+
+the `.venv` directory (created by `uv run` earlier) contained Python 3.13 with
+NO dependencies installed. ty auto-discovers `.venv` and uses it for module
+resolution — so it couldn't find `discord.py`, `aiohttp`, etc., producing 254
+`Module 'discord' has no member X` errors.
+
+the actual dependencies are installed in the nix develop environment
+(Python 3.12, all deps in site-packages). removing the empty `.venv` made ty
+fall back to the system/nix python, resolving all 254 import errors instantly.
+
+**fix:** `rm -rf .venv` (it was a stray artifact, not a real venv).
+also set `python-version = "3.12"` in `[tool.ty.environment]` to match the
+nix env, with a comment explaining why.
+
+**impact:** 4,422 → 3,385 diagnostics (−1,037) from this single fix.
+
+### remaining 122 discord errors (post-fix)
+
+after ty could resolve discord.py:
+- 17 `not defined on None` — `self._client` (Optional[commands.Bot]) accessed
+  before ty can prove it's non-None. all are in event handlers called after
+  the bot is ready. not bugs, but could benefit from `assert self._client is not None`
+  guards for type narrowing.
+- ~100 remaining are real type-checking errors from ty now being able to
+  see discord.py's actual types (mismatched args, wrong attribute access, etc.)
+  these need individual triage.

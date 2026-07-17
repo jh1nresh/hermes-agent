@@ -366,7 +366,8 @@ markers = [
 addopts = "-m 'not integration'"
 
 [tool.ty.environment]
-python-version = "3.13"
+# Match requires-python floor (>=3.11).
+python-version = "3.11"
 
 [tool.ty.rules]
 unknown-argument = "warn"

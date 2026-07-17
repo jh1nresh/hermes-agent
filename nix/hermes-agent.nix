@@ -9,6 +9,7 @@
   stdenv,
   makeWrapper,
   callPackage,
+  python311,
   python312,
   nodejs_22,
   electron,
@@ -37,15 +38,28 @@
 }:
 let
   nodejs = nodejs_22;
+
   mkHermesVenv =
-    extraDependencyGroups:
+    {
+      extraDependencyGroups,
+      python ? null,
+    }:
     callPackage ./python.nix {
-      inherit uv2nix pyproject-nix pyproject-build-systems;
+      inherit
+        uv2nix
+        pyproject-nix
+        pyproject-build-systems
+        python
+        ;
       pythonSrc = hermesNpmLib.pythonSrc;
       dependency-groups = [ "all" ] ++ extraDependencyGroups;
     };
 
-  hermesVenv = (mkHermesVenv extraDependencyGroups).venv;
+  hermesVenv =
+    (mkHermesVenv {
+      inherit extraDependencyGroups;
+      python = python312;
+    }).venv;
 
   hermesNpmLib = callPackage ./lib.nix {
     inherit npm-lockfile-fix nodejs;
@@ -61,8 +75,7 @@ let
 
   bundledSkills = lib.cleanSourceWith {
     src = ../skills;
-    filter =
-      path: _type: !(lib.hasInfix "/index-cache/" path) && !(lib.hasInfix "/__pycache__/" path);
+    filter = path: _type: !(lib.hasInfix "/index-cache/" path) && !(lib.hasInfix "/__pycache__/" path);
   };
 
   # Optional skills are NOT in the wheel (pythonSrc excludes them, see
@@ -70,8 +83,7 @@ let
   # same mechanism Homebrew packaging uses.
   bundledOptionalSkills = lib.cleanSourceWith {
     src = ../optional-skills;
-    filter =
-      path: _type: !(lib.hasInfix "/index-cache/" path) && !(lib.hasInfix "/__pycache__/" path);
+    filter = path: _type: !(lib.hasInfix "/index-cache/" path) && !(lib.hasInfix "/__pycache__/" path);
   };
 
   # Import bundled plugins (memory, context_engine, platforms/*).  Keeping
@@ -224,8 +236,13 @@ stdenv.mkDerivation (finalAttrs: {
   '';
 
   passthru =
+    python:
     let
-      devPython = (mkHermesVenv (extraDependencyGroups ++ [ "dev" ])).editableVenv;
+      devPython =
+        (mkHermesVenv ({
+          extraDependencyGroups = extraDependencyGroups ++ [ "dev" ];
+          python = python311;
+        })).editableVenv;
     in
     {
       inherit
