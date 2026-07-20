@@ -278,6 +278,83 @@ describe('usePromptActions /title', () => {
   })
 })
 
+describe('usePromptActions /compress', () => {
+  beforeEach(() => {
+    setSessions(() => [sessionInfo()])
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('calls session.compress (not slash.exec) and replaces the transcript from the response', async () => {
+    // Seed a long-looking transcript so we can prove /compress swaps it out
+    // for the post-compress history the RPC returns — not just prints a line.
+    $messages.set([
+      { id: 'm1', parts: [textPart('old message one')], role: 'user', timestamp: 0 },
+      { id: 'm2', parts: [textPart('old message two')], role: 'assistant', timestamp: 0 },
+      { id: 'm3', parts: [textPart('old message three')], role: 'user', timestamp: 0 },
+      { id: 'm4', parts: [textPart('old message four')], role: 'assistant', timestamp: 0 }
+    ])
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.compress') {
+        return {
+          removed: 2,
+          status: 'compressed',
+          summary: {
+            headline: '✓ compressed 4 → 2 messages',
+            token_line: '~8.2k → ~2.1k tok'
+          },
+          messages: [
+            { role: 'user', content: 'summarized context' },
+            { role: 'assistant', content: 'sure, here is the summary' }
+          ]
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let handle: HarnessHandle | null = null
+    await actRender(<Harness onReady={h => (handle = h)} refreshSessions={vi.fn(async () => undefined)} requestGateway={requestGateway} />)
+
+    await handle!.submitText('/compress')
+
+    // Routes through the dedicated session.compress RPC with the runtime id —
+    // NOT slash.exec, which only returns a summary string and leaves stale
+    // bubbles on screen (the bug this fixes).
+    expect(requestGateway).toHaveBeenCalledWith('session.compress', expect.objectContaining({ session_id: RUNTIME_SESSION_ID }))
+    expect(requestGateway).not.toHaveBeenCalledWith('slash.exec', expect.anything())
+
+    // The transcript was replaced with the post-compress history, so the old
+    // messages are gone and only the summarized pair remains.
+    const messages = $messages.get()
+    expect(messages).toHaveLength(2)
+    expect(messages.every(m => !m.parts.some(p => 'text' in p && p.text.includes('old message')))).toBe(true)
+  })
+
+  it('forwards a focus topic arg as focus_topic to session.compress', async () => {
+    $messages.set([{ id: 'm1', parts: [textPart('ctx')], role: 'user', timestamp: 0 }])
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.compress') {
+        return { removed: 0, status: 'aborted', summary: { headline: 'nothing to compress', noop: true } } as never
+      }
+
+      return {} as never
+    })
+
+    let handle: HarnessHandle | null = null
+    await actRender(<Harness onReady={h => (handle = h)} refreshSessions={vi.fn(async () => undefined)} requestGateway={requestGateway} />)
+
+    await handle!.submitText('/compress the deployment bug')
+
+    expect(requestGateway).toHaveBeenCalledWith('session.compress', expect.objectContaining({ focus_topic: 'the deployment bug' }))
+  })
+})
+
 describe('usePromptActions slash.exec dispatch payloads', () => {
   afterEach(() => {
     cleanup()

@@ -478,6 +478,7 @@ export function usePromptActions({
     refreshSessions,
     requestGateway,
     resumeStoredSession,
+    setMessages,
     startFreshSessionDraft,
     submitPromptText
   })

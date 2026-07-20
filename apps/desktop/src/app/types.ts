@@ -1,7 +1,7 @@
 import type * as React from 'react'
 
 import type { ChatMessage } from '@/lib/chat-messages'
-import type { UsageStats } from '@/types/hermes'
+import type { SessionMessage, UsageStats } from '@/types/hermes'
 
 export interface ContextSuggestion {
   text: string
@@ -66,6 +66,27 @@ export interface SessionTitleResponse {
   // to be applied on the first turn (see tui_gateway session.title handler).
   pending?: boolean
   session_key?: string
+}
+
+/** Response from the `session.compress` RPC. `messages` is the post-compress
+ *  history (same shape `session.resume` returns), so the desktop can replace
+ *  its transcript from it rather than leaving stale bubbles on screen. `summary`
+ *  carries the human-readable "compressed N → M messages" feedback line. */
+export interface SessionCompressResponse {
+  after_messages?: number
+  after_tokens?: number
+  before_messages?: number
+  before_tokens?: number
+  messages?: SessionMessage[]
+  removed?: number
+  status?: string
+  summary?: {
+    aborted?: boolean
+    headline?: string
+    noop?: boolean
+    note?: null | string
+    token_line?: string
+  }
 }
 
 export interface HandoffRequestResponse {

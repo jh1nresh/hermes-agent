@@ -73,6 +73,22 @@ describe('desktop slash command curation', () => {
     expect(resolveDesktopCommand('/browser')?.args).toBe(true)
   })
 
+  it('routes /compress through a desktop action that calls session.compress', () => {
+    // /compress mutates the live session history server-side, so it must call
+    // the session.compress RPC directly (like the TUI) and replace the
+    // transcript from the response — not go through slash.exec, which only
+    // returns a summary string and leaves stale bubbles on screen.
+    expect(resolveDesktopCommand('/compress')?.surface).toEqual({ kind: 'action', action: 'compress' })
+    expect(resolveDesktopCommand('/compress')?.args).toBe(true)
+    expect(isDesktopSlashCommand('/compress')).toBe(true)
+    expect(isDesktopSlashSuggestion('/compress')).toBe(true)
+    expect(desktopSlashUnavailableMessage('/compress')).toBeNull()
+    // /compact is an alias — executes but stays out of the popover.
+    expect(resolveDesktopCommand('/compact')?.surface).toEqual({ kind: 'action', action: 'compress' })
+    expect(isDesktopSlashCommand('/compact')).toBe(true)
+    expect(isDesktopSlashSuggestion('/compact')).toBe(false)
+  })
+
   it('routes /journey (and aliases) to the memory graph overlay action', () => {
     expect(resolveDesktopCommand('/journey')?.surface).toEqual({ kind: 'action', action: 'journey' })
     expect(resolveDesktopCommand('/memory-graph')?.surface).toEqual({ kind: 'action', action: 'journey' })

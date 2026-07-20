@@ -2,7 +2,7 @@ import { type MutableRefObject, useCallback } from 'react'
 
 import { getProfiles } from '@/hermes'
 import type { Translations } from '@/i18n'
-import { type ChatMessage } from '@/lib/chat-messages'
+import { type ChatMessage, toChatMessages } from '@/lib/chat-messages'
 import { parseCommandDispatch, parseSlashCommand, sessionTitle } from '@/lib/chat-runtime'
 import {
   type CommandsCatalogLike,
@@ -29,7 +29,7 @@ import {
   setYoloActive
 } from '@/store/session'
 
-import type { BrowserManageResponse, SessionTitleResponse, SlashExecResponse } from '../../../types'
+import type { BrowserManageResponse, SessionCompressResponse, SessionTitleResponse, SlashExecResponse } from '../../../types'
 
 import {
   type GatewayRequest,
@@ -64,6 +64,7 @@ interface SlashCommandDeps {
   refreshSessions: () => Promise<void>
   requestGateway: GatewayRequest
   resumeStoredSession: (storedSessionId: string) => Promise<void> | void
+  setMessages: (updater: ChatMessage[] | ((current: ChatMessage[]) => ChatMessage[])) => void
   startFreshSessionDraft: () => void
   submitPromptText: (rawText: string, options?: SubmitTextOptions) => Promise<boolean>
 }
@@ -83,6 +84,7 @@ export function useSlashCommand(deps: SlashCommandDeps) {
     refreshSessions,
     requestGateway,
     resumeStoredSession,
+    setMessages,
     startFreshSessionDraft,
     submitPromptText
   } = deps
@@ -515,6 +517,62 @@ export function useSlashCommand(deps: SlashCommandDeps) {
           } catch (err) {
             renderSlashOutput(`error: ${err instanceof Error ? err.message : String(err)}`)
           }
+        },
+
+        // /compress (alias /compact) summarizes older turns into a compact
+        // preamble. Unlike plain slash.exec commands, it mutates the live session
+        // history server-side — so the desktop must replace its transcript from
+        // the response's `messages` (the same field session.resume returns) or the
+        // summarized bubbles stay on screen forever, making /compress look like
+        // a no-op. Mirrors the TUI's session.compress path: call the dedicated
+        // RPC, swap the transcript, then show the feedback headline.
+        compress: async ctx => {
+          const resolved = await withSlashOutput(ctx)
+
+          if (!resolved) {
+            return
+          }
+
+          const { render: renderSlashOutput, sessionId } = resolved
+
+          if (busyRef.current) {
+            renderSlashOutput('session busy — /interrupt the current turn before /compress')
+
+            return
+          }
+
+          const focusTopic = ctx.arg.trim()
+
+          try {
+            const result = await requestGateway<SessionCompressResponse>('session.compress', {
+              session_id: sessionId,
+              ...(focusTopic ? { focus_topic: focusTopic } : {})
+            })
+
+            // Replace the transcript with the post-compress history so the
+            // summarized bubbles actually disappear. `messages` is the same
+            // shape session.resume returns (_history_to_messages), so
+            // toChatMessages handles it directly.
+            if (Array.isArray(result?.messages)) {
+              setMessages(toChatMessages(result.messages))
+            }
+
+            const summary = result?.summary
+
+            const lines = [summary?.headline, summary?.token_line, summary?.note].filter(
+              (line): line is string => Boolean(line)
+            )
+
+            if (lines.length > 0) {
+              renderSlashOutput(lines.join('\n'))
+            } else if ((result?.removed ?? 0) > 0) {
+              renderSlashOutput(`compressed ${result?.removed} messages`)
+            } else {
+              renderSlashOutput('nothing to compress')
+            }
+          } catch (err) {
+            renderSlashOutput(`error: ${err instanceof Error ? err.message : String(err)}`)
+          }
         }
       }
 
@@ -628,6 +686,7 @@ export function useSlashCommand(deps: SlashCommandDeps) {
       refreshSessions,
       requestGateway,
       resumeStoredSession,
+      setMessages,
       startFreshSessionDraft,
       submitPromptText
     ]
