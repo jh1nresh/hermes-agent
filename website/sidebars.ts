@@ -592,6 +592,7 @@ const sidebars: SidebarsConfig = {
                   collapsed: true,
                   items: [
                     'user-guide/skills/optional/web-development/web-development-page-agent',
+                    'user-guide/skills/optional/web-development/web-development-react-best-practices',
                   ],
                 },
               ],
