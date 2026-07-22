@@ -2501,6 +2501,10 @@ def test_make_agent_passes_configured_fallback_chain(monkeypatch):
     monkeypatch.delenv("HERMES_MODEL", raising=False)
     monkeypatch.delenv("HERMES_INFERENCE_MODEL", raising=False)
     monkeypatch.delenv("HERMES_TUI_PROVIDER", raising=False)
+    # Platform resolution is env-driven (HERMES_DESKTOP → "desktop"); clear it
+    # so the assertion below is deterministic regardless of the dev machine.
+    monkeypatch.delenv("HERMES_DESKTOP", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_TERMINAL", raising=False)
     monkeypatch.setattr(
         server,
         "_load_cfg",
@@ -2527,7 +2531,7 @@ def test_make_agent_passes_configured_fallback_chain(monkeypatch):
 
     assert agent.model == "gpt-5.5"
     assert captured["fallback_model"] == fallback_chain
-    assert captured["platform"] == "desktop"
+    assert captured["platform"] == "tui"
 
 
 def test_background_agent_kwargs_preserves_full_fallback_chain(monkeypatch):
@@ -3807,11 +3811,13 @@ def test_ensure_session_db_row_persists_explicit_cwd(monkeypatch, tmp_path):
 
     monkeypatch.setattr(server, "_get_db", lambda: _FakeDB())
     monkeypatch.setattr(server, "_resolve_model", lambda: "test-model")
+    monkeypatch.delenv("HERMES_DESKTOP", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_TERMINAL", raising=False)
 
     server._ensure_session_db_row({"session_key": "k1", "cwd": str(tmp_path), "explicit_cwd": True})
 
     assert created == [
-        {"key": "k1", "source": "desktop", "model": "test-model", "model_config": None, "cwd": str(tmp_path)}
+        {"key": "k1", "source": "tui", "model": "test-model", "model_config": None, "cwd": str(tmp_path)}
     ]
 
 
@@ -3847,11 +3853,13 @@ def test_ensure_session_db_row_defaults_to_no_workspace(monkeypatch, tmp_path):
 
     monkeypatch.setattr(server, "_get_db", lambda: _FakeDB())
     monkeypatch.setattr(server, "_resolve_model", lambda: "test-model")
+    monkeypatch.delenv("HERMES_DESKTOP", raising=False)
+    monkeypatch.delenv("HERMES_DESKTOP_TERMINAL", raising=False)
 
     server._ensure_session_db_row({"session_key": "k1", "cwd": str(tmp_path)})
 
     assert created == [
-        {"key": "k1", "source": "desktop", "model": "test-model", "model_config": None, "cwd": None}
+        {"key": "k1", "source": "tui", "model": "test-model", "model_config": None, "cwd": None}
     ]
 
 
