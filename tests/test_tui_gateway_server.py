@@ -8311,9 +8311,23 @@ def test_agent_build_failure_surfaces_error_and_drops_turn(monkeypatch):
 
         assert calls["run_prompt"] == 0
         assert session["running"] is False
-        error_events = [e for e in emitted if e and e[0] == "error" and e[1] == "sid"]
-        assert len(error_events) == 1, f"expected one error event, got: {emitted}"
-        assert "No LLM provider configured" in error_events[0][2].get("message", "")
+        # A failed build closes the turn with a TERMINAL message.complete frame
+        # (status="error"), not a bare "error" event: the frame shape matches the
+        # returned-error path in _run_prompt_submit, and _fail_inflight_turn
+        # retains the failure so a client that was disconnected during this
+        # window can still recover it from session.resume's inflight payload.
+        complete_events = [
+            e
+            for e in emitted
+            if e and e[0] == "message.complete" and e[1] == "sid"
+        ]
+        assert len(complete_events) == 1, (
+            f"expected one terminal message.complete, got: {emitted}"
+        )
+        payload = complete_events[0][2]
+        assert payload.get("status") == "error"
+        assert "No LLM provider configured" in payload.get("error", "")
+        assert "No LLM provider configured" in payload.get("text", "")
     finally:
         server._sessions.pop("sid", None)
 
