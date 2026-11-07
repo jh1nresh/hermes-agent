@@ -6,8 +6,6 @@
 // - Resolves electron from the install tree (the desktop workspace already
 //   ships it; a root `npm install` hoists it) instead of declaring a second
 //   copy as a ui-tui dependency. ELECTRON_BIN overrides for exotic setups.
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
 import { dirname, join } from 'path'

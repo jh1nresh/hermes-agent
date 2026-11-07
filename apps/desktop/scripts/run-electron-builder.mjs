@@ -4,8 +4,6 @@
 // wherever it landed. Dist present → -c.electronDist=<abs>/dist; absent → let
 // electron-builder fetch via @electron/get (electronVersion + ELECTRON_MIRROR).
 
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import fs from "node:fs"
 import path from "node:path"
 import { spawnSync } from "node:child_process"

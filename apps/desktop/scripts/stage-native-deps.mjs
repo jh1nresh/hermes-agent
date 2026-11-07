@@ -9,8 +9,6 @@
 // before-pack.mjs, where electron-builder gives you the real per-target
 // platform/arch during multi-arch builds.
 
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, join } from 'node:path'
